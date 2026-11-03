@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108" role="img" aria-labelledby="title description">
+  <title id="title">EEZY DRAW E monogram</title>
+  <desc id="description">An original geometric blue E with light upper faces and a dark extruded right edge, inspired by dimensional CAD lettering.</desc>
+  <path fill="#17469E" d="M40 30H74V39H50V46H70V55H50V62H74V71H40Z"/>
+  <path fill="#A8D5FF" d="M33 35L40 30H74L67 35ZM43 51L50 46H70L63 51ZM43 67L50 62H74L67 67Z"/>
+  <path fill="#1D4ED8" d="M67 35L74 30V39L67 44ZM63 51L70 46V55L63 60ZM67 67L74 62V71L67 76Z"/>
+  <path fill="#3B82F6" d="M33 35H67V44H43V51H63V60H43V67H67V76H33Z"/>
+  <path fill="#2563EB" d="M33 35H43V76H33Z"/>
+</svg>

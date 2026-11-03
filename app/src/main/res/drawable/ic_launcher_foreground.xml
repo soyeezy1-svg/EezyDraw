@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Artwork stays inside the central 66dp safe circle for adaptive launcher masks. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#17469E"
+        android:pathData="M40,30H74V39H50V46H70V55H50V62H74V71H40Z" />
+    <path
+        android:fillColor="#A8D5FF"
+        android:pathData="M33,35L40,30H74L67,35ZM43,51L50,46H70L63,51ZM43,67L50,62H74L67,67Z" />
+    <path
+        android:fillColor="#1D4ED8"
+        android:pathData="M67,35L74,30V39L67,44ZM63,51L70,46V55L63,60ZM67,67L74,62V71L67,76Z" />
+    <path
+        android:fillColor="@color/brand_blue"
+        android:pathData="M33,35H67V44H43V51H63V60H43V67H67V76H33Z" />
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M33,35H43V76H33Z" />
+</vector>
