@@ -10,6 +10,7 @@ import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.ProjectSettings
 import com.eezydraw.core.model.ProjectTemplate
 import com.eezydraw.core.model.SnapSettings
+import com.eezydraw.core.model.SnapMode
 import com.eezydraw.core.model.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -77,6 +78,7 @@ class AppViewModelTest {
         model.rename("East Wing Rev 2")
         model.describe("Coordination review")
         model.changeUnits(LengthUnit.MILLIMETRES)
+        model.changeSnaps(created.project.settings.snap.copy(modes = setOf(SnapMode.ENDPOINT, SnapMode.ORTHO)))
         assertTrue(model.state.value.dirty)
         model.save()
         runCurrent()
@@ -91,6 +93,7 @@ class AppViewModelTest {
         assertEquals("East Wing Rev 2", document.project.name)
         assertEquals("Coordination review", document.project.description)
         assertEquals(LengthUnit.MILLIMETRES, document.project.settings.lengthUnit)
+        assertEquals(setOf(SnapMode.ENDPOINT, SnapMode.ORTHO), document.project.settings.snap.modes)
         assertEquals(document.project.name, reopened.state.value.recentProjects.first().name)
     }
 

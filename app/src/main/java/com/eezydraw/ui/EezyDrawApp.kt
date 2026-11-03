@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +51,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.eezydraw.R
 import com.eezydraw.storage.ProjectExchange
 import com.eezydraw.ui.help.HelpScreen
+import com.eezydraw.ui.canvas.DrawingCanvasScreen
+import com.eezydraw.ui.canvas.CanvasFrame
+import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.ui.projects.CreateProjectScreen
 import com.eezydraw.ui.projects.ProjectDetailsScreen
 import com.eezydraw.ui.projects.lengthUnitLabel
@@ -64,10 +68,14 @@ import com.eezydraw.ui.theme.EezyDrawTheme
 
 /** ViewModel owns durable workflows; only animation completion belongs to local saved UI state. */
 @Composable
-fun EezyDrawApp(viewModel: AppViewModel) {
+fun EezyDrawApp(
+    viewModel: AppViewModel,
+    canvasSurface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var startupComplete by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    val canvasStates = rememberSaveableStateHolder()
     val snackbar = remember { SnackbarHostState() }
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importProject(it.toString()) }
@@ -131,11 +139,22 @@ fun EezyDrawApp(viewModel: AppViewModel) {
                                 viewModel::create, { viewModel.navigate(AppScreen.MENU) },
                             )
                             AppScreen.PROJECT -> state.document?.let { document ->
+                                canvasStates.SaveableStateProvider("canvas:${document.project.id.value}") {
+                                    DrawingCanvasScreen(
+                                        document, state.settings, state.dirty, state.busy,
+                                        viewModel::changeSnaps, viewModel::changeUnits, viewModel::save,
+                                        { exportFile.launch(ProjectExchange.fileName(document, state.settings)) },
+                                        { viewModel.navigate(AppScreen.PROJECT_DETAILS) }, viewModel::backFromProject,
+                                        surface = canvasSurface,
+                                    )
+                                }
+                            } ?: LoadingIndicator()
+                            AppScreen.PROJECT_DETAILS -> state.document?.let { document ->
                                 ProjectDetailsScreen(
                                     document, state.dirty, state.busy, viewModel::rename, viewModel::describe,
                                     viewModel::changeUnits, viewModel::save,
                                     { exportFile.launch(ProjectExchange.fileName(document, state.settings)) },
-                                    viewModel::backFromProject,
+                                    { viewModel.navigate(AppScreen.PROJECT) },
                                 )
                             } ?: LoadingIndicator()
                             AppScreen.SETTINGS -> SettingsScreen(
@@ -197,6 +216,7 @@ fun EezyDrawApp(viewModel: AppViewModel) {
     BackHandler(enabled = startupComplete && state.ready && state.screen != AppScreen.MENU && state.screen != AppScreen.SETTINGS) {
         if (!state.busy) {
             if (state.screen == AppScreen.PROJECT) viewModel.backFromProject()
+            else if (state.screen == AppScreen.PROJECT_DETAILS) viewModel.navigate(AppScreen.PROJECT)
             else viewModel.navigate(AppScreen.MENU)
         }
     }
