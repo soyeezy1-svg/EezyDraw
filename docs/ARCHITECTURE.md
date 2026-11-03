@@ -1,15 +1,33 @@
-# Architecture and data model — Part A
+# Architecture and data model
 
-The current scope is the Android Studio project, folder structure, and data model from [SPEC.md](../SPEC.md). All feature behavior remains for subsequent work. The app contains one Compose entry point with a static foundation screen. The model module defines immutable Kotlin records and constructor invariants without Android, rendering, storage, or UI dependencies.
+The project includes the Android Studio structure and data model from Part A of [SPEC.md](../SPEC.md), plus the startup presentation slice. The app owns vector branding, an animated splash transition, a responsive Start Menu, and lightweight Settings and Help dialogs. Project operations, drawing, persistence, rendering, and other product workflows remain future work. The model module defines Kotlin records and constructor invariants without Android, rendering, storage, or UI dependencies.
 
 ## Module boundaries
 
 ```mermaid
 flowchart LR
-    app[":app · Android / Compose shell"] --> model[":core:model · Kotlin/JVM records"]
+    app[":app · Android / Compose startup"] --> model[":core:model · Kotlin/JVM records"]
 ```
 
-`:app` owns the manifest, activity, resources, and theme. `:core:model` owns serializable value types and their immediate structural constraints. Only these two modules exist; no empty feature modules or services are registered.
+`:app` owns the manifest, activity, resources, theme, and startup UI state/callback contracts. `:core:model` owns serializable value types and their immediate structural constraints. Only these two modules exist; no empty feature modules or services are registered.
+
+## Startup presentation
+
+The original faceted E monogram is supplied as [SVG](assets/eezy-draw-logo.svg) and Android vector artwork, with adaptive and monochrome launcher support. AndroidX SplashScreen provides a static system launch icon on the brand navy background on API 26–35. The activity installs that splash before `super.onCreate`. The matching Compose splash fades, scales, and rotates the logo, then fades/slides into the Start Menu. The normal logo animation lasts 1.2 seconds and the menu transition 450 milliseconds. Frame-clock animations follow the system duration scale; no separate delay forces users to wait when animations are disabled.
+
+`EezyDrawApp` saves startup completion with `rememberSaveable`, avoiding a replay after activity recreation. It also saves the current dialog and session theme selection. System-bar contrast follows the navy splash and the selected menu theme through the activity’s edge-to-edge styles. This is presentation state, not durable preferences or project persistence; no repository or feature ViewModel is introduced for it.
+
+`ui/start/StartMenuState.kt` defines `StartMenuUiState`, ordered `RecentProject` presentation metadata, and typed `StartMenuAction` events. `StartMenuScreen` consumes the state and emits actions without accessing storage. Continue is enabled only when the supplied recent list is nonempty. The default app supplies an empty list, not fabricated recent projects. A future repository adapter will resolve project/asset IDs and supply state to the host, and a feature host can handle events through `EezyDrawApp.onAction`.
+
+`ProjectThumbnail` reads only local content/file URIs on the I/O dispatcher. Bounds-first, power-of-two sampled decoding caps image dimensions at 512 pixels. Missing, invalid, corrupt, or inaccessible previews fall back to a document monogram. A URI change cancels the previous load and prevents the previous image from showing under a new source. The UI neither acquires durable URI permissions nor downloads remote images.
+
+The default host opens explicit availability dialogs for Create, Continue, Open from file, Templates, and recent-project selection: project creation, template application, project loading, and the editor are not implemented by this slice. Help provides startup guidance; Settings offers Light/Dark/Device theme for the saved activity session. The full Settings requirements and durable preference storage remain future work. No menu action pretends to save or open a project.
+
+At widths of at least 840dp, the menu separates a scrolling action column from a recent-project list. Compact widths use a single lazy list. Both layouts account for safe drawing insets, larger text, and short viewports; top-right Settings/Help targets are at least 48dp. Semantic descriptions identify thumbnail previews and icon actions. Directional icons mirror for RTL.
+
+Eleven JVM startup tests use Robolectric API 28 and a controlled frame clock to cover the splash, saved-state restoration, Settings/Help dialogs, action dispatch, recent-project/empty states, thumbnails, and compact layouts. Image decoding uses real bitmap fixtures. All eleven pass, along with the five unchanged model tests; debug APK assembly and lint (zero issues) pass. Native view captures support visual review of the tablet and large-text phone layouts without claiming pixel-baseline coverage. Device-only checks remain in the README QA plan; JVM results do not establish physical-device rendering or launcher behavior.
+
+## Future feature boundaries
 
 As features are implemented, use the following boundaries:
 
@@ -108,4 +126,4 @@ Define explicit migrations for both the Room schema and serialized payload versi
 
 Constructors reject immediate invalid values such as nonfinite coordinates, nonpositive sizes, insufficient route points, out-of-range fitting indices, and invalid asset traversal paths. Model tests exercise those invariants and serialization of representative records, including shared-wall references and large coordinates.
 
-Future repository/import validators must check duplicate IDs, project ownership, dangling references, cycles, polygon topology, wall/room alignment, host compatibility, route elevation consistency, asset existence/checksums, and schema support. Device runtime, rendering, geometry, persistence, and feature acceptance testing are outside this foundation's behavior.
+Future repository/import validators must check duplicate IDs, project ownership, dangling references, cycles, polygon topology, wall/room alignment, host compatibility, route elevation consistency, asset existence/checksums, and schema support. Physical-device runtime, drawing/rendering, geometry, persistence, and remaining feature acceptance testing are outside this slice's validation.

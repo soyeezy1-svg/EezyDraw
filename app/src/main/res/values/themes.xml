@@ -5,4 +5,9 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.EezyDraw.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/eezy_draw_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.EezyDraw</item>
+    </style>
 </resources>

@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EEZY DRAW</string>
-    <string name="scaffold_description">Project foundation</string>
+    <string name="splash_tagline">MEP · DESIGN · COORDINATE</string>
+    <string name="start_menu_tagline">MEP coordination, made clear.</string>
+    <string name="start_menu_heading">Your next great plan starts here.</string>
+    <string name="start_menu_subtitle">Create a project, open a drawing, or pick up where you left off.</string>
+    <string name="create_new_project">Create New Project</string>
+    <string name="create_project_description">A fresh space for your next idea</string>
+    <string name="continue_project">Continue Project</string>
+    <string name="continue_project_description">Return to your latest project</string>
+    <string name="open_from_file">Open from file</string>
+    <string name="templates">Templates</string>
+    <string name="recent_projects">Recent Projects</string>
+    <string name="recent_projects_empty_title">A fresh drawing board</string>
+    <string name="recent_projects_empty_description">You haven’t opened any projects yet.</string>
+    <string name="settings">Settings</string>
+    <string name="help">Help</string>
+    <string name="project_thumbnail_description">Preview of %1$s</string>
+    <string name="appearance">Appearance</string>
+    <string name="theme_system">Use device theme</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="close">Close</string>
+    <string name="start_menu_help">Welcome to EEZY DRAW. Your recent projects appear on the Start Menu, with Continue Project returning to the latest one. Settings changes the appearance for this session. Project creation, file opening and the drawing workspace will arrive in a future update.</string>
+    <string name="templates_availability">Office, residential and data center templates are planned for a future update.</string>
+    <string name="open_availability">Opening project files will be available in a future update.</string>
+    <string name="create_availability">Project creation will be available in a future update.</string>
+    <string name="editor_availability">The project workspace will be available in a future update.</string>
 </resources>
