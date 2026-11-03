@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "EezyDraw"
-include(":app", ":core:model", ":core:data")
+include(":app", ":core:model", ":core:data", ":core:geometry")

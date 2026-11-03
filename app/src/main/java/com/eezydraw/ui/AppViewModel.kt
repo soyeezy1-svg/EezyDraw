@@ -16,6 +16,7 @@ import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.ProjectTemplate
+import com.eezydraw.core.model.SnapSettings
 import com.eezydraw.storage.ProjectExchange
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class AppScreen { MENU, CREATE, PROJECT, SETTINGS, HELP }
+enum class AppScreen { MENU, CREATE, PROJECT, PROJECT_DETAILS, SETTINGS, HELP }
 
 data class AppUiState(
     val screen: AppScreen = AppScreen.MENU,
@@ -91,15 +92,15 @@ class AppViewModel(
                 }
             }
         }
-        if (initialScreen == AppScreen.PROJECT) {
+        if (initialScreen == AppScreen.PROJECT || initialScreen == AppScreen.PROJECT_DETAILS) {
             val id = savedState.get<String>("projectId")
-            if (id == null) navigate(AppScreen.MENU) else open(id)
+            if (id == null) navigate(AppScreen.MENU) else openProject(id, initialScreen)
         }
     }
 
     fun navigate(screen: AppScreen) {
         savedState["screen"] = screen.name
-        if (screen != AppScreen.PROJECT) savedState["projectId"] = null
+        if (screen != AppScreen.PROJECT && screen != AppScreen.PROJECT_DETAILS) savedState["projectId"] = null
         mutableState.update { it.copy(screen = screen) }
     }
 
@@ -117,9 +118,12 @@ class AppViewModel(
         mirror(document)
     }
 
-    fun open(id: String) = operation {
+    fun open(id: String) = openProject(id, AppScreen.PROJECT)
+
+    private fun openProject(id: String, destination: AppScreen) = operation {
         mutableState.update { it.copy(failedProjectId = id) }
         showProject(projects.load(id))
+        if (destination == AppScreen.PROJECT_DETAILS) navigate(destination)
     }
 
     fun continueProject() {
@@ -135,6 +139,10 @@ class AppViewModel(
 
     fun changeUnits(unit: LengthUnit) = edit {
         it.copy(project = it.project.copy(settings = it.project.settings.copy(lengthUnit = unit)))
+    }
+
+    fun changeSnaps(settings: SnapSettings) = edit {
+        it.copy(project = it.project.copy(settings = it.project.settings.copy(snap = settings)))
     }
 
     private fun edit(change: (ProjectDocument) -> ProjectDocument) {
@@ -255,7 +263,7 @@ class AppViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (state.value.screen == AppScreen.PROJECT && state.value.document == null) {
+                if ((state.value.screen == AppScreen.PROJECT || state.value.screen == AppScreen.PROJECT_DETAILS) && state.value.document == null) {
                     navigate(AppScreen.MENU)
                 }
                 mutableState.update { it.copy(error = userMessage(error)) }
