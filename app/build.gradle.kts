@@ -33,6 +33,12 @@ android {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(project(":core:data"))
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.documentfile)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.activity.compose)
@@ -48,6 +54,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 tasks.withType<Test>().configureEach {

@@ -1,46 +1,41 @@
 # Architecture and data model
 
-The project includes the Android Studio structure and data model from Part A of [SPEC.md](../SPEC.md), plus the startup presentation slice. The app owns vector branding, an animated splash transition, a responsive Start Menu, and lightweight Settings and Help dialogs. Project operations, drawing, persistence, rendering, and other product workflows remain future work. The model module defines Kotlin records and constructor invariants without Android, rendering, storage, or UI dependencies.
+The app implements the project foundation, branding/startup, project creation and local library, portable project files, Settings, and Help from [SPEC.md](../SPEC.md). Drawing, geometry editing, coordination engines, and external CAD codecs remain separate work.
 
-## Module boundaries
+## Modules and ownership
 
 ```mermaid
 flowchart LR
-    app[":app · Android / Compose startup"] --> model[":core:model · Kotlin/JVM records"]
+    app[":app · Compose / ViewModel / SAF"] --> data[":core:data · Room / revision files / archives"]
+    app --> model[":core:model · serializable records"]
+    data --> model
 ```
 
-`:app` owns the manifest, activity, resources, theme, and startup UI state/callback contracts. `:core:model` owns serializable value types and their immediate structural constraints. Only these two modules exist; no empty feature modules or services are registered.
+- `:core:model` contains Android-independent document/settings records and constructor invariants. `Project.template` and additional `AppSettings` fields have backward-compatible defaults.
+- `:core:data` owns the Room catalogue and settings row, document validation, immutable file revisions, assets/previews, templates, archive import/export, and repository interfaces/implementations.
+- `:app` owns screens, `AppViewModel`, lifecycle/navigation state, system file/folder pickers, permission grants, optional folder copies, and explicit feedback sharing. `EezyDrawApplication` creates one database/repository set per process.
 
-## Startup presentation
+Composables consume immutable UI state and callbacks. `AppViewModel` collects repository flows, executes suspend operations, maintains a dirty document, and exposes busy/error/notice state. It retains the route and active project ID through `SavedStateHandle`; process recreation reloads the last saved document. Unsaved edits are not claimed to survive process death.
 
-The original faceted E monogram is supplied as [SVG](assets/eezy-draw-logo.svg) and Android vector artwork, with adaptive and monochrome launcher support. AndroidX SplashScreen provides a static system launch icon on the brand navy background on API 26–35. The activity installs that splash before `super.onCreate`. The matching Compose splash fades, scales, and rotates the logo, then fades/slides into the Start Menu. The normal logo animation lasts 1.2 seconds and the menu transition 450 milliseconds. Frame-clock animations follow the system duration scale; no separate delay forces users to wait when animations are disabled.
+## Startup and project flow
 
-`EezyDrawApp` saves startup completion with `rememberSaveable`, avoiding a replay after activity recreation. It also saves the current dialog and session theme selection. System-bar contrast follows the navy splash and the selected menu theme through the activity’s edge-to-edge styles. This is presentation state, not durable preferences or project persistence; no repository or feature ViewModel is introduced for it.
+The original faceted E mark is supplied as [SVG](assets/eezy-draw-logo.svg), Android vectors, and adaptive/monochrome launcher icons. AndroidX SplashScreen hands off to the 1.2-second Compose logo animation and 450ms menu transition. System duration scale applies without a separate forced delay. Saved completion prevents replay on activity recreation. System-bar contrast follows splash and persisted theme.
 
-`ui/start/StartMenuState.kt` defines `StartMenuUiState`, ordered `RecentProject` presentation metadata, and typed `StartMenuAction` events. `StartMenuScreen` consumes the state and emits actions without accessing storage. Continue is enabled only when the supplied recent list is nonempty. The default app supplies an empty list, not fabricated recent projects. A future repository adapter will resolve project/asset IDs and supply state to the host, and a feature host can handle events through `EezyDrawApp.onAction`.
+The menu observes the real Room catalogue, ordered by last-opened time. Continue loads the first entry; recent cards load their IDs. Native preview PNGs are generated from saved room footprints (or a named blank-project card), refreshed on save, and supplied as local URIs. `ProjectThumbnail` bounds decoding to 512px on I/O and falls back to a monogram for unavailable images. Tablet widths of at least 840dp use split columns; compact layouts scroll.
 
-`ProjectThumbnail` reads only local content/file URIs on the I/O dispatcher. Bounds-first, power-of-two sampled decoding caps image dimensions at 512 pixels. Missing, invalid, corrupt, or inaccessible previews fall back to a document monogram. A URI change cancels the previous load and prevents the previous image from showing under a new source. The UI neither acquires durable URI permissions nor downloads remote images.
+Create New Project and Templates open the same validated form: name, Empty/Office/Residential/Data center, and five display-unit choices. Templates seed a level, layers, and representative room footprints without claiming wall joins or a drawing editor. Defaults come from persisted settings. Project details loads the real document and permits name, description, and unit changes, Save, and portable Export. Invalid input cannot be saved. Changing display units never rescales geometry.
 
-The default host opens explicit availability dialogs for Create, Continue, Open from file, Templates, and recent-project selection: project creation, template application, project loading, and the editor are not implemented by this slice. Help provides startup guidance; Settings offers Light/Dark/Device theme for the saved activity session. The full Settings requirements and durable preference storage remain future work. No menu action pretends to save or open a project.
+Busy state prevents duplicate operations. Saving commits before clearing dirty state or reporting success. Leaving dirty project details saves before returning; a failed save keeps the draft open. Periodic autosave saves dirty documents at the configured interval; zero disables it. When autosave is enabled, activity stop also requests a save. These jobs run in the ViewModel lifetime, not a background synchronization service.
 
-At widths of at least 840dp, the menu separates a scrolling action column from a recent-project list. Compact widths use a single lazy list. Both layouts account for safe drawing insets, larger text, and short viewports; top-right Settings/Help targets are at least 48dp. Semantic descriptions identify thumbnail previews and icon actions. Directional icons mirror for RTL.
+Open from file uses Android's document picker and imports a validated independent copy into the library. Export uses CreateDocument. Settings uses OpenDocumentTree with persisted read/write grants; no broad filesystem permission is requested. A selected save folder receives versioned portable copies after successful local saves. The private library remains authoritative. Folder failure reports that the local save succeeded and the external copy failed; it does not roll back or overwrite the private revision. External versioned copies are not automatically deleted.
 
-Eleven JVM startup tests use Robolectric API 28 and a controlled frame clock to cover the splash, saved-state restoration, Settings/Help dialogs, action dispatch, recent-project/empty states, thumbnails, and compact layouts. Image decoding uses real bitmap fixtures. All eleven pass, along with the five unchanged model tests; debug APK assembly and lint (zero issues) pass. Native view captures support visual review of the tablet and large-text phone layouts without claiming pixel-baseline coverage. Device-only checks remain in the README QA plan; JVM results do not establish physical-device rendering or launcher behavior.
+## Settings and Help
 
-## Future feature boundaries
+Room persists `AppSettings` separately from documents. Settings edits a saved draft and validates before Save. Partial invalid numeric text survives rotation; leaving dirty settings requires discard confirmation. A returned folder URI is merged without erasing other draft inputs. Grid/tolerance/service-height input follows selected display units and converts back to canonical metres, including unit changes within the form.
 
-As features are implemented, use the following boundaries:
+The screen includes save location/permissions, units, angle format, precision, all six snap modes, grid size/tolerance, theme, language, autosave, backup, line weights, seven service-height defaults/reference frames, stylus/touch mode, gesture sensitivity, quality, undo history, template/export defaults, and filename patterns. Defaults affect newly created projects; existing documents retain their settings. Theme and storage/autosave/backup behavior are active now. Input, snapping, quality, undo, and drawing-export preferences are retained for their future engines. English and native `.eezydraw` export are the supported language/format; unavailable translations/codecs are not advertised as functioning options. Native archives remain lossless and include referenced attachments regardless of future drawing-export visibility preferences.
 
-| Future boundary | Responsibility |
-| --- | --- |
-| `core:data` | Room database, entities/DAOs, project assets, model mappers, repository implementations, migrations |
-| `core:domain` | Repository interfaces, use cases, document validation, commands and undo/redo contracts |
-| `core:geometry` | Double-precision predicates, snapping, topology, wall joins, routing and clash calculations |
-| `core:rendering` | Canvas/scene adapter, floating origin, picking, GPU resources and render modes |
-| `core:formats` | Validated import/export adapters for supported external formats |
-| `feature:*` | Compose screens and ViewModels for projects, editor, library, coordination, settings, and help |
-
-Feature ViewModels will expose immutable UI state and receive user actions. They will call domain operations and repositories; composables will not operate on Room entities or GPU objects. Renderer-specific handles, Android `Uri` objects, Room annotations, and UI state do not belong in `core:model`. Rendering backend and external CAD codec selection remain future implementation decisions.
+Help contains a current user guide, project-library gestures/keyboard accessibility, a clearly marked future drawing-gesture reference, version/about/privacy, and feedback. Feedback opens an Android share chooser only after explicit submission. It has no invented recipient and attaches no project files; nothing is sent automatically.
 
 ## Coordinate and identity conventions
 
@@ -112,18 +107,26 @@ Underlays reference project assets and retain source format, page, metre convers
 
 Clashes are stored results, not a detector. Issues can reference elements, a saved view, markup, and comments. Revisions reference snapshot assets and an optional parent revision. Sheets describe paper dimensions, title block fields, and scaled viewports. History storage, collaboration identity, sync conflict resolution, schedules, and BOQ calculation remain future services.
 
-## Persistence plan
+## Persistence and portable format
 
-Room is the intended offline source of truth once project storage is implemented. This scaffold deliberately contains no database, DAO, persistence module, repository implementation, or Room dependency.
+Room schema version 1 has `projects` (identity, metadata, recent order, active revision/checksum, preview and optional backup pointers) and `settings` (singleton typed JSON preferences). KSP exports the schema under `core/data/schemas`; future database/payload changes require explicit migration. The whole drawing is not stored in one Room row. Additional normalized element/query tables can be introduced when editing/indexed geometry queries need them.
 
-Use normalized tables for queryable identities and relationships: project, level, layer, system, material, element, library item, asset, view, underlay, issue, revision, sheet, and their join records. Element rows should index project/layer/level/system IDs and a stable body-kind discriminator. Keep the body-specific serializable payload in a versioned JSON column initially; promote geometry or properties into indexed tables only when a query requires it. Do not serialize an entire large drawing into one Room row.
+Private layout:
 
-Map Room entities to domain records at the repository boundary. Foreign keys and transactions should protect ownership and structural references; typed IDs in Kotlin do not supply database referential integrity. Keep large binary assets in project storage, referenced by logical paths and optional checksums. Save external files atomically and publish their metadata only after successful writes. App preferences should use device-local storage separately from project settings.
+```text
+files/projects/<project-id>/
+  revisions/<revision-uuid>.json
+  previews/<preview-uuid>.png
+  assets/<validated-relative-path>
+databases/eezy-draw.db
+```
 
-Define explicit migrations for both the Room schema and serialized payload version before changing an established format. Round-trip serialization tests are a foundation check; they do not establish backward compatibility, corruption recovery, atomic writes, or safe handling of untrusted imports. Sync should later build on stable IDs and committed revision records, while normal editing remains usable without a network connection.
+Saves validate structure, write a new atomic JSON snapshot and preview, then publish their pointers in one Room transaction. The transaction/commit flag cannot be interrupted by coroutine cancellation; failed pre-commit writes leave the previous revision intact. Cleanup after publication is best effort. Crash-orphaned files are not treated as projects. Current/backup revisions have SHA-256 checksums. Load checks schema, ownership/references, paths, and assets before updating recents. Backups retain the preceding valid document revision when enabled; corruption never silently restores older data. The error UI offers explicit recovery, and a corrupt primary is never promoted over a valid backup. Disabling backups removes the retained backup pointer on the next save.
 
-## Validation boundary
+Portable `.eezydraw` v1 is a ZIP with `document.json` containing `{format: "eezydraw", version: 1, document: ...}` and matching `assets/<relative-path>` entries. Both compressed and expanded archives are limited to 32MiB, documents to 8MiB, individual assets to 16MiB, and archives to 256 entries. Decoding checks complete ZIP footer/CRC, strict UTF-8/schema, duplicate/unsafe paths, required attachments and checksums, duplicate IDs, ownership, references, and host/revision cycles. Import assigns a fresh project ID and remaps ownership, preserving internal references while avoiding overwriting an existing project. Imported assets without a checksum gain one. Current native files are not DWG/DXF/PDF/IFC codecs.
 
-Constructors reject immediate invalid values such as nonfinite coordinates, nonpositive sizes, insufficient route points, out-of-range fitting indices, and invalid asset traversal paths. Model tests exercise those invariants and serialization of representative records, including shared-wall references and large coordinates.
+## Remaining boundaries and validation
 
-Future repository/import validators must check duplicate IDs, project ownership, dangling references, cycles, polygon topology, wall/room alignment, host compatibility, route elevation consistency, asset existence/checksums, and schema support. Physical-device runtime, drawing/rendering, geometry, persistence, and remaining feature acceptance testing are outside this slice's validation.
+Future geometry and rendering modules will implement robust predicates, snapping, topology, wall joins, route placement, floating-origin scene handling, and coordination. Future format adapters will implement supported external CAD imports/exports. Neither project details nor Help's reference gestures provide these engines.
+
+Tests exercise real Room databases/files, archive corruption and attachment round trips, backup recovery, persistence after reopening, ViewModel save/failure/autosave/restore behavior, and Compose creation/settings/help/startup flows. The current verification passed all 47 tests (5 model, 9 storage, 33 app), APK assembly, and app/data lint with no issues. Unit/Compose tests use Robolectric rather than a physical device. Real SAF providers, permission revocation, launcher/runtime behavior on API 26/35, and process/lifecycle behavior on devices remain explicit manual QA items in the README.

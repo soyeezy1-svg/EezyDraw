@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="project_back">Back</string>
+    <string name="project_create_intro">Choose a starting point and display units. You can adjust project details after creation.</string>
+    <string name="project_name">Project name</string>
+    <string name="project_name_hint">Required · up to 120 characters</string>
+    <string name="project_name_invalid">Enter a name between 1 and 120 characters.</string>
+    <string name="project_description">Description</string>
+    <string name="project_template">Template</string>
+    <string name="project_template_empty">Empty</string>
+    <string name="project_template_office">Office</string>
+    <string name="project_template_residential">Residential</string>
+    <string name="project_template_data_center">Data center</string>
+    <string name="project_template_empty_description">A clean project with a starting level and drawing layers.</string>
+    <string name="project_template_office_description">An office starting layout with levels, layers and room footprints.</string>
+    <string name="project_template_residential_description">A residential starting layout with levels, layers and room footprints.</string>
+    <string name="project_template_data_center_description">A data center starting layout with levels, layers and room footprints.</string>
+    <string name="project_units">Display units</string>
+    <string name="project_unit_millimetres">Millimetres (mm)</string>
+    <string name="project_unit_centimetres">Centimetres (cm)</string>
+    <string name="project_unit_metres">Metres (m)</string>
+    <string name="project_unit_inches">Inches (in)</string>
+    <string name="project_unit_feet">Feet (ft)</string>
+    <string name="project_create">Create project</string>
+    <string name="project_creating">Creating…</string>
+    <string name="project_details">Project details</string>
+    <string name="project_saved">Saved on this device</string>
+    <string name="project_unsaved">Unsaved changes</string>
+    <string name="project_template_summary">Template: %1$s</string>
+    <plurals name="project_level_count">
+        <item quantity="one">%d level</item>
+        <item quantity="other">%d levels</item>
+    </plurals>
+    <plurals name="project_element_count">
+        <item quantity="one">%d element</item>
+        <item quantity="other">%d elements</item>
+    </plurals>
+    <string name="project_units_hint">Display units change labels; stored geometry stays in metres.</string>
+    <string name="project_save">Save</string>
+    <string name="project_export">Export</string>
+    <string name="project_details_scope">Manage this project’s details here. Drawing tools are separate from the project library.</string>
+</resources>
