@@ -17,14 +17,9 @@
     <string name="settings">Settings</string>
     <string name="help">Help</string>
     <string name="project_thumbnail_description">Preview of %1$s</string>
+    <string name="close">Close</string>
     <string name="appearance">Appearance</string>
     <string name="theme_system">Use device theme</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
-    <string name="close">Close</string>
-    <string name="start_menu_help">Welcome to EEZY DRAW. Your recent projects appear on the Start Menu, with Continue Project returning to the latest one. Settings changes the appearance for this session. Project creation, file opening and the drawing workspace will arrive in a future update.</string>
-    <string name="templates_availability">Office, residential and data center templates are planned for a future update.</string>
-    <string name="open_availability">Opening project files will be available in a future update.</string>
-    <string name="create_availability">Project creation will be available in a future update.</string>
-    <string name="editor_availability">The project workspace will be available in a future update.</string>
 </resources>

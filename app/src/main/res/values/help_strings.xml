@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="help_back">Back</string>
+    <string name="help_user_guide">User guide</string>
+    <string name="help_gesture_sheet">Gesture cheat sheet</string>
+    <string name="help_about">About</string>
+    <string name="help_feedback">Feedback</string>
+    <string name="help_create_title">Create your first project</string>
+    <string name="help_create_body">Choose Create New Project, enter a name, pick Empty, Office, Residential or Data center, then choose display units. Templates provide a starting level, drawing layers and room footprints. Project details lets you change the name, description and units.</string>
+    <string name="help_save_title">Save and export</string>
+    <string name="help_save_body">Save writes your project to the local library on this device. Export creates a portable .eezydraw file in a location you choose. If you select a save folder in Settings, the app also writes project copies there; the local library stays available on this device.</string>
+    <string name="help_open_title">Continue or open a file</string>
+    <string name="help_open_body">Continue Project opens the most recent project. Select a recent-project thumbnail to open that project instead. Open from file imports a .eezydraw file into your local library. Existing local projects are not silently overwritten by imported files.</string>
+    <string name="help_defaults_title">Units and defaults</string>
+    <string name="help_defaults_body">Settings controls defaults for newly created projects. Changing a project’s display units does not rescale its geometry: stored lengths stay in metres. Existing projects keep their own units and project settings. Theme, input mode and other app preferences are stored separately from project files.</string>
+    <string name="help_backups_title">Autosave and backups</string>
+    <string name="help_backups_body">Choose an autosave interval in Settings, or switch it off. Save important changes before leaving a project. With backups enabled, saving retains the preceding saved version. If a project cannot be read, use the offered backup recovery action to restore an available earlier version.</string>
+    <string name="help_gesture_scope">This guide covers today’s project library and the planned drawing workspace. Drawing gestures are a reference for future tools, not controls in Project details.</string>
+    <string name="help_current_gestures_title">Project library gestures</string>
+    <string name="help_current_gestures_body">Tap a card or button to open it. Swipe vertically to scroll forms and recent projects. Tap a text field to edit it. Use the back arrow or Android Back to return; save any changes before leaving a project.</string>
+    <string name="help_drawing_gestures_title">Drawing gesture reference</string>
+    <string name="help_drawing_gestures_body">Planned workspace gestures: drag with two fingers to pan, pinch to zoom, and use dedicated orbit controls for 3D views. Stylus mode is selected in Settings. Selection and transform handles will be introduced with the drawing tools.</string>
+    <string name="help_shortcuts_title">Keyboard and accessibility</string>
+    <string name="help_shortcuts_body">Use Tab to move between controls, Enter or Space to activate a focused button, and Android Back to return. Drawing shortcuts such as undo, redo and view commands will arrive with the drawing workspace. TalkBack announces labelled buttons and thumbnail previews.</string>
+    <string name="help_version">Version 0.1.0</string>
+    <string name="help_about_body">EEZY DRAW is a tablet-first MEP project coordination application. This version includes project creation, a local project library, portable save files, project details, settings and help. Drawing and coordination tools are separate development stages.</string>
+    <string name="help_privacy_title">Your project files</string>
+    <string name="help_privacy_body">The project library works offline. Exports and save-folder copies go only to the locations you choose. Uninstalling the app removes its private library; keep exported copies of important projects. Feedback does not attach project files.</string>
+    <string name="help_feedback_intro">Tell us what happened, what you expected, or what would make EEZY DRAW more useful.</string>
+    <string name="help_feedback_label">Your feedback</string>
+    <string name="help_feedback_limit">Up to 4,000 characters</string>
+    <string name="help_feedback_subject">EEZY DRAW feedback · Version 0.1.0</string>
+    <string name="help_share_feedback">Share feedback</string>
+    <string name="help_feedback_privacy">You choose the app and recipient. Nothing is sent automatically, and project files are not attached.</string>
+</resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="project_saved_notice">Project saved.</string>
+    <string name="settings_saved_notice">Settings saved.</string>
+    <string name="project_imported_notice">Project opened and added to your library.</string>
+    <string name="project_exported_notice">Project copy exported.</string>
+    <string name="backup_restored_notice">The previous saved version was restored.</string>
+    <string name="folder_copy_failed_notice">Saved on this device, but the selected folder could not be updated. Choose it again in Settings.</string>
+    <string name="folder_permission_error">Folder permission is unavailable. Choose a writable folder in Settings.</string>
+    <string name="project_storage_error">This action could not be completed. Your existing saved projects have not been replaced.</string>
+    <string name="file_unavailable_error">This file is no longer available.</string>
+    <string name="operation_error_title">Unable to complete action</string>
+    <string name="restore_project_backup">Restore previous backup</string>
+    <string name="feedback_share_title">Share EEZY DRAW feedback</string>
+    <string name="share_unavailable_error">No app is available to share feedback. Your message is still on this screen.</string>
+    <string name="permissions_unavailable_error">App permission settings could not be opened.</string>
+    <string name="working_description">Saving or opening project</string>
+</resources>

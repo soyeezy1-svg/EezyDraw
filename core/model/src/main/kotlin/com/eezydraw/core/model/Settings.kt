@@ -9,6 +9,8 @@ import kotlinx.serialization.Serializable
 @Serializable enum class RenderQuality { PERFORMANCE, BALANCED, QUALITY }
 @Serializable enum class SnapMode { GRID, ENDPOINT, MIDPOINT, INTERSECTION, PERPENDICULAR, ORTHO }
 @Serializable enum class ProjectTemplate { OFFICE, RESIDENTIAL, DATA_CENTER, EMPTY }
+/** Portable EEZY DRAW archives are the currently implemented export format. */
+@Serializable enum class ExportFormat { EEZYDRAW }
 
 @Serializable
 data class SnapSettings(
@@ -50,9 +52,24 @@ data class AppSettings(
     val gestureSensitivity: Double = 1.0,
     val defaultTemplate: ProjectTemplate = ProjectTemplate.EMPTY,
     val saveLocationUri: String? = null,
+    val projectDefaults: ProjectSettings = ProjectSettings(),
+    val defaultLineWeightMm: Double = 0.25,
+    val fileNamingPattern: String = "{name}-{date}",
+    val exportFormat: ExportFormat = ExportFormat.EEZYDRAW,
+    val exportIncludeUnderlays: Boolean = true,
 ) {
     init {
-        require(autosaveIntervalSeconds > 0 && undoLimit > 0)
-        require(gestureSensitivity.isFinite() && gestureSensitivity > 0)
+        require(languageTag.isNotBlank())
+        require(autosaveIntervalSeconds in 0..3600 && undoLimit in 1..10000)
+        require(gestureSensitivity.isFinite() && gestureSensitivity in 0.25..4.0)
+        require(defaultLineWeightMm.isFinite() && defaultLineWeightMm > 0)
+        require(isValidFileNamingPattern(fileNamingPattern))
     }
+}
+
+/** A filename component, with optional {name}, {date}, and {id} substitutions. */
+fun isValidFileNamingPattern(pattern: String): Boolean {
+    if (pattern.isBlank() || pattern.length > 80 || pattern.any { it == '/' || it == '\\' || it.isISOControl() }) return false
+    val remainder = pattern.replace("{name}", "").replace("{date}", "").replace("{id}", "")
+    return '{' !in remainder && '}' !in remainder && pattern != "." && pattern != ".."
 }

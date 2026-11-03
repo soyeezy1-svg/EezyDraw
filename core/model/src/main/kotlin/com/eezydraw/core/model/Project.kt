@@ -19,6 +19,7 @@ data class Project(
     val settings: ProjectSettings = ProjectSettings(),
     val thumbnailAssetId: AssetId? = null,
     val schemaVersion: Int = 1,
+    val template: ProjectTemplate = ProjectTemplate.EMPTY,
 ) {
     init {
         require(name.isNotBlank())

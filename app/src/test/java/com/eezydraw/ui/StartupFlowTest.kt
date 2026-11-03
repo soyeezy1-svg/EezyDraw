@@ -2,8 +2,6 @@ package com.eezydraw.ui
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotSelected
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -12,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.eezydraw.R
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,84 +23,77 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [28], qualifiers = "w1024dp-h768dp")
 @LooperMode(LooperMode.Mode.PAUSED)
 class StartupFlowTest {
-    @get:Rule
-    val compose = createComposeRule()
-
+    @get:Rule val compose = createComposeRule()
     private val context: Context get() = ApplicationProvider.getApplicationContext()
+    private lateinit var repositories: TestAppRepositories
+    private lateinit var model: AppViewModel
 
-    @Test
-    fun splashAnimatesBeforeTransitioningToStartMenu() {
+    @Before fun prepareModel() {
+        repositories = TestAppRepositories(context)
+        model = repositories.newViewModel()
+    }
+
+    @After fun clearModel() { repositories.close() }
+
+    @Test fun splashAnimatesBeforeTransitioningToStartMenu() {
         compose.mainClock.autoAdvance = false
-        compose.setContent { EezyDrawApp() }
-
+        compose.setContent { EezyDrawApp(model) }
         compose.onNodeWithTag("startup_splash").assertIsDisplayed()
         compose.onNodeWithTag("start_menu").assertDoesNotExist()
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(100)
         compose.onNodeWithTag("startup_splash").assertIsDisplayed()
 
-        compose.mainClock.advanceTimeBy(3_000)
-        compose.waitForIdle()
+        completeStartup()
 
-        compose.onNodeWithTag("start_menu").assertIsDisplayed()
         compose.onNodeWithTag("startup_splash").assertDoesNotExist()
     }
 
-    @Test
-    fun restoringCompletedStartupDoesNotReplayTheSplash() {
+    @Test fun restoringCompletedStartupDoesNotReplayTheSplash() {
         compose.mainClock.autoAdvance = false
         val restoration = StateRestorationTester(compose)
-        restoration.setContent { EezyDrawApp() }
-        compose.mainClock.advanceTimeByFrame()
-        compose.mainClock.advanceTimeBy(3_000)
-        compose.waitForIdle()
-        compose.onNodeWithTag("start_menu").assertIsDisplayed()
+        restoration.setContent { EezyDrawApp(model) }
+        completeStartup()
 
         restoration.emulateSavedInstanceStateRestore()
 
-        // Keep the clock paused: a restarted splash cannot silently finish during this assertion.
+        // The clock remains paused: a mistakenly replayed splash cannot silently finish.
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
         compose.onNodeWithTag("startup_splash").assertDoesNotExist()
     }
 
-    @Test
-    fun settingsSelectionAndOpenDialogSurviveSavedStateRestoration() {
+    @Test fun fullSettingsScreenSurvivesRestorationAndReturnsWithoutReplayingSplash() {
         compose.mainClock.autoAdvance = false
         val restoration = StateRestorationTester(compose)
-        restoration.setContent { EezyDrawApp() }
+        restoration.setContent { EezyDrawApp(model) }
         completeStartup()
-        // New Dialog windows require their own layout frames after startup has completed.
         compose.mainClock.autoAdvance = true
 
         compose.onNodeWithContentDescription(context.getString(R.string.settings)).performClick()
-        compose.onNodeWithText(context.getString(R.string.appearance)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.theme_dark)).performClick().assertIsSelected()
-        compose.onNodeWithText(context.getString(R.string.theme_light)).assertIsNotSelected()
-
+        compose.onNodeWithTag("settings_screen").assertIsDisplayed()
         restoration.emulateSavedInstanceStateRestore()
-
+        compose.onNodeWithTag("settings_screen").assertIsDisplayed()
         compose.onNodeWithTag("startup_splash").assertDoesNotExist()
-        compose.onNodeWithText(context.getString(R.string.appearance)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.theme_dark)).assertIsSelected()
-        compose.onNodeWithText(context.getString(R.string.theme_light)).assertIsNotSelected()
-        compose.onNodeWithText(context.getString(R.string.close)).performClick()
-        compose.onNodeWithText(context.getString(R.string.appearance)).assertDoesNotExist()
+        compose.onNodeWithTag("settings_back").performClick()
+
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
+        compose.onNodeWithTag("startup_splash").assertDoesNotExist()
     }
 
-    @Test
-    fun helpExplainsTheAvailableStartupFeaturesAndCanBeClosed() {
+    @Test fun fullHelpScreenShowsTheGuideAndReturnsToTheMenu() {
         compose.mainClock.autoAdvance = false
-        compose.setContent { EezyDrawApp() }
+        compose.setContent { EezyDrawApp(model) }
         completeStartup()
         compose.mainClock.autoAdvance = true
 
         compose.onNodeWithContentDescription(context.getString(R.string.help)).performClick()
-        compose.onNodeWithText(context.getString(R.string.start_menu_help)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.close)).performClick()
+        compose.onNodeWithTag("help_screen").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.help_create_title)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(context.getString(R.string.help_back)).performClick()
 
-        compose.onNodeWithText(context.getString(R.string.start_menu_help)).assertDoesNotExist()
+        compose.onNodeWithTag("help_screen").assertDoesNotExist()
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
+        compose.onNodeWithTag("startup_splash").assertDoesNotExist()
     }
 
     private fun completeStartup() {
