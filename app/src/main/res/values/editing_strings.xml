@@ -3,6 +3,8 @@
     <string name="editing_tools">Tools</string>
     <string name="editing_expand_tools">Expand tools</string>
     <string name="editing_collapse_tools">Collapse tools</string>
+    <string name="editing_expand_group">Expand group</string>
+    <string name="editing_collapse_group">Collapse group</string>
     <string name="editing_select">Select</string>
     <string name="editing_shapes">2D shapes</string>
     <string name="editing_annotations">Annotations</string>

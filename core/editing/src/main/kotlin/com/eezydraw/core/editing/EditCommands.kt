@@ -9,6 +9,8 @@ import com.eezydraw.core.model.Issue
 import com.eezydraw.core.model.LayerId
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.ProjectDocument
+import com.eezydraw.core.model.Shape
+import com.eezydraw.core.model.measurementShape
 import java.util.UUID
 
 /** Transaction builders. Creating a command does not mutate the document or history. */
@@ -115,10 +117,11 @@ object EditCommands {
             if (element.id in ids) {
                 replacements[element.id] = null
             } else {
-                val body = detach(element.body, ids)
-                if (body != element.body) {
+                val detached = detachMeasurementReferences(document, element, ids)
+                val changed = detached.copy(body = detach(detached.body, ids))
+                if (changed != element) {
                     requireEditable(document, element)
-                    replacements[element.id] = element.copy(body = body)
+                    replacements[element.id] = changed
                 }
             }
         }
@@ -198,6 +201,15 @@ object EditCommands {
             it.copy(hostElementId = ids[it.hostElementId] ?: it.hostElementId)
         }
         return when (body) {
+            is ElementBody.DrawingShape -> {
+                val dimension = body.shape as? Shape.Dimension
+                val measurement = dimension?.measurement
+                if (dimension == null || measurement == null) body else body.copy(shape = dimension.copy(
+                    measurement = measurement.copy(anchors = measurement.anchors.map { anchor ->
+                        anchor.copy(elementId = ids[anchor.elementId] ?: anchor.elementId)
+                    }),
+                ))
+            }
             is ElementBody.Room -> body.copy(wallFaces = body.wallFaces.map { it.copy(wallId = ids[it.wallId] ?: it.wallId) })
             is ElementBody.Component -> body.copy(host = host(body.host))
             is ElementBody.Route -> body.copy(host = host(body.host))
@@ -269,6 +281,13 @@ object EditCommands {
             require(element.systemId == null || element.systemId in systems) { "Object system no longer exists" }
             require(element.materialId == null || element.materialId in materials) { "Object material no longer exists" }
             when (val body = element.body) {
+                is ElementBody.DrawingShape -> {
+                    val data = measurementShape(element)?.measurement
+                    require(data == null || data.anchors.all { it.elementId == null || it.elementId != element.id && it.elementId in elements }) {
+                        "A measurement reference object no longer exists"
+                    }
+                    require(data?.floorLevelId == null || data.floorLevelId in levels) { "The measurement floor no longer exists" }
+                }
                 is ElementBody.Room -> require(body.wallFaces.all { elements[it.wallId]?.body is ElementBody.Wall }) {
                     "A referenced wall no longer exists"
                 }

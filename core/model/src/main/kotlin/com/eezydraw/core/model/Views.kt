@@ -3,7 +3,7 @@ package com.eezydraw.core.model
 import kotlinx.serialization.Serializable
 
 @Serializable enum class Projection { ORTHOGRAPHIC, PERSPECTIVE }
-@Serializable enum class ViewMode { WIREFRAME, HIDDEN_LINE, SHADED, REALISTIC, TRANSPARENT, SECTION, XRAY }
+@Serializable enum class ViewMode { WIREFRAME, HIDDEN_LINE, SHADED, REALISTIC, TRANSPARENT, SECTION, XRAY, SHADED_WITH_EDGES }
 
 @Serializable
 data class Camera(

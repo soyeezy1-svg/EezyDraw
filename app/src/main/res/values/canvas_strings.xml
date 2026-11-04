@@ -35,9 +35,6 @@
     <string name="canvas_coordinates">Coordinates</string>
     <string name="canvas_target">Target</string>
     <string name="canvas_window_hint">Drag a rectangle to zoom. Tap Zoom window again to cancel.</string>
-    <string name="canvas_plan_hint">Drag to pan · pinch to zoom · tap to set a snap reference</string>
-    <string name="canvas_orbit_hint">Drag to orbit · two fingers to pan and zoom</string>
-    <string name="canvas_pan_hint">Drag to pan · pinch to zoom</string>
     <string name="canvas_probe_hint">Drag the snap probe · tap to set a reference</string>
     <string name="canvas_preparing">Preparing drawing…</string>
     <string name="canvas_prepare_error">This drawing could not be prepared. It may exceed the supported geometry limits.</string>

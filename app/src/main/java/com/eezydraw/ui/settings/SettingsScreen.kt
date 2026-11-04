@@ -244,6 +244,13 @@ fun SettingsScreen(
             }
             item { NumericField("gesture", R.string.settings_gesture, draft, errors, input, help = R.string.settings_gesture_help) }
             item {
+                SettingSwitch(
+                    stringResource(R.string.settings_body_drag_moves_selection), current.bodyDragMovesSelection,
+                    { update(current.copy(bodyDragMovesSelection = it)) }, "settings_body_drag_moves_selection",
+                )
+                Text(stringResource(R.string.settings_body_drag_moves_selection_help), style = MaterialTheme.typography.bodySmall)
+            }
+            item {
                 ChoiceField(
                     stringResource(R.string.settings_quality), current.renderQuality,
                     RenderQuality.entries.map { it to stringResource(when (it) {

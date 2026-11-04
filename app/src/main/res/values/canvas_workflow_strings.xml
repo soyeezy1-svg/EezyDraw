@@ -1,0 +1,20 @@
+<resources>
+    <string name="canvas_view_exported">View exported</string>
+    <string name="canvas_export_png">Export PNG</string>
+    <string name="canvas_export_pdf">Export PDF</string>
+    <string name="canvas_measurements">Measurements</string>
+    <string name="canvas_show_measurements">Show measurements</string>
+    <string name="canvas_measurements_empty">Use Measure for two points, or Dimension from reference for an object and a reference.</string>
+    <string name="canvas_edit_measurement">Edit measurement</string>
+    <string name="canvas_measurement_name">Name</string>
+    <string name="canvas_measurement_start">Start (project units)</string>
+    <string name="canvas_measurement_end">End (project units)</string>
+    <string name="canvas_measurement_label">Label position (project units)</string>
+    <string name="canvas_measurement_coordinates">Show coordinates and angles</string>
+    <string name="canvas_measurement_affl">Show height above floor</string>
+    <string name="canvas_measure_pick_first">Measure: tap the first point</string>
+    <string name="canvas_measure_pick_second">Measure: tap the second point</string>
+    <string name="canvas_reference_pick_object">Dimension from reference: tap the object</string>
+    <string name="canvas_reference_pick_reference">Tap a wall corner, object, or grid line</string>
+    <string name="canvas_reference_place_label">Tap to place the dimension label</string>
+</resources>

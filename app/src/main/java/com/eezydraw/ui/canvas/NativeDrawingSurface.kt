@@ -46,8 +46,7 @@ internal fun NativeDrawingSurface(
         modifier = modifier,
         update = {
             it.onRenderError = onError
-            it.setScene(scene ?: EmptyDrawingScene)
-            it.update(frame)
+            it.render(scene ?: EmptyDrawingScene, frame)
         },
     )
 }

@@ -27,24 +27,28 @@ private const val TAU = PI * 2
  * The explicit 500,000-edge / 16,384-chunk budget rejects oversized documents rather than
  * silently dropping geometry or allocating unbounded GPU buffers.
  */
-fun buildDrawingScene(document: ProjectDocument): DrawingScene {
+fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = null): DrawingScene {
     val layers = document.layers.associateBy { it.id }
     val systems = document.systems.associateBy { it.id }
     val library = document.libraryItems.associateBy { it.id }
+    val materials = document.materials.associateBy { it.id }
+    val elements = document.elements.associateBy { it.id }
     val segments = ArrayList<SceneSegment>(minOf(document.elements.size * 12L, MAX_SEGMENTS.toLong()).toInt())
     val bounds = SceneBounds()
     val levelBounds = linkedMapOf<String?, SceneBounds>()
     val chunks = ChunkCollector()
     for (element in document.elements) {
+        if (elementIds != null && element.id !in elementIds) continue
         val layer = layers[element.layerId]
         val system = element.systemId?.let(systems::get)
         if (layer?.visible == false || system?.visible == false) continue
+        if (!document.project.settings.showMeasurements && isMeasurement(element)) continue
         val transform = SceneTransform(element.transform)
         val levelId = element.levelId?.value
-        val color = system?.colourArgb ?: layer?.colourArgb ?: 0xFF334455
-        val emit: (Point3, Point3) -> Unit = { localA, localB ->
-            val a = transform.apply(localA)
-            val b = transform.apply(localB)
+        val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
+        val color = system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
+            ?: layer?.colourArgb ?: 0xFF334455
+        val emitWorld: (Point3, Point3) -> Unit = { a, b ->
             if (a != b) {
                 require(segments.size < MAX_SEGMENTS) { "Drawing exceeds the $MAX_SEGMENTS wireframe edge limit." }
                 val edge = SceneSegment(a, b, element.id.value, levelId, color)
@@ -54,8 +58,13 @@ fun buildDrawingScene(document: ProjectDocument): DrawingScene {
                 chunks.add(edge)
             }
         }
+        val emit: (Point3, Point3) -> Unit = { a, b -> emitWorld(transform.apply(a), transform.apply(b)) }
         when (val body = element.body) {
-            is ElementBody.DrawingShape -> drawShape(body.shape, emit, document.project.settings, transform::apply)
+            is ElementBody.DrawingShape -> {
+                val measurement = resolveMeasurement(document, element, elements)
+                if (measurement == null) drawShape(body.shape, emit, document.project.settings, transform::apply)
+                else drawMeasurement(measurement, document.project.settings, emitWorld)
+            }
             is ElementBody.Room -> extrude(body.boundary, 0.0, body.ceilingHeight, emit)
             is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
             is ElementBody.Wall -> wall(body, emit)
@@ -81,6 +90,38 @@ fun buildDrawingScene(document: ProjectDocument): DrawingScene {
         }
     }
     return DrawingScene(segments, chunks.finish(), bounds.build(), levelBounds.mapValues { it.value.build() })
+}
+
+/** World anchors remain attached while the annotation's independently placed label can move. */
+private fun drawMeasurement(
+    summary: MeasurementSummary,
+    settings: ProjectSettings,
+    emit: (Point3, Point3) -> Unit,
+) {
+    val midpoint = measurementMidpoint(summary.start, summary.end)
+    val offset = point(summary.labelPoint.x - midpoint.x, summary.labelPoint.y - midpoint.y, summary.labelPoint.z - midpoint.z)
+    fun shifted(p: Point3) = point(p.x + offset.x, p.y + offset.y, p.z + offset.z)
+    val a = shifted(summary.start); val b = shifted(summary.end)
+    emit(summary.start, a); emit(summary.end, b); emit(a, b)
+    val height = (summary.distance * .035).coerceIn(.005, .12)
+    fun arrow3D(tip: Point3, toward: Point3) {
+        val dx = toward.x - tip.x; val dy = toward.y - tip.y; val dz = toward.z - tip.z
+        val length = hypot(hypot(dx, dy), dz)
+        if (length == 0.0) return
+        val size = minOf(height * .65, length * .2)
+        val ux = dx / length; val uy = dy / length; val uz = dz / length
+        val horizontal = hypot(ux, uy)
+        val px = if (horizontal > 1e-8) -uy / horizontal else 1.0
+        val py = if (horizontal > 1e-8) ux / horizontal else 0.0
+        for (side in listOf(-.4, .4)) emit(tip, point(tip.x + (ux + px * side) * size,
+            tip.y + (uy + py * side) * size, tip.z + uz * size))
+    }
+    arrow3D(a, b); arrow3D(b, a)
+    val lines = measurementText(summary, settings)
+    val longest = lines.maxOfOrNull(String::length) ?: 0
+    val origin = point(summary.labelPoint.x - longest * height * .4,
+        summary.labelPoint.y + height * .5, summary.labelPoint.z)
+    textStrokes(lines.joinToString("\n"), height, origin, emit)
 }
 
 /** Intrinsic local XYZ Euler rotation: R = Rx * Ry * Rz; scale precedes rotation. */

@@ -16,6 +16,7 @@ import com.eezydraw.core.model.Scale3
 import com.eezydraw.core.model.Shape
 import com.eezydraw.core.model.Size3
 import com.eezydraw.core.model.Transform3
+import com.eezydraw.core.model.*
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -125,6 +126,39 @@ class EditedGeometryPersistenceTest {
         assertEquals(listOf(mirrored), restored.elements)
         assertEquals(shape, (restored.elements.single().body as ElementBody.DrawingShape).shape)
         assertEquals(restored, repository.load(saved.project.id.value))
+    }
+
+    @Test fun associatedMeasurementsAndViewPreferencesSurviveRoomAndPortableArchive() = runBlocking {
+        val created=repository.create("Shared positions",ProjectTemplate.EMPTY,ProjectSettings())
+        ownedProjectIds+=created.project.id.value
+        val layer=created.layers.first()
+        val level=created.levels.single()
+        val system=BuildingSystem(SystemId("electrical"),created.project.id,"Electrical",Discipline.ELECTRICAL,0xFF009688,visible=false)
+        val socket=Element(ElementId("socket"),created.project.id,layer.id,ElementBody.DrawingShape(Shape.Box(Size3(.1,.1,.1))),
+            levelId=level.id,systemId=system.id,name="Socket",transform=Transform3(translation=Point3(.3,0.0,1.2)))
+        val wall=Element(ElementId("wall"),created.project.id,layer.id,ElementBody.Wall(Point2(0.0,0.0),Point2(0.0,2.0),.2,3.0),levelId=level.id)
+        val data=MeasurementData("Socket to wall",listOf(MeasurementAnchor(Point3(),socket.id,Point3(.3,0.0,1.2)),
+            MeasurementAnchor(Point3(),wall.id,Point3())),showHeightAboveFloor=true,floorLevelId=level.id)
+        val dimension=Element(ElementId("position-dimension"),created.project.id,layer.id,ElementBody.DrawingShape(
+            Shape.Dimension(DimensionKind.ALIGNED,listOf(Point3(.3,0.0,1.2),Point3()),Point3(0.0,.5),data)),levelId=level.id)
+        val saved=repository.save(created.copy(project=created.project.copy(settings=created.project.settings.copy(
+            viewMode=ViewMode.SHADED_WITH_EDGES,showMeasurements=false)),layers=created.layers.map {it.copy(visible=false)},
+            systems=listOf(system),elements=listOf(socket,wall,dimension)))
+        database.close();reopenDatabase()
+        val reopened=repository.load(saved.project.id.value)
+        assertEquals(saved,reopened)
+        assertEquals(.3,resolveMeasurement(reopened,reopened.elements.last())!!.horizontalDistance,1e-12)
+        assertEquals(1.2,resolveMeasurement(reopened,reopened.elements.last())!!.heightAboveFloorMetres!!,1e-12)
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()))
+        ownedProjectIds+=imported.project.id.value
+        assertNotEquals(saved.project.id,imported.project.id)
+        assertEquals(saved.project.settings,imported.project.settings)
+        assertTrue(imported.layers.none {it.visible})
+        assertTrue(imported.systems.none {it.visible})
+        assertEquals(data,measurementShape(imported.elements.last())!!.measurement)
+        assertEquals(.3,resolveMeasurement(imported,imported.elements.last())!!.horizontalDistance,1e-12)
+        assertEquals(1.2,resolveMeasurement(imported,imported.elements.last())!!.heightAboveFloorMetres!!,1e-12)
     }
 
     private fun reopenDatabase() {

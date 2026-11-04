@@ -6,7 +6,9 @@ import android.util.AttributeSet
 import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
+import com.eezydraw.core.geometry.SurfaceScene
 import com.eezydraw.core.geometry.Viewport2D
+import com.eezydraw.core.model.ViewMode
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Immutable camera/preview state; the static document is supplied independently through [setScene]. */
@@ -22,6 +24,15 @@ data class CanvasFrame(
     /** Selected geometry stays immutable during a drag; only [selectionDelta] changes. */
     val selectionScene: DrawingScene? = null,
     val selectionDelta: EditDelta? = null,
+    val surfaceScene: SurfaceScene? = null,
+    val selectionSurfaceScene: SurfaceScene? = null,
+    val viewMode: ViewMode = ViewMode.WIREFRAME,
+    /** Open curves and annotations remain visible when closed-surface edges are hidden. */
+    val annotationScene: DrawingScene? = null,
+    val selectionAnnotationScene: DrawingScene? = null,
+    /** Dimension labels/extension lines are overlaid for readability in filled views. */
+    val measurementScene: DrawingScene? = null,
+    val selectionMeasurementScene: DrawingScene? = null,
 ) {
     init {
         require(gridSpacing.isFinite() && gridSpacing > 0)
@@ -63,6 +74,12 @@ class DrawingSurfaceView @JvmOverloads constructor(
         if (released.get()) return
         drawingRenderer.update(frame)
         requestRender()
+    }
+
+    /** Publish the wireframe, surfaces, annotations and camera as one render snapshot. */
+    fun render(scene: DrawingScene, frame: CanvasFrame) {
+        if (released.get()) return
+        if (drawingRenderer.submit(scene, frame)) requestRender()
     }
 
     fun setScene(scene: DrawingScene) {

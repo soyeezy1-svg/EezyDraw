@@ -20,6 +20,8 @@ import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.SnapMode
 import com.eezydraw.core.model.ThemeMode
 import com.eezydraw.ui.theme.EezyDrawTheme
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -164,6 +166,27 @@ class SettingsScreenTest {
         visible("settings_show_autosave_notification").assertIsOn()
         compose.onNodeWithTag("settings_save").performClick()
         compose.runOnIdle { assertEquals(true, saved?.showAutosaveNotification) }
+    }
+
+    @Test
+    fun bodyDragIsOptionalOffByDefaultAndItsDraftSurvivesRestoration() {
+        var saved: AppSettings? = null
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            EezyDrawTheme { Surface { SettingsScreen(AppSettings(), { saved = it }, {}, {}, {}, {}) } }
+        }
+        visible("settings_body_drag_moves_selection").assertIsOff().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        visible("settings_body_drag_moves_selection").assertIsOn()
+        compose.onNodeWithTag("settings_save").performClick()
+        compose.runOnIdle { assertEquals(true, saved?.bodyDragMovesSelection) }
+    }
+
+    @Test
+    fun legacyPreferencesDefaultToHandleOnlyMovementAndOptInRoundTrips() {
+        assertEquals(false, Json.decodeFromString<AppSettings>("{}").bodyDragMovesSelection)
+        val settings = AppSettings(bodyDragMovesSelection = true)
+        assertEquals(settings, Json.decodeFromString<AppSettings>(Json.encodeToString(settings)))
     }
 
     private fun showSettings(

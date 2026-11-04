@@ -31,6 +31,8 @@ data class ProjectSettings(
     val defaultWallThickness: Double = 0.2,
     val defaultWallHeight: Double = 3.0,
     val defaultRouteElevations: Map<RouteKind, ElevationSetting> = emptyMap(),
+    val viewMode: ViewMode = ViewMode.WIREFRAME,
+    val showMeasurements: Boolean = true,
 ) {
     init {
         require(decimalPlaces in 0..8)
@@ -58,6 +60,7 @@ data class AppSettings(
     val exportFormat: ExportFormat = ExportFormat.EEZYDRAW,
     val exportIncludeUnderlays: Boolean = true,
     val showAutosaveNotification: Boolean = false,
+    val bodyDragMovesSelection: Boolean = false,
 ) {
     init {
         require(languageTag.isNotBlank())

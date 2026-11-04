@@ -1,0 +1,4 @@
+<resources>
+    <string name="settings_body_drag_moves_selection">Move selected objects by dragging body</string>
+    <string name="settings_body_drag_moves_selection_help">Off by default. Use the large four-arrow handle to move; when enabled, dragging a selected object also moves it. Drag empty space to navigate.</string>
+</resources>
