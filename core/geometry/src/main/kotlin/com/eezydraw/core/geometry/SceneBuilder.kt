@@ -1,8 +1,10 @@
 package com.eezydraw.core.geometry
 
 import com.eezydraw.core.model.*
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.acos
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -53,7 +55,7 @@ fun buildDrawingScene(document: ProjectDocument): DrawingScene {
             }
         }
         when (val body = element.body) {
-            is ElementBody.DrawingShape -> drawShape(body.shape, emit)
+            is ElementBody.DrawingShape -> drawShape(body.shape, emit, document.project.settings, transform::apply)
             is ElementBody.Room -> extrude(body.boundary, 0.0, body.ceilingHeight, emit)
             is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
             is ElementBody.Wall -> wall(body, emit)
@@ -69,7 +71,11 @@ fun buildDrawingScene(document: ProjectDocument): DrawingScene {
                     val instance: (Point3, Point3) -> Unit = { a, b ->
                         emit(point(a.x * sx, a.y * sy, a.z * sz), point(b.x * sx, b.y * sy, b.z * sz))
                     }
-                    definition.geometry.forEach { drawShape(it, instance) }
+                    definition.geometry.forEach { shape ->
+                        drawShape(shape, instance, document.project.settings) { p ->
+                            transform.apply(point(p.x * sx, p.y * sy, p.z * sz))
+                        }
+                    }
                 }
             }
         }
@@ -107,7 +113,12 @@ private fun point(x: Double, y: Double, z: Double = 0.0): Point3 {
     return Point3(x, y, z)
 }
 
-private fun drawShape(shape: Shape, emit: (Point3, Point3) -> Unit) {
+private fun drawShape(
+    shape: Shape,
+    emit: (Point3, Point3) -> Unit,
+    settings: ProjectSettings,
+    worldPoint: (Point3) -> Point3,
+) {
     when (shape) {
         is Shape.Line -> emit(shape.start, shape.end)
         is Shape.Polyline -> polyline(shape.points, shape.closed, emit)
@@ -119,7 +130,7 @@ private fun drawShape(shape: Shape, emit: (Point3, Point3) -> Unit) {
         is Shape.Polygon -> rings(shape.boundary).forEach { ring(it, 0.0, emit) }
         is Shape.Spline -> spline(shape, emit)
         is Shape.Text -> textStrokes(shape.text, shape.height, Point3(), emit)
-        is Shape.Dimension -> dimension(shape, emit)
+        is Shape.Dimension -> dimension(shape, dimensionLabel(shape, settings, worldPoint), emit)
         is Shape.Leader -> {
             polyline(shape.points, false, emit)
             arrow(shape.points[0], shape.points[1], emit)
@@ -277,7 +288,49 @@ private fun spline(shape: Shape.Spline, emit: (Point3, Point3) -> Unit) {
     }
 }
 
-private fun dimension(shape: Shape.Dimension, emit: (Point3, Point3) -> Unit) {
+/** Measures fixed dimension anchors after the element transform; no object association is implied. */
+internal fun formatDimensionLabel(
+    shape: Shape.Dimension,
+    settings: ProjectSettings,
+    transform: Transform3 = Transform3(),
+): String = dimensionLabel(shape, settings, SceneTransform(transform)::apply)
+
+private fun dimensionLabel(
+    shape: Shape.Dimension,
+    settings: ProjectSettings,
+    worldPoint: (Point3) -> Point3,
+): String {
+    val anchors = shape.anchors.map(worldPoint)
+    val a = anchors[0]
+    val b = anchors[1]
+    fun length(p: Point3, q: Point3) = hypot(hypot(q.x - p.x, q.y - p.y), q.z - p.z)
+    fun number(value: Double) = String.format(Locale.ROOT, "%.${settings.decimalPlaces}f", value)
+    if (shape.kind == DimensionKind.ANGULAR) {
+        val c = anchors.getOrNull(2) ?: return "?"
+        val ab = length(a, b)
+        val ac = length(a, c)
+        if (ab == 0.0 || ac == 0.0) return "?"
+        val cosine = ((b.x - a.x) / ab * ((c.x - a.x) / ac) +
+            (b.y - a.y) / ab * ((c.y - a.y) / ac) +
+            (b.z - a.z) / ab * ((c.z - a.z) / ac)).coerceIn(-1.0, 1.0)
+        val radians = acos(cosine)
+        return when (settings.angleFormat) {
+            AngleFormat.DEGREES -> "${number(radians * 180 / PI)} DEG"
+            AngleFormat.RADIANS -> "${number(radians)} RAD"
+        }
+    }
+    val metres = length(a, b)
+    val (value, unit) = when (settings.lengthUnit) {
+        LengthUnit.MILLIMETRES -> metres * 1000 to "MM"
+        LengthUnit.CENTIMETRES -> metres * 100 to "CM"
+        LengthUnit.METRES -> metres to "M"
+        LengthUnit.INCHES -> metres / 0.0254 to "IN"
+        LengthUnit.FEET -> metres / 0.3048 to "FT"
+    }
+    return "${if (shape.kind == DimensionKind.RADIAL) "R " else ""}${number(value)} $unit"
+}
+
+private fun dimension(shape: Shape.Dimension, label: String, emit: (Point3, Point3) -> Unit) {
     val a = shape.anchors[0]
     val b = shape.anchors[1]
     fun offset(p: Point3) = point(p.x + shape.labelOffset.x, p.y + shape.labelOffset.y, p.z + shape.labelOffset.z)
@@ -285,11 +338,16 @@ private fun dimension(shape: Shape.Dimension, emit: (Point3, Point3) -> Unit) {
         DimensionKind.ALIGNED -> {
             val c = offset(a)
             val d = offset(b)
+            val height = (hypot(b.x - a.x, b.y - a.y) * 0.04).coerceIn(1e-7, 0.25)
             emit(a, c); emit(b, d); emit(c, d)
-            arrow(c, d, emit); arrow(d, c, emit)
+            arrow(c, d, emit, height * 0.6); arrow(d, c, emit, height * 0.6)
+            centeredLabel(label, height, point((c.x + d.x) / 2, (c.y + d.y) / 2, (c.z + d.z) / 2), emit)
         }
         DimensionKind.RADIAL -> {
-            emit(a, b); emit(b, offset(b)); arrow(b, a, emit)
+            val height = (hypot(b.x - a.x, b.y - a.y) * 0.06).coerceIn(1e-7, 0.25)
+            val labelPoint = offset(b)
+            emit(a, b); emit(b, labelPoint); arrow(b, a, emit, height * 0.6)
+            textStrokes(label, height, labelPoint, emit)
         }
         DimensionKind.ANGULAR -> {
             val c = shape.anchors.getOrNull(2)
@@ -301,19 +359,36 @@ private fun dimension(shape: Shape.Dimension, emit: (Point3, Point3) -> Unit) {
                 var sweep = atan2(c.y - a.y, c.x - a.x) - start
                 while (sweep > PI) sweep -= TAU
                 while (sweep < -PI) sweep += TAU
-                val radius = minOf(hypot(b.x - a.x, b.y - a.y), hypot(c.x - a.x, c.y - a.y)) * 0.6
-                if (radius > 0) curve(start, sweep, emit) { angle -> point(a.x + radius * cos(angle), a.y + radius * sin(angle), a.z) }
+                val requested = hypot(shape.labelOffset.x, shape.labelOffset.y)
+                val radius = if (requested > 0) requested else minOf(hypot(b.x - a.x, b.y - a.y), hypot(c.x - a.x, c.y - a.y)) * 0.6
+                if (radius > 0) {
+                    fun at(angle: Double) = point(a.x + radius * cos(angle), a.y + radius * sin(angle), a.z)
+                    val height = (radius * 0.1).coerceIn(1e-7, 0.25)
+                    val direction = if (sweep >= 0) 1 else -1
+                    val first = at(start)
+                    val last = at(start + sweep)
+                    emit(a, first); emit(a, last)
+                    curve(start, sweep, emit, ::at)
+                    arrow(first, at(start + direction * 0.1), emit, height * 0.6)
+                    arrow(last, at(start + sweep - direction * 0.1), emit, height * 0.6)
+                    val labelPoint = if (requested > 0) offset(a) else at(start + sweep / 2)
+                    centeredLabel(label, height, labelPoint, emit)
+                }
             }
         }
     }
 }
 
-private fun arrow(tip: Point3, toward: Point3, emit: (Point3, Point3) -> Unit) {
+private fun centeredLabel(label: String, height: Double, center: Point3, emit: (Point3, Point3) -> Unit) {
+    textStrokes(label, height, point(center.x - label.length * height * 0.4, center.y + height * 0.3, center.z), emit)
+}
+
+private fun arrow(tip: Point3, toward: Point3, emit: (Point3, Point3) -> Unit, arrowSize: Double? = null) {
     val dx = toward.x - tip.x
     val dy = toward.y - tip.y
     val length = hypot(dx, dy)
     if (length <= 0 || !length.isFinite()) return
-    val size = (length * 0.08).coerceIn(0.005, 0.2)
+    val size = arrowSize ?: (length * 0.08).coerceIn(0.005, 0.2)
     val ux = dx / length * size
     val uy = dy / length * size
     emit(tip, point(tip.x + ux - uy * 0.4, tip.y + uy + ux * 0.4, tip.z))

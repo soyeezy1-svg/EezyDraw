@@ -1,6 +1,6 @@
 # EEZY DRAW
 
-Native Android project for the tablet-first MEP coordination app described in [SPEC.md](SPEC.md). It includes vector branding/startup, a durable local project library, native project save/load/import/export, Settings and Help, plus a floating-origin 2D canvas and orbit 3D wireframe viewer. Geometry editing, coordination engines and external CAD codecs remain future work.
+Native Android project for the tablet-first MEP coordination app described in [SPEC.md](SPEC.md). It includes vector branding/startup, a durable local project library, native project save/load/import/export, Settings and Help, plus a floating-origin 2D drawing canvas and orbit 3D wireframe view. Drawing tools, object selection, handle transforms, numeric Properties and session undo/redo are implemented; coordination engines and external CAD codecs remain future work.
 
 ## Project
 
@@ -14,6 +14,7 @@ EezyDraw/
 │       │   └── ui/              Startup, projects, Settings/Help, theme, canvas
 │       └── res/                 Branding, splash/launcher icons, strings, backup policy
 ├── core/data/                   Room catalogue/preferences, revision files, native archives
+├── core/editing/                Drawing factories, selection, transforms and sparse undo/redo
 ├── core/geometry/               Scene compilation, Double cameras, spatial index and snaps
 ├── core/model/                  Android-independent Kotlin/JVM module
 │   └── src/
@@ -34,7 +35,7 @@ EezyDraw/
 └── settings.gradle.kts
 ```
 
-Module dependencies are `:app → :core:data → :core:model` and `:app → :core:geometry → :core:model`, with `:app` also using the model directly. See [architecture and data model](docs/ARCHITECTURE.md) for coordinate conventions and the canvas/persistence boundaries.
+Module dependencies are `:app → :core:data → :core:model`, `:app → :core:editing → :core:geometry → :core:model`, with `:app` also using geometry/model directly. See [architecture and data model](docs/ARCHITECTURE.md) for coordinate conventions and the editing/persistence boundaries.
 
 ## Open in Android Studio
 
@@ -63,7 +64,7 @@ No credentials, environment files, backend services, or broad filesystem runtime
 From the repository root, with a full JDK on `JAVA_HOME` and the Android SDK configured through `ANDROID_HOME` or `local.properties`:
 
 ```sh
-./gradlew :core:model:test :core:geometry:test :core:data:testDebugUnitTest :app:testDebugUnitTest
+./gradlew :core:model:test :core:geometry:test :core:editing:test :core:data:testDebugUnitTest :app:testDebugUnitTest
 ./gradlew :app:assembleDebug :app:lintDebug :core:data:lintDebug
 ```
 
@@ -73,7 +74,7 @@ On Windows, use `gradlew.bat`. The debug APK is written to `app/build/outputs/ap
 ./gradlew :app:installDebug
 ```
 
-Model/geometry tests run on the JVM. Room/file/archive tests use real temporary storage under Robolectric. Compose tests cover startup, project/settings/help workflows and canvas controls/gestures; the canvas tests replace the native surface to isolate interaction state. Thumbnail tests decode real local PNG fixtures. These checks do not establish Android GPU rendering, physical tablet performance or external URI permission behavior.
+Model/geometry/editing tests run on the JVM. Room/file/archive tests use real temporary storage under Robolectric. Compose tests cover startup, project/settings/help workflows and canvas controls/gestures; the canvas tests replace the native surface to isolate interaction state. Thumbnail tests decode real local PNG fixtures. These checks do not establish Android GPU rendering, physical tablet performance or external URI permission behavior.
 
 ## Project workflow
 
@@ -81,7 +82,7 @@ Create a project with a name, template and display units. Office, Residential an
 
 The library is stored privately on this device using Room metadata and atomic, checked document revisions. Export makes a portable `.eezydraw` ZIP containing the document and its referenced attachments. Open from file validates and imports a separate local copy, never silently replacing an existing project. Keep exported copies before uninstalling the app, which removes the private library.
 
-Settings persist across restarts. Units/precision/snaps/grid/service settings supply defaults for new projects; existing projects retain their own settings and changing display units never rescales geometry. Canvas units/snap changes are project edits and use normal save/autosave. Theme, stylus/touch mode, gesture sensitivity, autosave (zero means off), backup and save-folder behavior work now; editing/undo/quality/export preferences are retained for their later engines. The selected save folder receives additional versioned archive copies; local storage remains available if the folder is disconnected or permission is revoked. External copies are not automatically pruned. Native archives remain complete; drawing-export visibility options do not remove attachments from project saves.
+Settings persist across restarts. Units/precision/snaps/grid/service settings supply defaults for new projects; existing projects retain their own settings and changing display units never rescales geometry. Canvas units/snap changes are project edits and use normal save/autosave. Theme, stylus/touch mode, gesture sensitivity, autosave (zero means off), backup, save-folder behavior and the undo-history size work now; line weights, service placement, quality presets and drawing-export preferences await their respective engines. The selected save folder receives additional versioned archive copies; local storage remains available if the folder is disconnected or permission is revoked. External copies are not automatically pruned. Native archives remain complete; drawing-export visibility options do not remove attachments from project saves.
 
 Backups retain the preceding valid saved revision when enabled. On a damaged primary, explicitly choose backup recovery; the app does not silently substitute an older project. Help explains current workflows, gesture/shortcut references, about/version and privacy. Feedback opens a share chooser only after explicit submission; it attaches no projects and sends nothing automatically.
 
@@ -89,7 +90,13 @@ Backups retain the preceding valid saved revision when enabled. On a damaged pri
 
 | Action | Control |
 | --- | --- |
-| Pan the plan | Drag with one finger; two-finger drag also pans |
+| Show drawing/editing tools | Expand Tools; collapse it to recover drawing space |
+| Create geometry | Choose a tool and tap its defining points in plan view; Finish ends a polyline, polygon, spline or leader |
+| Select an object | Select tool, then tap its visible outline or closed interior; polygon holes remain empty |
+| Move, rotate or scale | Drag the selection's axis arrow, Z-rotation control or uniform-scale handle; dragging the body never transforms it |
+| Enter exact values | Properties for one selected object: position X/Y/Z, rotation X/Y/Z in degrees, and local width/depth/height in project units |
+| Duplicate or remove | Copy/Paste, Mirror X/Y, Array and Delete in Tools; Undo/Redo reverses committed drawing edits |
+| Pan the plan | Drag the canvas with one finger; two-finger drag also pans |
 | Zoom the plan | Pinch; the point under the gesture stays in place |
 | Inspect coordinates/snaps | Hover, or enable Snap probe and drag; a stylus in Stylus mode probes without panning |
 | Set a snap reference | Tap the plan; Clear reference removes it |
@@ -100,23 +107,27 @@ Backups retain the preceding valid saved revision when enabled. On a damaged pri
 | Align the 3D view | Tap an oriented view-cube face or Top, Front, Side or Isometric; choose Perspective or Orthographic |
 | Change units/level | Bottom status bar; All levels includes every level, while a chosen level also includes unassigned geometry |
 
-The plan includes an adaptive grid, vector rulers and a coordinate/snap readout in project units. The 3D status reports the camera target. Perpendicular and ortho need a tap reference: perpendicular finds the projection onto a finite edge, while ortho holds a horizontal/vertical construction axis. Grid spacing and snap tolerance remain physical metre values behind the chosen display units. Snaps inspect the projected wireframe; they do not create or modify geometry. Cameras, level/view choices and the reference survive Project details navigation and activity recreation; they are not yet saved into portable project views.
+The plan includes an adaptive grid, vector rulers and a coordinate/snap readout in project units. The 3D status reports the camera target. Perpendicular and ortho need a reference: perpendicular finds the projection onto a finite edge, while ortho holds a horizontal/vertical construction axis. Grid spacing and snap tolerance remain physical metre values behind the chosen display units. Drawing taps use the configured snaps on the selected level's XY plane. Cameras, level/view choices and the reference survive Project details navigation and activity recreation; they are not yet saved into portable project views.
 
-Geometry and its spatial index are prepared off the UI thread. The GLES 2 surface batches immutable chunk buffers, subtracts a Double camera origin before Float conversion, culls offscreen chunks, and renders on demand. Camera gestures reuse those buffers. Nearby snap queries have bounded work, including intersection checks over the nearest 64 edges. These are implementation safeguards for large drawings; measured tablet frame rates and memory remain part of device QA.
+Tools include line, polyline, three-point arc, circle, ellipse, rectangle, polygon, triangle, spline, text, leader, aligned/angular/radial dimensions, box, sphere, cylinder, cone and pyramid. Rectangles and boxes use opposite corners; circles/spheres use a centre and radius point; an arc uses start, middle and end. Text has editable content/height. A leader starts at its arrow tip and ends at its text. Dimensions use two measurement anchors plus a label point, or vertex/two arms/label for angular dimensions. Box/cylinder/cone/pyramid height is entered in Tools before picking the base; Z and full XYZ rotations remain editable in Properties. Construction stays in an XY level plane, then primitives can be inspected and transformed in 3D.
+
+Properties sizes are physical extents along each object's local axes before rotation, including existing scale; flat axes stay flat. Mirror records reflected handedness with signed nonzero scale. Dimensions measure their own fixed anchors after transforms and display current project units, angle format and precision; they do not attach to other objects. Text/annotations use the wireframe stroke alphabet, including a fixed 0.25m leader text height.
+
+Copy/Paste uses a project-local in-app clipboard and creates new IDs. Array repeats the selection in rows/columns at project X/Y spacing and caps newly created objects at 1,000. Delete removes dependent host/shared-wall/group/issue links in the same reversible operation. Undo/redo retains changed records in memory, bounded by Settings and an auxiliary changed-record budget; it is cleared for a different editing session and is not written to project files. Save/autosave persists the resulting geometry.
+
+Geometry, snapping and selection indexes are prepared off the UI thread. The GLES 2 surface uses separate immutable buffers for the drawing and selection, subtracts a Double camera origin before Float conversion, culls offscreen chunks, and renders on demand. Camera gestures reuse buffers. Handle drags update a transform uniform on the selected batch; releasing commits one undoable edit and prepares the new scene. Nearby snap queries have bounded work, including intersection checks over the nearest 64 edges. These safeguards do not establish tablet frame rates or memory use; those remain part of device QA.
 
 ## Validation
 
-Verified on 2026-11-04 with the pinned toolchain:
+All **175 tests pass**: model 5, geometry 50, editing 47, storage 11 and app 62. The debug APK builds, and app/storage debug lint reports have zero issues. See [the test report](docs/TEST_REPORT.md) for commands, coverage and device QA boundaries.
 
-- 96 tests passed with no failures, errors or skips: 5 model, 43 geometry, 9 storage, and 39 app/Compose/ViewModel tests.
-- Debug APK assembly passed; app and data-module lint both reported no issues.
-- A Mesa GLES2 smoke check passed for the production shaders, vertex-buffer layout, colors, plan elevation projection and 3D depth occlusion, with no GL errors.
+The editing suite covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
-The camera regressions include 1 mm extents, deep window zoom, large-coordinate precision, full-height first-entry 3D framing, and gesture anchoring. Project creation → canvas → Back → Continue is covered through actual app navigation with only the native surface substituted. These results do not measure physical tablet FPS or Android EGL lifecycle behavior.
+Existing camera regressions include 1 mm extents, deep window zoom, large-coordinate precision, full-height first-entry 3D framing, and gesture anchoring. Project creation → canvas → Back → Continue is covered through actual app navigation with only the native surface substituted. These tests do not measure physical tablet FPS or Android EGL lifecycle behavior.
 
 The suite covers model serialization/invariants; Room reopening and real file/archive/backup/failure paths; ViewModel/autosave/restoration; Compose startup, creation/details, Settings, Help and thumbnails; and camera, snap and scene conversion regressions. Geometry tests include large-coordinate floating origins, all model shape variants, scene-budget rejection and deterministic 100,000-segment spatial-query checks, including dense overlapping edges. Canvas Compose gesture/control tests use a substitute surface and inspect real camera/snap state rather than claiming native GPU output.
 
-The production vertex/fragment shaders have also passed a software Mesa GLES 2 smoke check for buffer layout, colour, plan-Z flattening and 3D depth without GL errors. That check does not establish Android surface lifecycle or physical-device frame rates. The manual QA below remains required.
+The current production vertex/fragment shaders pass the software Mesa GLES 2 smoke check for buffer layout, colour, plan-Z flattening, 3D depth and selected translation/rotation/scale, including a combined transform near billion-metre coordinates, with no GL errors. On Linux with Python 3 and Mesa EGL/GLES 2 installed, run `python3 scripts/gles_shader_smoke.py`. Software GL checks do not establish Android surface lifecycle or physical-device frame rates. The manual QA below remains required.
 
 ## Manual QA plan
 
@@ -128,6 +139,10 @@ The following remain device/emulator checks, not claims of completed testing:
 - On a tablet, check one-finger pan, two-finger pan/pinch, stylus hover/probe, gesture sensitivity and view-cube taps; try rapid direction changes and fingers joining/leaving a gesture.
 - Open geometry with endpoints, midpoints, crossing lines and multiple levels; check all six snaps, disabled snapping, tolerance at different zooms, negative/large coordinates, perpendicular/ortho references, units and status values. Check global/unassigned geometry remains visible with a selected level.
 - Check 2D/3D zoom extents/window, all view presets, perspective/orthographic framing, depth, grid/rulers and light/dark contrast. Confirm tiny window drags do not jump the camera.
+- Create every drawing tool on multiple levels with snapping on/off, including clockwise/major arcs, open/closed polylines, irregular polygons, multi-line text and each primitive height. Cancel incomplete tools and reject duplicate/collinear picks without committing objects.
+- Select outlines and closed interiors in plan and orbit views, including polygon holes, overlapping solids, hidden layers and locked objects. Confirm dragging the body leaves geometry unchanged, while arrow/rotation/scale handles show a live preview and commit only once; cancellation must restore the original.
+- Apply numeric X/Y/Z, XYZ rotations and local dimensions in mm/cm/m/in/ft; check flat axes, mirrored objects, small values below display precision and invalid input. Check measured dimension labels after scaling and unit/angle changes.
+- Copy/paste, mirror twice, create row/column arrays, delete linked objects, undo/redo repeatedly, then save/reopen. Verify geometry and references persist, clipboard/history stay session-local, and the configured history limit applies.
 - On API 26/35, background/resume and rotate the native surface, force EGL context recreation where possible, reopen different projects, and check renderer errors are visible without damaging saved data.
 - Profile a large imported drawing on target tablets: scene/index load time, pan/pinch frame-time percentiles, visible chunk count, GPU/CPU memory and repeated open/close/background cycles. Include dense overlaps and large coordinate offsets; report device/model/API and drawing size. No tablet FPS target has been verified in cloud tests.
 - Export/open a native archive with attachments through real SAF providers; verify imported copies leave originals intact.
@@ -141,4 +156,4 @@ The following remain device/emulator checks, not claims of completed testing:
 
 The supported UI language is English and the portable format is native `.eezydraw` v1. Archive limits are 32MiB compressed/expanded, 8MiB document JSON, 16MiB per attachment, and 256 entries. The wireframe viewer accepts at most 500,000 semantic/subdivided render edges and 16,384 spatial chunks, with a maximum single-edge axis span of 64,000,000m; oversized scenes display an error instead of truncating. Plan scale is bounded to `1e-6..1e7` pixels/metre. The virtual canvas has no fixed page boundary, but finite coordinate precision and scene/memory limits still apply.
 
-Curves use up to 64 segments per turn, spline degree is capped at 32, hatches show boundaries, routes show centrelines, and annotation previews use a limited stroke alphabet. Snaps operate in 2D on tessellated edges; dense-query budgets may omit a candidate. Geometry creation/selection/editing, solid/shaded/realistic rendering, saved-view management, underlays, cloud synchronization, coordination, a built-in component catalogue and DWG/DXF/PDF/IFC codecs remain future work. Autosave runs during the app/ViewModel lifetime, not as a background sync service; unsaved drafts are not guaranteed to survive process death.
+Curves use up to 64 segments per turn, spline degree is capped at 32, hatches show boundaries, routes show centrelines, and annotation previews use a limited stroke alphabet. New splines use degree up to three. Snaps operate in 2D on tessellated edges; dense-query budgets may omit a candidate. Picking uses actual outlines and supported closed interiors rather than accepting empty bounding boxes; detailed library components retain outline selection. Drawing placement is in level XY planes, Properties cannot add thickness to a flat shape, handle rotation is about project Z and handle scaling is uniform. Dimensions have fixed, nonassociative anchors. Revision-cloud/hatch/extrude/revolve creation, topology repair, solid/shaded/realistic rendering, saved-view management, underlays, cloud synchronization, coordination, a built-in component catalogue and DWG/DXF/PDF/IFC codecs remain future work. The tools panel collapses but does not yet dock or drag. Autosave runs during the app/ViewModel lifetime, not as a background sync service; unsaved drafts and undo history are not guaranteed to survive process death.

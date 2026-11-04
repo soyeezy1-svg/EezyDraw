@@ -12,12 +12,28 @@ import com.eezydraw.core.data.ProjectRepository
 import com.eezydraw.core.data.ProjectStorageException
 import com.eezydraw.core.data.SettingsRepository
 import com.eezydraw.core.data.StoredProject
+import com.eezydraw.core.editing.EditCommand
+import com.eezydraw.core.editing.EditCommands
+import com.eezydraw.core.editing.EditDelta
+import com.eezydraw.core.editing.EditHistory
+import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.editing.MirrorAxis
+import com.eezydraw.core.editing.SketchGeometry
+import com.eezydraw.core.editing.applyProperties
 import com.eezydraw.core.model.AppSettings
+import com.eezydraw.core.model.Element
+import com.eezydraw.core.model.ElementBody
+import com.eezydraw.core.model.ElementId
+import com.eezydraw.core.model.Layer
+import com.eezydraw.core.model.LayerId
 import com.eezydraw.core.model.LengthUnit
+import com.eezydraw.core.model.LevelId
+import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.ProjectTemplate
 import com.eezydraw.core.model.SnapSettings
 import com.eezydraw.storage.ProjectExchange
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -46,6 +62,10 @@ data class AppUiState(
     val error: String? = null,
     val notice: String? = null,
     val failedProjectId: String? = null,
+    val selectedIds: Set<ElementId> = emptySet(),
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
+    val canPaste: Boolean = false,
 )
 
 class AppViewModel(
@@ -64,6 +84,10 @@ class AppViewModel(
 
     private var preferencesReady = false
     private var catalogueReady = false
+    private val history = EditHistory()
+    private var savedDocument: ProjectDocument? = null
+    private var clipboard = emptyList<Element>()
+    private var pasteSequence = 0L
 
     init {
         viewModelScope.launch {
@@ -72,7 +96,10 @@ class AppViewModel(
                 mutableState.update { it.copy(ready = catalogueReady, error = userMessage(error)) }
             }.collect { settings ->
                 preferencesReady = true
-                mutableState.update { it.copy(settings = settings, ready = catalogueReady) }
+                history.setLimit(settings.undoLimit)
+                mutableState.update {
+                    it.copy(settings = settings, ready = catalogueReady, canUndo = history.canUndo, canRedo = history.canRedo)
+                }
             }
         }
         viewModelScope.launch {
@@ -150,8 +177,141 @@ class AppViewModel(
         mutableState.update { current ->
             val document = current.document ?: return@update current
             val changed = change(document)
-            current.copy(document = changed, dirty = current.dirty || changed != document)
+            current.copy(document = changed, dirty = changed != savedDocument)
         }
+    }
+
+    fun select(ids: Set<ElementId>) {
+        val current = state.value
+        if (current.busy) return
+        val existing = current.document?.elements?.mapTo(HashSet()) { it.id } ?: emptySet()
+        mutableState.update { it.copy(selectedIds = ids.intersect(existing)) }
+    }
+
+    fun addSketch(geometry: SketchGeometry, levelId: String?): Boolean {
+        return drawingEdit(selectAdded = true) { current, document ->
+            val (prepared, layer) = drawingLayer(document, current.settings.defaultLineWeightMm)
+            val element = Element(
+                id = ElementId(UUID.randomUUID().toString()),
+                projectId = document.project.id,
+                layerId = layer.id,
+                body = ElementBody.DrawingShape(geometry.shape),
+                levelId = levelId?.let(::LevelId),
+                transform = geometry.transform,
+            )
+            EditCommands.between(document, prepared.copy(elements = document.elements + element), "Create object")
+        }
+    }
+
+    fun transformSelection(delta: EditDelta): Boolean {
+        return drawingEdit { current, document -> EditCommands.transform(document, current.selectedIds, delta) }
+    }
+
+    fun updateProperties(properties: ElementProperties) {
+        drawingEdit { current, document ->
+            require(current.selectedIds.size == 1) { "Select one object to edit its properties." }
+            val element = requireNotNull(document.elements.find { it.id in current.selectedIds }) {
+                "The selected object no longer exists."
+            }
+            EditCommands.replace(document, listOf(applyProperties(document, element, properties)))
+        }
+    }
+
+    fun copySelection() {
+        val current = state.value
+        if (current.busy || current.selectedIds.isEmpty()) return
+        clipboard = current.document?.elements?.filter { it.id in current.selectedIds } ?: emptyList()
+        pasteSequence = 0L
+        mutableState.update { it.copy(canPaste = clipboard.isNotEmpty(), error = null) }
+    }
+
+    fun pasteSelection() {
+        if (clipboard.isEmpty()) return
+        val sequence = pasteSequence + 1L
+        if (drawingEdit(selectAdded = true) { current, document ->
+            val distance = document.project.settings.snap.gridSpacing * 5.0 * sequence
+            require(distance.isFinite()) { "The paste offset is too large. Reduce the grid size." }
+            val offset = Point3(distance, distance)
+            val editableLayers = document.layers.filter { it.visible && !it.locked }.mapTo(HashSet()) { it.id }
+            if (clipboard.all { it.layerId in editableLayers }) {
+                EditCommands.paste(document, clipboard, offset)
+            } else {
+                val (prepared, layer) = drawingLayer(document, current.settings.defaultLineWeightMm)
+                val paste = EditCommands.paste(prepared, clipboard, offset, layer.id)
+                if (prepared === document) paste else
+                    EditCommands.between(document, paste.preview(prepared), "Paste objects")
+            }
+        }) pasteSequence = sequence
+    }
+
+    fun mirrorSelection(axis: MirrorAxis, pivot: Point3) {
+        drawingEdit { current, document -> EditCommands.mirror(document, current.selectedIds, axis, pivot) }
+    }
+
+    fun arraySelection(columns: Int, rows: Int, dx: Double, dy: Double) {
+        drawingEdit { current, document -> EditCommands.array(document, current.selectedIds, columns, rows, dx, dy) }
+    }
+
+    fun deleteSelection() {
+        drawingEdit { current, document -> EditCommands.delete(document, current.selectedIds) }
+    }
+
+    fun undo() = restoreDrawing(redo = false)
+    fun redo() = restoreDrawing(redo = true)
+
+    /** Commands are sparse and session-only; saving changes the baseline without clearing history. */
+    private fun drawingEdit(
+        selectAdded: Boolean = false,
+        build: (AppUiState, ProjectDocument) -> EditCommand,
+    ): Boolean {
+        val current = state.value
+        if (current.busy) return false
+        val document = current.document ?: return false
+        return try {
+            val command = build(current, document)
+            val changed = history.execute(document, command)
+            publishDrawing(current, changed, if (selectAdded && !command.isEmpty) command.addedElementIds else current.selectedIds)
+            true
+        } catch (error: Exception) {
+            mutableState.update { it.copy(error = error.message?.takeIf(String::isNotBlank) ?: "The drawing could not be changed.") }
+            false
+        }
+    }
+
+    private fun restoreDrawing(redo: Boolean) {
+        val current = state.value
+        if (current.busy) return
+        val document = current.document ?: return
+        try {
+            val changed = if (redo) history.redo(document) else history.undo(document)
+            publishDrawing(current, changed, current.selectedIds)
+        } catch (error: Exception) {
+            mutableState.update { it.copy(error = error.message?.takeIf(String::isNotBlank) ?: "The drawing history could not be restored.") }
+        }
+    }
+
+    private fun publishDrawing(current: AppUiState, document: ProjectDocument, selected: Set<ElementId>) {
+        val existing = document.elements.mapTo(HashSet()) { it.id }
+        mutableState.value = current.copy(
+            document = document,
+            dirty = document != savedDocument,
+            selectedIds = selected.intersect(existing),
+            canUndo = history.canUndo,
+            canRedo = history.canRedo,
+            canPaste = clipboard.isNotEmpty(),
+            error = null,
+            notice = null,
+        )
+    }
+
+    private fun drawingLayer(document: ProjectDocument, lineWeight: Double): Pair<ProjectDocument, Layer> {
+        document.layers.firstOrNull { it.visible && !it.locked }?.let { return document to it }
+        val names = document.layers.mapTo(HashSet()) { it.name }
+        var name = "Drawing"
+        var suffix = 2
+        while (name in names) name = "Drawing ${suffix++}"
+        val layer = Layer(LayerId(UUID.randomUUID().toString()), document.project.id, name, lineWeightMm = lineWeight)
+        return document.copy(layers = document.layers + layer) to layer
     }
 
     fun saveIfDirty() {
@@ -227,6 +387,7 @@ class AppViewModel(
     private suspend fun persistCurrent(): Boolean {
         val snapshot = state.value.document ?: return false
         val saved = projects.save(snapshot, state.value.settings.backupEnabled)
+        savedDocument = saved
         mutableState.update { current ->
             if (current.document == snapshot) current.copy(document = saved, dirty = false)
             else current.copy(dirty = true)
@@ -247,10 +408,18 @@ class AppViewModel(
     }
 
     private fun showProject(document: ProjectDocument) {
+        savedDocument = document
+        history.clear()
+        history.setLimit(state.value.settings.undoLimit)
+        clipboard = emptyList()
+        pasteSequence = 0L
         savedState["projectId"] = document.project.id.value
         savedState["screen"] = AppScreen.PROJECT.name
         mutableState.update {
-            it.copy(screen = AppScreen.PROJECT, document = document, dirty = false, failedProjectId = null)
+            it.copy(
+                screen = AppScreen.PROJECT, document = document, dirty = false, failedProjectId = null,
+                selectedIds = emptySet(), canUndo = false, canRedo = false, canPaste = false,
+            )
         }
     }
 
