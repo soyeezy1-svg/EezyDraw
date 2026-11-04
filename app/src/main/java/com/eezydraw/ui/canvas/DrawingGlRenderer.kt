@@ -2,10 +2,12 @@ package com.eezydraw.ui.canvas
 
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
+import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.SceneChunk
 import com.eezydraw.core.geometry.Viewport2D
+import com.eezydraw.core.model.Bounds3
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.Projection
 import java.nio.ByteBuffer
@@ -17,11 +19,13 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.math.tan
 
 /**
@@ -39,13 +43,17 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     private var positionAttribute = -1
     private var colorAttribute = -1
     private var matrixUniform = -1
+    private var modelUniform = -1
     private var offsetUniform = -1
     private var darkUniform = -1
+    private var selectionUniform = -1
     private var width = 1
     private var height = 1
     private var drawingLineWidth = 1f
     private var uploadedScene: DrawingScene? = null
     private var chunks = emptyList<GpuChunk>()
+    private var uploadedSelectionScene: DrawingScene? = null
+    private var selectionChunks = emptyList<GpuChunk>()
     private var gridBuffer = 0
     private var gridVertexCount = 0
     private var gridFrame: CanvasFrame? = null
@@ -54,6 +62,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     private var staging = nativeFloats(MAX_GRID_FLOATS)
     private val gridVertices = FloatArray(MAX_GRID_FLOATS)
     private val frustumPlanes = DoubleArray(24)
+    private val visibleBounds = DoubleArray(6)
 
     fun update(value: CanvasFrame) { frame.set(value) }
     fun setScene(value: DrawingScene) { scene.set(value) }
@@ -67,7 +76,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         program = 0
         gridBuffer = 0
         chunks = emptyList()
+        selectionChunks = emptyList()
         uploadedScene = null
+        uploadedSelectionScene = null
         gridFrame = null
         gridVertexCount = 0
         if (disposed.get()) return
@@ -76,10 +87,14 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             positionAttribute = GLES20.glGetAttribLocation(program, "aPosition")
             colorAttribute = GLES20.glGetAttribLocation(program, "aColor")
             matrixUniform = GLES20.glGetUniformLocation(program, "uMatrix")
+            modelUniform = GLES20.glGetUniformLocation(program, "uModel")
             offsetUniform = GLES20.glGetUniformLocation(program, "uOffset")
             darkUniform = GLES20.glGetUniformLocation(program, "uDark")
+            selectionUniform = GLES20.glGetUniformLocation(program, "uSelection")
             check(positionAttribute >= 0 && colorAttribute >= 0 && matrixUniform >= 0 &&
-                offsetUniform >= 0 && darkUniform >= 0) { "Required drawing shader inputs are unavailable" }
+                modelUniform >= 0 && offsetUniform >= 0 && darkUniform >= 0 && selectionUniform >= 0) {
+                "Required drawing shader inputs are unavailable"
+            }
             val ids = IntArray(1)
             GLES20.glGenBuffers(1, ids, 0)
             gridBuffer = ids[0]
@@ -119,6 +134,8 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
 
         val pendingScene = scene.get()
         if (pendingScene !== uploadedScene && !uploadScene(pendingScene)) return
+        if (current.selectionScene !== uploadedSelectionScene &&
+            !uploadScene(current.selectionScene, selection = true)) return
 
         val origin = if (current.is3D) current.orbit.target else
             Point3(current.viewport.center.x, current.viewport.center.y)
@@ -130,7 +147,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         } else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glUseProgram(program)
         GLES20.glUniformMatrix4fv(matrixUniform, 1, false, matrix, 0)
+        GLES20.glUniformMatrix4fv(modelUniform, 1, false, IDENTITY_MATRIX, 0)
         GLES20.glUniform1f(darkUniform, if (current.dark) 1f else 0f)
+        GLES20.glUniform1f(selectionUniform, 0f)
         GLES20.glEnableVertexAttribArray(positionAttribute)
         GLES20.glEnableVertexAttribArray(colorAttribute)
 
@@ -146,26 +165,56 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glLineWidth(drawingLineWidth)
         val halfWidth = width / (2 * current.viewport.pixelsPerMetre)
         val halfHeight = height / (2 * current.viewport.pixelsPerMetre)
-        for (gpu in chunks) {
-            val chunk = gpu.source
-            if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
-            if (current.is3D) {
-                if (!inFrustum(chunk, origin)) continue
-            } else {
-                val bounds = chunk.bounds
-                if (bounds.max.x - origin.x < -halfWidth || bounds.min.x - origin.x > halfWidth ||
-                    bounds.max.y - origin.y < -halfHeight || bounds.min.y - origin.y > halfHeight) continue
+        drawChunks(chunks, current, origin, halfWidth, halfHeight)
+
+        if (selectionChunks.isNotEmpty()) {
+            val delta = current.selectionDelta
+            val model = delta?.linearMatrix() ?: IDENTITY_MATRIX
+            if (model.all { it.isFinite() }) {
+                GLES20.glUniformMatrix4fv(modelUniform, 1, false, model, 0)
+                GLES20.glUniform1f(selectionUniform, 1f)
+                drawChunks(selectionChunks, current, origin, halfWidth, halfHeight, delta)
             }
-            val x = (chunk.origin.x - origin.x).toFloat()
-            val y = (chunk.origin.y - origin.y).toFloat()
-            val z = if (current.is3D) (chunk.origin.z - origin.z).toFloat() else 0f
-            if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
-            GLES20.glUniform3f(offsetUniform, x, y, z)
-            drawBuffer(gpu.buffer, chunk.vertices.size / FLOATS_PER_VERTEX)
         }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         GLES20.glDisableVertexAttribArray(positionAttribute)
         GLES20.glDisableVertexAttribArray(colorAttribute)
+    }
+
+    /** The small selected batch changes uniforms during handle drags, never its vertex buffers. */
+    private fun drawChunks(
+        batches: List<GpuChunk>,
+        current: CanvasFrame,
+        origin: Point3,
+        halfWidth: Double,
+        halfHeight: Double,
+        delta: EditDelta? = null,
+    ) {
+        val c = if (delta == null) 1.0 else cos(delta.rotationZ) * delta.scale
+        val s = if (delta == null) 0.0 else sin(delta.rotationZ) * delta.scale
+        for (gpu in batches) {
+            val chunk = gpu.source
+            if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
+            boundsRelativeToCamera(chunk.bounds, origin, delta, c, s)
+            if (current.is3D) {
+                if (!inFrustum()) continue
+            } else {
+                if (visibleBounds[3] < -halfWidth || visibleBounds[0] > halfWidth ||
+                    visibleBounds[4] < -halfHeight || visibleBounds[1] > halfHeight) continue
+            }
+            val transformedOrigin = if (delta == null) chunk.origin else try {
+                delta.apply(chunk.origin)
+            } catch (_: IllegalArgumentException) {
+                // Extremely large finite user input can overflow a transformed project coordinate.
+                continue
+            }
+            val x = (transformedOrigin.x - origin.x).toFloat()
+            val y = (transformedOrigin.y - origin.y).toFloat()
+            val z = if (current.is3D) (transformedOrigin.z - origin.z).toFloat() else 0f
+            if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
+            GLES20.glUniform3f(offsetUniform, x, y, z)
+            drawBuffer(gpu.buffer, chunk.vertices.size / FLOATS_PER_VERTEX)
+        }
     }
 
     /** Called on the GL thread, or reclaimed by EGL itself when a disposed surface is detached. */
@@ -175,6 +224,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         GLES20.glUseProgram(0)
         deleteChunkBuffers()
+        deleteChunkBuffers(selection = true)
         if (gridBuffer != 0) GLES20.glDeleteBuffers(1, intArrayOf(gridBuffer), 0)
         if (program != 0) GLES20.glDeleteProgram(program)
         gridBuffer = 0
@@ -182,19 +232,22 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         positionAttribute = -1
         colorAttribute = -1
         matrixUniform = -1
+        modelUniform = -1
         offsetUniform = -1
         darkUniform = -1
+        selectionUniform = -1
         uploadedScene = null
+        uploadedSelectionScene = null
         gridFrame = null
         gridVertexCount = 0
     }
 
     /** Publish the new GPU scene only after every batch has uploaded successfully. */
-    private fun uploadScene(value: DrawingScene?): Boolean {
-        deleteChunkBuffers()
-        uploadedScene = null
+    private fun uploadScene(value: DrawingScene?, selection: Boolean = false): Boolean {
+        deleteChunkBuffers(selection)
+        if (selection) uploadedSelectionScene = null else uploadedScene = null
         if (value == null || value.chunks.isEmpty()) {
-            uploadedScene = value
+            if (selection) uploadedSelectionScene = value else uploadedScene = value
             return true
         }
         val ids = IntArray(value.chunks.size)
@@ -212,8 +265,13 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
                 checkGlUpload("uploading drawing batch ${index + 1} of ${ids.size}")
                 uploaded += GpuChunk(chunk, id)
             }
-            chunks = uploaded
-            uploadedScene = value
+            if (selection) {
+                selectionChunks = uploaded
+                uploadedSelectionScene = value
+            } else {
+                chunks = uploaded
+                uploadedScene = value
+            }
             return true
         } catch (error: IllegalStateException) {
             // The transaction owns every generated name, including buffers not reached by the loop.
@@ -235,11 +293,12 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         }
     }
 
-    private fun deleteChunkBuffers() {
-        if (chunks.isNotEmpty()) {
-            val ids = IntArray(chunks.size) { chunks[it].buffer }
+    private fun deleteChunkBuffers(selection: Boolean = false) {
+        val batches = if (selection) selectionChunks else chunks
+        if (batches.isNotEmpty()) {
+            val ids = IntArray(batches.size) { batches[it].buffer }
             GLES20.glDeleteBuffers(ids.size, ids, 0)
-            chunks = emptyList()
+            if (selection) selectionChunks = emptyList() else chunks = emptyList()
         }
     }
 
@@ -269,14 +328,53 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         }
     }
 
-    private fun inFrustum(chunk: SceneChunk, origin: Point3): Boolean {
-        val bounds = chunk.bounds
-        val minX = bounds.min.x - origin.x
-        val minY = bounds.min.y - origin.y
-        val minZ = bounds.min.z - origin.z
-        val maxX = bounds.max.x - origin.x
-        val maxY = bounds.max.y - origin.y
-        val maxZ = bounds.max.z - origin.z
+    /**
+     * Culling follows the preview too: a selected batch can move into view from outside the old
+     * bounds. Eight corners are transformed in Double; the reusable result avoids per-batch arrays.
+     */
+    private fun boundsRelativeToCamera(
+        bounds: Bounds3,
+        origin: Point3,
+        delta: EditDelta?,
+        c: Double,
+        s: Double,
+    ) {
+        if (delta == null) {
+            visibleBounds[0] = bounds.min.x - origin.x
+            visibleBounds[1] = bounds.min.y - origin.y
+            visibleBounds[2] = bounds.min.z - origin.z
+            visibleBounds[3] = bounds.max.x - origin.x
+            visibleBounds[4] = bounds.max.y - origin.y
+            visibleBounds[5] = bounds.max.z - origin.z
+            return
+        }
+        for (axis in 0..2) {
+            visibleBounds[axis] = Double.POSITIVE_INFINITY
+            visibleBounds[axis + 3] = Double.NEGATIVE_INFINITY
+        }
+        for (corner in 0 until 8) {
+            val x = (if (corner and 1 == 0) bounds.min.x else bounds.max.x) - delta.pivot.x
+            val y = (if (corner and 2 == 0) bounds.min.y else bounds.max.y) - delta.pivot.y
+            val z = (if (corner and 4 == 0) bounds.min.z else bounds.max.z) - delta.pivot.z
+            val tx = delta.pivot.x + delta.translation.x + c * x - s * y - origin.x
+            val ty = delta.pivot.y + delta.translation.y + s * x + c * y - origin.y
+            val tz = delta.pivot.z + delta.translation.z + delta.scale * z - origin.z
+            visibleBounds[0] = min(visibleBounds[0], tx)
+            visibleBounds[1] = min(visibleBounds[1], ty)
+            visibleBounds[2] = min(visibleBounds[2], tz)
+            visibleBounds[3] = max(visibleBounds[3], tx)
+            visibleBounds[4] = max(visibleBounds[4], ty)
+            visibleBounds[5] = max(visibleBounds[5], tz)
+        }
+    }
+
+    private fun inFrustum(): Boolean {
+        val minX = visibleBounds[0]
+        val minY = visibleBounds[1]
+        val minZ = visibleBounds[2]
+        val maxX = visibleBounds[3]
+        val maxY = visibleBounds[4]
+        val maxZ = visibleBounds[5]
         for (plane in 0 until 6) {
             val start = plane * 4
             val x = frustumPlanes[start]
@@ -290,7 +388,12 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     }
 
     private fun updateGrid(current: CanvasFrame) {
-        if (gridFrame == current && gridWidth == width && gridHeight == height) return
+        val previous = gridFrame
+        // Selection and handle motion do not invalidate the construction grid.
+        if (previous != null && previous.viewport == current.viewport && previous.orbit == current.orbit &&
+            previous.is3D == current.is3D && previous.gridSpacing == current.gridSpacing &&
+            previous.dark == current.dark && previous.floorElevation == current.floorElevation &&
+            gridWidth == width && gridHeight == height) return
         gridFrame = current
         gridWidth = width
         gridHeight = height
@@ -428,24 +531,35 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         const val MAX_GRID_FLOATS = MAX_GRID_LINES * 2 * FLOATS_PER_VERTEX
         const val MIN_GRID_PIXELS = 16.0
 
+        val IDENTITY_MATRIX = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+
         fun nativeFloats(size: Int): FloatBuffer = ByteBuffer.allocateDirect(size * FLOAT_BYTES)
             .order(ByteOrder.nativeOrder()).asFloatBuffer()
 
         const val VERTEX_SHADER = """
             precision highp float;
             uniform mat4 uMatrix;
+            uniform mat4 uModel;
             uniform vec3 uOffset;
             uniform float uDark;
+            uniform float uSelection;
             attribute vec3 aPosition;
             attribute vec4 aColor;
             varying lowp vec4 vColor;
             void main() {
-                gl_Position = uMatrix * vec4(aPosition + uOffset, 1.0);
+                vec3 position = (uModel * vec4(aPosition, 1.0)).xyz + uOffset;
+                gl_Position = uMatrix * vec4(position, 1.0);
                 vec3 color = aColor.rgb;
                 float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
                 if (uDark > 0.5 && luminance < 0.12) {
                     color = clamp(color + vec3(0.74 - luminance), 0.0, 1.0);
                 }
+                color = mix(color, vec3(0.11, 0.48, 1.0), uSelection);
                 vColor = vec4(color, aColor.a);
             }
         """

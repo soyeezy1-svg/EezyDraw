@@ -21,8 +21,9 @@ data class Rotation3(val x: Double = 0.0, val y: Double = 0.0, val z: Double = 0
 }
 
 @Serializable
+/** Signed nonzero scales preserve mirrored geometry without rewriting local coordinates. */
 data class Scale3(val x: Double = 1.0, val y: Double = 1.0, val z: Double = 1.0) {
-    init { require(x.isFinite() && y.isFinite() && z.isFinite() && x > 0 && y > 0 && z > 0) }
+    init { require(x.isFinite() && y.isFinite() && z.isFinite() && x != 0.0 && y != 0.0 && z != 0.0) }
 }
 
 /** Local geometry is scaled, rotated, then translated into project coordinates. */

@@ -54,4 +54,16 @@ class HelpScreenTest {
         assertTrue(sent.single().endsWith("Please improve routing"))
         assertTrue(sent.single().startsWith(context.getString(R.string.help_feedback_subject)))
     }
+
+    @Test
+    fun drawingGuideAndKeyboardReferenceAreReachable() {
+        compose.setContent { EezyDrawTheme { HelpScreen({}, {}) } }
+        listOf(R.string.help_shapes_title, R.string.help_annotations_title, R.string.help_primitives_title,
+            R.string.help_editing_title, R.string.help_history_title).forEach { title ->
+            compose.onNodeWithText(context.getString(title)).performScrollTo().assertIsDisplayed()
+        }
+        compose.onNodeWithTag("help_section_gestures").performClick()
+        compose.onNodeWithText(context.getString(R.string.help_shortcuts_title)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.help_shortcuts_body)).performScrollTo().assertIsDisplayed()
+    }
 }

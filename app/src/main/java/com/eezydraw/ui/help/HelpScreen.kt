@@ -90,6 +90,11 @@ fun HelpScreen(
                     when (section) {
                         HelpSection.GUIDE -> {
                             item { HelpArticle(R.string.help_create_title, R.string.help_create_body) }
+                            item { HelpArticle(R.string.help_shapes_title, R.string.help_shapes_body) }
+                            item { HelpArticle(R.string.help_annotations_title, R.string.help_annotations_body) }
+                            item { HelpArticle(R.string.help_primitives_title, R.string.help_primitives_body) }
+                            item { HelpArticle(R.string.help_editing_title, R.string.help_editing_body) }
+                            item { HelpArticle(R.string.help_history_title, R.string.help_history_body) }
                             item { HelpArticle(R.string.help_save_title, R.string.help_save_body) }
                             item { HelpArticle(R.string.help_open_title, R.string.help_open_body) }
                             item { HelpArticle(R.string.help_defaults_title, R.string.help_defaults_body) }

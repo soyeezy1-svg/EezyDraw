@@ -53,6 +53,7 @@ import com.eezydraw.storage.ProjectExchange
 import com.eezydraw.ui.help.HelpScreen
 import com.eezydraw.ui.canvas.DrawingCanvasScreen
 import com.eezydraw.ui.canvas.CanvasFrame
+import com.eezydraw.ui.canvas.CanvasEditorActions
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.ui.projects.CreateProjectScreen
 import com.eezydraw.ui.projects.ProjectDetailsScreen
@@ -146,6 +147,12 @@ fun EezyDrawApp(
                                         { exportFile.launch(ProjectExchange.fileName(document, state.settings)) },
                                         { viewModel.navigate(AppScreen.PROJECT_DETAILS) }, viewModel::backFromProject,
                                         surface = canvasSurface,
+                                        editor = CanvasEditorActions(
+                                            state.selectedIds,state.canUndo,state.canRedo,state.canPaste,
+                                            viewModel::addSketch,viewModel::select,viewModel::transformSelection,viewModel::updateProperties,
+                                            viewModel::copySelection,viewModel::pasteSelection,viewModel::deleteSelection,viewModel::undo,viewModel::redo,
+                                            viewModel::mirrorSelection,viewModel::arraySelection,
+                                        ),
                                     )
                                 }
                             } ?: LoadingIndicator()

@@ -3,12 +3,13 @@ package com.eezydraw.ui.canvas
 import android.content.Context
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
+import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.Viewport2D
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Immutable camera state; document geometry is supplied independently through [setScene]. */
+/** Immutable camera/preview state; the static document is supplied independently through [setScene]. */
 data class CanvasFrame(
     val viewport: Viewport2D,
     val orbit: OrbitCamera,
@@ -18,6 +19,9 @@ data class CanvasFrame(
     val showGrid: Boolean = true,
     val dark: Boolean = false,
     val floorElevation: Double = 0.0,
+    /** Selected geometry stays immutable during a drag; only [selectionDelta] changes. */
+    val selectionScene: DrawingScene? = null,
+    val selectionDelta: EditDelta? = null,
 ) {
     init {
         require(gridSpacing.isFinite() && gridSpacing > 0)
