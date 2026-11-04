@@ -28,8 +28,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.DrawingTool
 import com.eezydraw.core.editing.ToolOptions
+import com.eezydraw.core.editing.supportsDefaultPlacement
 import com.eezydraw.core.model.LengthUnit
 
 /** Compact launcher keeps the canvas clear; expanding never changes the current tool. */
@@ -157,6 +160,29 @@ private fun ToolChoices(tools: List<DrawingTool>, selected: DrawingTool, onTool:
 
 @Composable
 private fun ToolOptionsFields(tool: DrawingTool, options: ToolOptions, units: LengthUnit, onOptions: (ToolOptions) -> Unit) {
+    if (supportsDefaultPlacement(tool)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(!options.useDefaultDimensions, { onOptions(options.copy(useDefaultDimensions = !it)) },
+                Modifier.testTag("tool_draw_by_points"))
+            Text(stringResource(R.string.editing_draw_by_points))
+        }
+        Text(stringResource(if (options.useDefaultDimensions) R.string.editing_default_placement_hint
+            else R.string.editing_point_placement_hint), style = MaterialTheme.typography.bodySmall)
+        if (options.useDefaultDimensions) {
+            val radial = tool in setOf(DrawingTool.CIRCLE, DrawingTool.SPHERE, DrawingTool.CYLINDER, DrawingTool.CONE)
+            OptionLength(options.width, units, if (radial) R.string.editing_default_diameter else R.string.editing_default_width,
+                "tool_default_width", tool) { onOptions(options.copy(width = it)) }
+            if (!radial) OptionLength(options.depth, units, R.string.editing_default_depth,
+                "tool_default_depth", tool) { onOptions(options.copy(depth = it)) }
+        }
+    }
+    if (tool == DrawingTool.SELECT) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(options.keepProportions, { onOptions(options.copy(keepProportions = it)) },
+                Modifier.testTag("tool_keep_proportions"))
+            Text(stringResource(R.string.editing_keep_proportions))
+        }
+    }
     if (tool == DrawingTool.TEXT || tool == DrawingTool.LEADER) {
         var text by rememberSaveable(tool, options.text) { mutableStateOf(options.text) }
         val invalid = text.isBlank() || text.length > 512
@@ -188,11 +214,28 @@ private fun ToolOptionsFields(tool: DrawingTool, options: ToolOptions, units: Le
 @Composable
 private fun OptionLength(value: Double, units: LengthUnit, label: Int, tag: String, tool: DrawingTool, onValue: (Double) -> Unit) {
     val factor = editingMetresPerUnit(units)
-    var text by rememberSaveable(tool, units, value) { mutableStateOf(editingNumber(value / factor)) }
+    var text by rememberSaveable(tool, tag) { mutableStateOf(editingNumber(value / factor)) }
+    var accepted by rememberSaveable(tool, tag) { mutableDoubleStateOf(value) }
+    var displayedUnits by rememberSaveable(tool, tag) { mutableStateOf(units) }
+    LaunchedEffect(value, units) {
+        val externalChange = value != accepted
+        val unitChange = displayedUnits != units
+        // Locally accepted edits keep their raw form (including a trailing decimal separator).
+        // Switching units reformats valid input from metres; invalid drafts remain editable.
+        val validDraft = text.toDoubleOrNull()?.let { it.isFinite() && it > 0.0 } == true
+        if (externalChange || unitChange && validDraft) {
+            text = editingNumber(value / factor)
+        }
+        accepted = value
+        displayedUnits = units
+    }
     val canonical = text.toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it > 0.0 }
     EditingNumberField(text, { next ->
         text = next
-        next.toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it > 0.0 }?.let(onValue)
+        next.toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it > 0.0 }?.let {
+            accepted = it
+            onValue(it)
+        }
     }, stringResource(label, stringResource(editingUnitLabel(units))), tag, canonical == null,
         error = stringResource(R.string.editing_positive_error))
 }

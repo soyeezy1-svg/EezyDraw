@@ -5,4 +5,13 @@
     <string name="gizmo_move_z">Move along Z</string>
     <string name="gizmo_rotate_z">Rotate around Z</string>
     <string name="gizmo_scale">Scale uniformly</string>
+    <string name="gizmo_resize_width_negative">Resize width from the negative side</string>
+    <string name="gizmo_resize_width_positive">Resize width from the positive side</string>
+    <string name="gizmo_resize_depth_negative">Resize depth from the negative side</string>
+    <string name="gizmo_resize_depth_positive">Resize depth from the positive side</string>
+    <string name="gizmo_resize_corner_min_min">Resize width and depth from the negative corner</string>
+    <string name="gizmo_resize_corner_max_min">Resize width and depth from the positive width corner</string>
+    <string name="gizmo_resize_corner_max_max">Resize width and depth from the positive corner</string>
+    <string name="gizmo_resize_corner_min_max">Resize width and depth from the positive depth corner</string>
+    <string name="gizmo_resize_height">Resize height from the top</string>
 </resources>

@@ -144,6 +144,12 @@ fun SettingsScreen(
                 NumericField("autosave", R.string.settings_autosave, draft, errors, input, integer = true,
                     help = R.string.settings_autosave_help)
             }
+            item {
+                SettingSwitch(
+                    stringResource(R.string.settings_show_autosave_notification), current.showAutosaveNotification,
+                    { update(current.copy(showAutosaveNotification = it)) }, "settings_show_autosave_notification",
+                )
+            }
             item { SectionHeading(stringResource(R.string.settings_project_defaults)) }
             item {
                 ChoiceField(

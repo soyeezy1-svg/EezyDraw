@@ -19,13 +19,11 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
-import kotlin.math.sin
 import kotlin.math.tan
 
 /**
@@ -190,12 +188,11 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         halfHeight: Double,
         delta: EditDelta? = null,
     ) {
-        val c = if (delta == null) 1.0 else cos(delta.rotationZ) * delta.scale
-        val s = if (delta == null) 0.0 else sin(delta.rotationZ) * delta.scale
+        val linear = delta?.linearMatrixDouble()
         for (gpu in batches) {
             val chunk = gpu.source
             if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
-            boundsRelativeToCamera(chunk.bounds, origin, delta, c, s)
+            boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
             if (current.is3D) {
                 if (!inFrustum()) continue
             } else {
@@ -336,10 +333,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         bounds: Bounds3,
         origin: Point3,
         delta: EditDelta?,
-        c: Double,
-        s: Double,
+        linear: DoubleArray?,
     ) {
-        if (delta == null) {
+        if (delta == null || linear == null) {
             visibleBounds[0] = bounds.min.x - origin.x
             visibleBounds[1] = bounds.min.y - origin.y
             visibleBounds[2] = bounds.min.z - origin.z
@@ -356,9 +352,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             val x = (if (corner and 1 == 0) bounds.min.x else bounds.max.x) - delta.pivot.x
             val y = (if (corner and 2 == 0) bounds.min.y else bounds.max.y) - delta.pivot.y
             val z = (if (corner and 4 == 0) bounds.min.z else bounds.max.z) - delta.pivot.z
-            val tx = delta.pivot.x + delta.translation.x + c * x - s * y - origin.x
-            val ty = delta.pivot.y + delta.translation.y + s * x + c * y - origin.y
-            val tz = delta.pivot.z + delta.translation.z + delta.scale * z - origin.z
+            val tx = delta.pivot.x + delta.translation.x + linear[0] * x + linear[4] * y + linear[8] * z - origin.x
+            val ty = delta.pivot.y + delta.translation.y + linear[1] * x + linear[5] * y + linear[9] * z - origin.y
+            val tz = delta.pivot.z + delta.translation.z + linear[2] * x + linear[6] * y + linear[10] * z - origin.z
             visibleBounds[0] = min(visibleBounds[0], tx)
             visibleBounds[1] = min(visibleBounds[1], ty)
             visibleBounds[2] = min(visibleBounds[2], tz)

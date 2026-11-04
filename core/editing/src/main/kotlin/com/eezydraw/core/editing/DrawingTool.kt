@@ -24,10 +24,25 @@ enum class DrawingTool(val minimumPoints: Int, val autoFinishPoints: Int?) {
     PYRAMID(2, 2),
 }
 
-/** Lengths are canonical metres. Leader lettering uses the model's fixed preview height. */
+/**
+ * Lengths are canonical metres; display-unit and pixel conversion belongs to the UI boundary.
+ * Width is a diameter for round tools. Leader lettering retains its fixed preview height.
+ */
 data class ToolOptions(
     val text: String = "Text",
     val textHeight: Double = 0.25,
-    val height: Double = 3.0,
+    val height: Double = 1.0,
     val closed: Boolean = false,
+    val width: Double = 1.0,
+    val depth: Double = 1.0,
+    val useDefaultDimensions: Boolean = true,
+    val keepProportions: Boolean = false,
 )
+
+/** Closed shapes can be inserted at a single location using explicit physical dimensions. */
+fun supportsDefaultPlacement(tool: DrawingTool): Boolean = when (tool) {
+    DrawingTool.CIRCLE, DrawingTool.ELLIPSE, DrawingTool.RECTANGLE, DrawingTool.POLYGON,
+    DrawingTool.TRIANGLE, DrawingTool.BOX, DrawingTool.SPHERE, DrawingTool.CYLINDER,
+    DrawingTool.CONE, DrawingTool.PYRAMID -> true
+    else -> false
+}

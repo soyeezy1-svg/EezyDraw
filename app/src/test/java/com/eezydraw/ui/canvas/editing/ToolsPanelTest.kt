@@ -15,6 +15,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -24,12 +27,15 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import com.eezydraw.core.editing.DrawingTool
 import com.eezydraw.core.editing.ToolOptions
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.ui.theme.EezyDrawTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -126,6 +132,91 @@ class ToolsPanelTest {
         assertEquals(1, canvasGestures)
     }
 
+    @Test
+    fun defaultDimensionsStayPhysicalAcrossEveryDisplayUnitAndPlacementToggle() {
+        var options by mutableStateOf(ToolOptions())
+        var units by mutableStateOf(LengthUnit.MILLIMETRES)
+        compose.setContent { EezyDrawTheme {
+            Panel(DrawingTool.BOX, options, onOptions = { options = it }, units = units)
+        } }
+        compose.onNodeWithTag("tools_expand").performClick()
+        LengthUnit.entries.forEach { next ->
+            compose.runOnIdle { units = next }
+            compose.waitForIdle()
+            listOf("tool_default_width", "tool_default_depth", "tool_solid_height").forEach { tag ->
+                compose.onNodeWithTag(tag).performScrollTo()
+                assertEquals(1.0 / editingMetresPerUnit(next), inputNumber(tag), 1e-9)
+            }
+            assertEquals(1.0, options.width, 0.0)
+            assertEquals(1.0, options.depth, 0.0)
+            assertEquals(1.0, options.height, 0.0)
+        }
+        compose.runOnIdle { units = LengthUnit.MILLIMETRES }
+        compose.onNodeWithTag("tool_default_width").performScrollTo().performTextReplacement("2400")
+        compose.onNodeWithTag("tool_default_depth").performScrollTo().performTextReplacement("1800")
+        compose.onNodeWithTag("tool_solid_height").performScrollTo().performTextReplacement("3200")
+        compose.onNodeWithTag("tool_draw_by_points").performScrollTo().assertIsOff().performClick().assertIsOn()
+        assertFalse(options.useDefaultDimensions)
+        compose.onNodeWithTag("tool_default_width").assertDoesNotExist()
+        compose.onNodeWithTag("tool_draw_by_points").performClick().assertIsOff()
+        compose.onNodeWithTag("tool_default_width").assertTextContains("2400")
+        compose.onNodeWithTag("tool_default_depth").performScrollTo().assertTextContains("1800")
+        compose.onNodeWithTag("tool_solid_height").performScrollTo().assertTextContains("3200")
+        assertEquals(2.4, options.width, 1e-12)
+        assertEquals(1.8, options.depth, 1e-12)
+        assertEquals(3.2, options.height, 1e-12)
+    }
+
+    @Test
+    fun dimensionDraftRetainsDecimalInputAndInvalidTextAcrossRestoration() {
+        var options by mutableStateOf(ToolOptions())
+        var units by mutableStateOf(LengthUnit.METRES)
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { EezyDrawTheme {
+            Panel(DrawingTool.RECTANGLE, options, onOptions = { options = it }, units = units)
+        } }
+        compose.onNodeWithTag("tools_expand").performClick()
+        compose.onNodeWithTag("tool_default_width").performScrollTo().performTextReplacement("2.")
+        compose.onNodeWithTag("tool_default_width").assertTextContains("2.")
+        assertEquals(2.0, options.width, 0.0)
+        compose.onNodeWithTag("tool_default_width").performTextReplacement("2.75")
+        assertEquals(2.75, options.width, 0.0)
+        compose.onNodeWithTag("tool_default_depth").performScrollTo().performTextReplacement("-")
+        assertEquals(1.0, options.depth, 0.0)
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("tool_default_depth").performScrollTo().assertTextContains("-")
+        compose.runOnIdle { units = LengthUnit.INCHES }
+        compose.onNodeWithTag("tool_default_depth").assertTextContains("-")
+        compose.onNodeWithTag("tool_default_width").performScrollTo()
+        assertEquals(2.75 / .0254, inputNumber("tool_default_width"), 1e-9)
+        assertEquals(2.75, options.width, 0.0)
+    }
+
+    @Test
+    fun roundSolidsExposeDiameterWithoutIndependentDepthAndSelectionExposesProportionLock() {
+        var tool by mutableStateOf(DrawingTool.SPHERE)
+        var options by mutableStateOf(ToolOptions())
+        compose.setContent { EezyDrawTheme {
+            Panel(tool, options, onOptions = { options = it })
+        } }
+        compose.onNodeWithTag("tools_expand").performClick()
+        compose.onNodeWithTag("tool_default_width").assertTextContains("Diameter", substring = true)
+        compose.onNodeWithTag("tool_default_depth").assertDoesNotExist()
+        compose.onNodeWithTag("tool_solid_height").assertDoesNotExist()
+        compose.onNodeWithTag("tool_default_width").performScrollTo().performTextReplacement("2000")
+        assertEquals(2.0, options.width, 0.0)
+        compose.runOnIdle { tool = DrawingTool.CYLINDER }
+        compose.onNodeWithTag("tool_default_width").assertTextContains("2000")
+        compose.onNodeWithTag("tool_default_depth").assertDoesNotExist()
+        compose.onNodeWithTag("tool_solid_height").assertExists()
+        compose.runOnIdle { tool = DrawingTool.SELECT }
+        compose.onNodeWithTag("tool_keep_proportions").assertIsOff().performClick().assertIsOn()
+        assertTrue(options.keepProportions)
+    }
+
+    private fun inputNumber(tag: String): Double = compose.onNodeWithTag(tag).fetchSemanticsNode()
+        .config[SemanticsProperties.EditableText].text.toDouble()
+
     @Composable
     private fun Panel(
         tool: DrawingTool = DrawingTool.SELECT,
@@ -138,7 +229,8 @@ class ToolsPanelTest {
         onCancel: () -> Unit = {},
         onCopy: () -> Unit = {},
         onDelete: () -> Unit = {},
-    ) = ToolsPanel(tool, options, LengthUnit.MILLIMETRES, selectedCount,
+        units: LengthUnit = LengthUnit.MILLIMETRES,
+    ) = ToolsPanel(tool, options, units, selectedCount,
         canUndo = false, canRedo = false, canPaste = false, canFinish = canFinish,
         onTool, onOptions, onFinish, onCancel, {}, {}, onCopy, {}, {}, {}, {}, onDelete, {})
 }

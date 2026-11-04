@@ -24,8 +24,9 @@ internal fun ConstructionPreview(
     val density = LocalDensity.current.density
     val livePoints = points + listOfNotNull(cursor?.let { Point3(it.x,it.y,floorZ) })
     val segments = remember(tool,options,points,cursor,floorZ,document.project.settings) {
-        if (livePoints.size >= tool.minimumPoints) runCatching {
-            val shape = createSketch(tool,livePoints,options)
+        val defaultPlacement = options.useDefaultDimensions && supportsDefaultPlacement(tool)
+        if (defaultPlacement && cursor != null || livePoints.size >= tool.minimumPoints) runCatching {
+            val shape = if (defaultPlacement) createDefaultSketch(tool,livePoints.last(),options) else createSketch(tool,livePoints,options)
             val layer = document.layers.firstOrNull()?.id ?: LayerId("preview")
             val element = Element(ElementId("construction-preview"),document.project.id,layer,
                 ElementBody.DrawingShape(shape.shape),transform = shape.transform)

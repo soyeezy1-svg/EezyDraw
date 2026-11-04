@@ -118,17 +118,29 @@ data = (C.c_float * 14)(*local_a, 1, 0, 0, 1, *local_b, 1, 0, 0, 1)
 proc('glBufferData', None, C.c_uint, C.c_ssize_t, C.c_void_p, C.c_uint)(0x8892, C.sizeof(data), data, 0x88E4)
 chunk_origin = (1e9, -2e9, 7.)
 pivot = (chunk_origin[0] + .125, chunk_origin[1] + .125, chunk_origin[2] + .25)
-def transformed(point, translation, angle, scale):
-    x, y, z = [point[i] - pivot[i] for i in range(3)]
-    c, s = math.cos(angle) * scale, math.sin(angle) * scale
-    return (pivot[0] + translation[0] + c*x - s*y,
-            pivot[1] + translation[1] + s*x + c*y,
-            pivot[2] + translation[2] + scale*z)
-def selected_preview(label, translation=(0,0,0), angle=0, scale=1):
-    c, s = math.cos(angle) * scale, math.sin(angle) * scale
-    model = [c,s,0,0, -s,c,0,0, 0,0,scale,0, 0,0,0,1]
+def linear_model(angle, scale, dimensions, axes):
+    cx, sx, cy, sy, cz, sz = (math.cos(axes[0]), math.sin(axes[0]),
+                              math.cos(axes[1]), math.sin(axes[1]),
+                              math.cos(axes[2]), math.sin(axes[2]))
+    basis = [[cy*cz,-cy*sz,sy], [cx*sz+sx*sy*cz,cx*cz-sx*sy*sz,-sx*cy],
+             [sx*sz-cx*sy*cz,sx*cz+cx*sy*sz,cx*cy]]
+    oriented = [[sum(basis[r][k]*dimensions[k]*scale*basis[c][k] for k in range(3))
+                 for c in range(3)] for r in range(3)]
+    co, si = math.cos(angle), math.sin(angle)
+    return [[co*oriented[0][c]-si*oriented[1][c] for c in range(3)],
+            [si*oriented[0][c]+co*oriented[1][c] for c in range(3)], oriented[2]]
+
+def transformed(point, translation, linear):
+    relative = [point[i] - pivot[i] for i in range(3)]
+    return tuple(pivot[i]+translation[i]+sum(linear[i][j]*relative[j] for j in range(3)) for i in range(3))
+
+def selected_preview(label, translation=(0,0,0), angle=0, scale=1, dimensions=(1,1,1), axes=(0,0,0)):
+    linear = linear_model(angle,scale,dimensions,axes)
+    model = [linear[0][0],linear[1][0],linear[2][0],0,
+             linear[0][1],linear[1][1],linear[2][1],0,
+             linear[0][2],linear[1][2],linear[2][2],0, 0,0,0,1]
     matrix_uniform(uniform(program, b'uModel'), 1, 0, (C.c_float * 16)(*model))
-    transformed_origin = transformed(chunk_origin, translation, angle, scale)
+    transformed_origin = transformed(chunk_origin, translation, linear)
     offset = [transformed_origin[i] - chunk_origin[i] for i in range(3)]
     set_offset(uniform(program, b'uOffset'), *offset)
     reset()
@@ -147,7 +159,7 @@ def selected_preview(label, translation=(0,0,0), angle=0, scale=1):
     expected = []
     for local in (local_a, local_b):
         world = tuple(chunk_origin[i] + local[i] for i in range(3))
-        point = transformed(world, translation, angle, scale)
+        point = transformed(world, translation, linear)
         expected.append(tuple((point[i] - chunk_origin[i] + 1) * 32 for i in range(2)))
     actual_bounds = (min(p[0] for p in lit), min(p[1] for p in lit), max(p[0] for p in lit), max(p[1] for p in lit))
     expected_bounds = (min(p[0] for p in expected), min(p[1] for p in expected), max(p[0] for p in expected), max(p[1] for p in expected))
@@ -158,10 +170,15 @@ preview_samples = [
     selected_preview('90-degree rotation', angle=math.pi/2),
     selected_preview('scale about nonzero pivot', scale=2),
     selected_preview('combined transform', (.125,.25,.25), math.pi/2, 1.5),
+    selected_preview('width only', dimensions=(1.5,1,1)),
+    selected_preview('depth only', dimensions=(1,1.5,1)),
+    selected_preview('height only', dimensions=(1,1,1.5)),
+    selected_preview('local XY corner resize', dimensions=(1.5,1.25,1), axes=(.2,.15,.4)),
+    selected_preview('rotated local height', dimensions=(1,1,1.5), axes=(.4,.25,.2)),
 ]
 error=proc('glGetError', C.c_uint)()
 assert error == 0, hex(error)
-print('Mesa EGL/GLES2 smoke passed: production shader compile/link, VBO layout/draw, dark contrast, preserved layer color, plan elevation projection, depth occlusion, selected translation/rotation/scale at distant origin, no GL errors.')
+print('Mesa EGL/GLES2 smoke passed: production shader compile/link, VBO layout/draw, dark contrast, preserved layer color, plan elevation projection, depth occlusion, selected translation/rotation/local dimension resizing at distant origin, no GL errors.')
 print('Samples:', dark_pixel,color_pixel,plan_pixel,depth_pixel)
 
 print('Selected preview samples:', preview_samples)
