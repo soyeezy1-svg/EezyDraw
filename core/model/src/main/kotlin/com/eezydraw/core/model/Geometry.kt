@@ -96,8 +96,18 @@ sealed interface Shape {
     }
 
     @Serializable @SerialName("dimension")
-    data class Dimension(val kind: DimensionKind, val anchors: List<Point3>, val labelOffset: Point3) : Shape {
-        init { require(anchors.size >= 2) }
+    data class Dimension(
+        val kind: DimensionKind,
+        val anchors: List<Point3>,
+        val labelOffset: Point3,
+        val measurement: MeasurementData? = null,
+    ) : Shape {
+        init {
+            require(anchors.size >= 2)
+            require(measurement == null || kind == DimensionKind.ALIGNED && anchors.size == 2) {
+                "Saved measurements require two aligned anchors."
+            }
+        }
     }
 
     @Serializable @SerialName("leader")

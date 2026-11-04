@@ -6,16 +6,16 @@ Validated on 2026-11-04 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned 
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 5 passed |
-| `:core:geometry:test` | 50 passed |
-| `:core:editing:test` | 87 passed |
-| `:core:data:testDebugUnitTest` | 11 passed |
-| `:app:testDebugUnitTest` | 81 passed |
+| `:core:model:test` | 11 passed |
+| `:core:geometry:test` | 66 passed |
+| `:core:editing:test` | 103 passed |
+| `:core:data:testDebugUnitTest` | 12 passed |
+| `:app:testDebugUnitTest` | 108 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **234 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **300 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -25,6 +25,12 @@ python3 scripts/gles_shader_smoke.py
 The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It reads the actual Kotlin shader sources and uses a surfaceless software GL context. Gradle XML/HTML reports are generated under each module's `build/test-results` and `build/reports`; lint reports are under `app/build/reports` and `core/data/build/reports`.
 
 ## Coverage and corrected issues
+
+- Twelve surface-builder regressions check actual primitive/body/route/library faces, concave polygons and holes, material/system colours, hidden layers/systems, signed XYZ normals, survey coordinates and bounded tessellation. Render-plan tests exercise all six mode passes, depth projection and inverse-transpose preview normals.
+- Movement tests cover the 52dp four-arrow control, separate axis handles, grid/geometry/ortho constraints, excluded selection/attached dimensions, 3D camera-plane depth, body-drag opt-in and one-step undo. Real-app workflows verify default navigation versus enabled object-body movement.
+- Persistent measurements separate 3D distance, PLAN offset, angles, XYZ and AFFL. Tests cover the 300mm/1200mm reference example, host-local/project-fixed anchors, copy/array/removal cleanup, label editing and undo, native archives, and per-project view/visibility restoration. The UI suite edits/hides/deletes saved measurements and checks each new panel.
+- PNG/PDF regressions decode real image bytes, check every display mode, camera framing, material colours, hidden-line occlusion, near-plane clipping, dimensions over fills, output limits, caller-owned streams and write failures. PDF output uses a real one-page PDF 1.4 object/xref structure with the same Flate-compressed RGB snapshot.
+- Integration checks repaired stale level selection after same-project reload and made Help navigation use lazy-list scrolling for newly added guide sections. Properties drafts survive collapse/full-screen restoration, while a new editing session starts from the current object values.
 
 - New sized shapes previously combined centimetre-scale picked footprints from the empty view with a fixed 3m solid height. Ten closed/solid tools now place physical one-metre defaults with a single snapped anchor; a sphere has a 0.5m radius. Tests vary all five display units, insertion pixels, zoom and survey coordinates, and compare Properties and rendered bounds. The empty view now spans 4m and first entry into 3D fits the current geometry.
 - Side controls change only width or depth, base corners change width/depth with an optional XY ratio lock, and the top control changes only height. Tests exercise every supported handle across all nineteen shape tools, preserve opposite edges/bases, and compare arbitrary XYZ rotations, mirrored scales, preview matrices and committed Properties. Full-app pointer tests cover all eight plan controls, top-height resizing, flat outlines, numeric Properties and save/reopen.
@@ -40,4 +46,4 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Device QA still required
 
-Compose tests substitute only the native surface; they do not establish physical tablet frame rates, GPU memory use or Android EGL lifecycle behavior. Run the [README manual QA plan](../README.md#manual-qa-plan) on API 26/35 devices, including native rendering, background/resume/context loss, stylus/touch, dense drawings, accessibility and SAF providers. Primitives use the existing wireframe renderer; construction uses level XY planes, and dimensions have fixed nonassociative anchors.
+Compose tests substitute only the native surface; they do not establish physical tablet frame rates, GPU memory use or Android EGL lifecycle behavior. Run the [README manual QA plan](../README.md#manual-qa-plan) on API 26/35 devices, including native rendering, background/resume/context loss, stylus/touch, dense drawings, accessibility and SAF providers. Wireframe and filled modes use the native renderer; construction uses level XY planes. Plain drawing-tool dimensions use fixed anchors and saved reference measurements follow their hosts. X-ray uses ordinary batch sorting, and Realistic supplies basic lighting rather than a physically based material system.

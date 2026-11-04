@@ -150,7 +150,7 @@ class ProjectStorageTest {
         val settingsRepository = RoomSettingsRepository(database)
         assertEquals(AppSettings(), settingsRepository.settings.first())
         val chosen = AppSettings(theme = ThemeMode.DARK, inputMode = InputMode.STYLUS, undoLimit = 250,
-            backupEnabled = false, showAutosaveNotification = true)
+            backupEnabled = false, showAutosaveNotification = true, bodyDragMovesSelection = true)
         settingsRepository.save(chosen)
         database.close()
         database = open()

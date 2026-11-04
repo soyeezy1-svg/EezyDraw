@@ -48,6 +48,14 @@ internal fun validateDocument(document: ProjectDocument) {
         valid(element.systemId == null || element.systemId in systems, "An element refers to a missing system.")
         valid(element.materialId == null || element.materialId in materials, "An element refers to a missing material.")
         when (val body = element.body) {
+            is ElementBody.DrawingShape -> {
+                val data = measurementShape(element)?.measurement
+                valid(data == null || data.anchors.all { anchor ->
+                    anchor.elementId == null || anchor.elementId != element.id && anchor.elementId in elements
+                }, "A measurement refers to a missing object.")
+                valid(data?.floorLevelId == null || data.floorLevelId in levels,
+                    "A measurement refers to a missing floor level.")
+            }
             is ElementBody.Component -> {
                 valid(body.libraryItemId in libraryItems, "A component definition is missing.")
                 val host = body.host

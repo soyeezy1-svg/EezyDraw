@@ -2,6 +2,8 @@ package com.eezydraw.ui.canvas.editing
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,6 +42,20 @@ fun PropertiesDialog(
     onApply: (ElementProperties) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    PropertiesEditor(properties, units, precision, onApply, onDismiss, dialog = true)
+}
+
+/** Shared atomic numeric draft for the modal editor and the collapsible canvas side panel. */
+@Composable
+fun PropertiesEditor(
+    properties: ElementProperties,
+    units: LengthUnit,
+    precision: Int,
+    onApply: (ElementProperties) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    dialog: Boolean = false,
+) {
     val factor = editingMetresPerUnit(units)
     val source = remember(properties) { listOf(
         properties.position.x, properties.position.y, properties.position.z,
@@ -68,50 +84,63 @@ fun PropertiesDialog(
         R.string.editing_property_width, R.string.editing_property_depth, R.string.editing_property_height)
     val tags = listOf("property_x", "property_y", "property_z", "property_rotation_x", "property_rotation_y",
         "property_rotation_z", "property_width", "property_depth", "property_height")
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.editing_properties)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                fields.forEachIndexed { index, value ->
-                    if (index % 3 == 0) {
-                        val heading = when (index) {
-                            0 -> stringResource(R.string.editing_property_position, stringResource(editingUnitLabel(units)))
-                            3 -> stringResource(R.string.editing_property_rotation)
-                            else -> stringResource(R.string.editing_property_size, stringResource(editingUnitLabel(units)))
-                        }
-                        Text(heading, style = MaterialTheme.typography.titleSmall)
+    val fieldsContent: @Composable () -> Unit = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            fields.forEachIndexed { index, value ->
+                if (index % 3 == 0) {
+                    val heading = when (index) {
+                        0 -> stringResource(R.string.editing_property_position, stringResource(editingUnitLabel(units)))
+                        3 -> stringResource(R.string.editing_property_rotation)
+                        else -> stringResource(R.string.editing_property_size, stringResource(editingUnitLabel(units)))
                     }
-                    val flat = index >= 6 && source[index] == 0.0
-                    EditingNumberField(
-                        value, { next -> fields = fields.toMutableList().also { it[index] = next } },
-                        stringResource(labels[index]), tags[index], errors[index], enabled = !flat,
-                        error = stringResource(if (index >= 6) R.string.editing_positive_error else R.string.editing_finite_error),
-                    )
+                    Text(heading, style = MaterialTheme.typography.titleSmall)
                 }
-                if (source.drop(6).any { it == 0.0 }) Text(
-                    stringResource(R.string.editing_property_flat_hint), style = MaterialTheme.typography.bodySmall,
+                val flat = index >= 6 && source[index] == 0.0
+                EditingNumberField(
+                    value, { next -> fields = fields.toMutableList().also { it[index] = next } },
+                    stringResource(labels[index]), tags[index], errors[index], enabled = !flat,
+                    error = stringResource(if (index >= 6) R.string.editing_positive_error else R.string.editing_finite_error),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (!applied && errors.none { it }) {
-                        applied = true
-                        onApply(ElementProperties(
-                            Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
-                            Rotation3(parsed[3]!!, parsed[4]!!, parsed[5]!!),
-                            Point3(parsed[6]!!, parsed[7]!!, parsed[8]!!),
-                        ))
-                    }
-                }, enabled = !applied && errors.none { it }, modifier = Modifier.testTag("properties_apply"),
-            ) { Text(stringResource(R.string.editing_apply)) }
-        },
-        dismissButton = {
-            TextButton(onDismiss, Modifier.testTag("properties_cancel")) { Text(stringResource(R.string.editing_cancel)) }
-        },
-    )
+            if (source.drop(6).any { it == 0.0 }) Text(
+                stringResource(R.string.editing_property_flat_hint), style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+    val applyButton: @Composable () -> Unit = {
+        TextButton(
+            onClick = {
+                if (!applied && errors.none { it }) {
+                    applied = true
+                    onApply(ElementProperties(
+                        Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
+                        Rotation3(parsed[3]!!, parsed[4]!!, parsed[5]!!),
+                        Point3(parsed[6]!!, parsed[7]!!, parsed[8]!!),
+                    ))
+                }
+            }, enabled = !applied && errors.none { it }, modifier = Modifier.testTag("properties_apply"),
+        ) { Text(stringResource(R.string.editing_apply)) }
+    }
+    val cancelButton: @Composable () -> Unit = {
+        TextButton(onDismiss, Modifier.testTag("properties_cancel")) { Text(stringResource(R.string.editing_cancel)) }
+    }
+    if (dialog) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.editing_properties)) },
+            text = fieldsContent,
+            confirmButton = applyButton,
+            dismissButton = cancelButton,
+        )
+    } else {
+        Column(modifier.testTag("properties_form")) {
+            Column(Modifier.weight(1f, fill = false)) { fieldsContent() }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                cancelButton()
+                applyButton()
+            }
+        }
+    }
 }
 
 internal val StringFieldsSaver = listSaver<List<String>, String>(save = { it }, restore = { it })

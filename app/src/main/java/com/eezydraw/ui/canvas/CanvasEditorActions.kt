@@ -20,6 +20,13 @@ data class CanvasEditorActions(
     val onRedo: () -> Unit,
     val onMirror: (MirrorAxis, Point3) -> Unit,
     val onArray: (Int, Int, Double, Double) -> Unit,
+    val onViewMode: (ViewMode) -> Unit = {},
+    val onLayerVisibility: (LayerId, Boolean) -> Unit = { _, _ -> },
+    val onSystemVisibility: (SystemId, Boolean) -> Unit = { _, _ -> },
+    val onMeasurementsVisibility: (Boolean) -> Unit = {},
+    val onUpdateMeasurement: (ElementId,Point3,Point3,Point3,String,Boolean,Boolean) -> Unit = { _,_,_,_,_,_,_ -> },
+    val onDeleteElements: (Set<ElementId>) -> Unit = {},
+    val onInsertLibrary: (LibraryItemId,Point3,String?) -> Unit = { _,_,_ -> },
 )
 
 internal fun Bounds3.center() = Point3(

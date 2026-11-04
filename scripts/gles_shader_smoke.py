@@ -176,9 +176,101 @@ preview_samples = [
     selected_preview('local XY corner resize', dimensions=(1.5,1.25,1), axes=(.2,.15,.4)),
     selected_preview('rotated local height', dimensions=(1,1,1.5), axes=(.4,.25,.2)),
 ]
+# Exercise the actual production filled-surface shader and its packed xyz/normal/rgba VBO.
+surface_program = create_program()
+for name, kind in [('SURFACE_VERTEX_SHADER', 0x8B31), ('SURFACE_FRAGMENT_SHADER', 0x8B30)]:
+    body = re.search(r'const val ' + name + r' = """(.*?)"""', source, re.S).group(1).encode()
+    shader = create_shader(kind)
+    shader_source(shader, 1, C.byref(C.c_char_p(body)), None)
+    compile_shader(shader)
+    status = C.c_int()
+    shader_status(shader, 0x8B81, C.byref(status))
+    assert status.value == 1, name + ' compile'
+    attach_shader(surface_program, shader)
+link_program(surface_program)
+program_status(surface_program, 0x8B82, C.byref(status))
+assert status.value == 1, 'surface program link'
+use_program = proc('glUseProgram', None, C.c_uint)
+disable_attribute = proc('glDisableVertexAttribArray', None, C.c_uint)
+for attrib in [position, color]:
+    disable_attribute(attrib)
+surface_attributes = [attribute(surface_program, name) for name in [b'aPosition', b'aNormal', b'aColor']]
+assert all(a >= 0 for a in surface_attributes)
+surface_buffer = C.c_uint()
+proc('glGenBuffers', None, C.c_int, C.POINTER(C.c_uint))(1, C.byref(surface_buffer))
+normal_uniform = proc('glUniformMatrix3fv', None, C.c_int, C.c_int, C.c_uint, C.POINTER(C.c_float))
+identity3 = [1.,0.,0., 0.,1.,0., 0.,0.,1.]
+def surface_inputs(lighting=0, opacity=1, model=identity, normals=identity3):
+    use_program(surface_program)
+    proc('glBindBuffer', None, C.c_uint, C.c_uint)(0x8892, surface_buffer)
+    for attrib in surface_attributes:
+        proc('glEnableVertexAttribArray', None, C.c_uint)(attrib)
+    vertex_pointer(surface_attributes[0], 3, 0x1406, 0, 40, None)
+    vertex_pointer(surface_attributes[1], 3, 0x1406, 0, 40, C.c_void_p(12))
+    vertex_pointer(surface_attributes[2], 4, 0x1406, 0, 40, C.c_void_p(24))
+    for name, values in [(b'uMatrix', identity), (b'uModel', model)]:
+        matrix_uniform(uniform(surface_program, name), 1, 0, (C.c_float * 16)(*values))
+    normal_uniform(uniform(surface_program, b'uNormalMatrix'), 1, 0, (C.c_float * 9)(*normals))
+    set_offset(uniform(surface_program, b'uOffset'), 0, 0, 0)
+    set_offset(uniform(surface_program, b'uViewDirection'), 0, 0, 1)
+    for name, value in [(b'uLighting', lighting), (b'uOpacity', opacity), (b'uSelection', 0), (b'uDark', 0)]:
+        set_dark(uniform(surface_program, name), value)
+def square(z=0, rgb=(.8,.4,.2), normal=(0,0,1)):
+    vertices = []
+    for x,y in [(-.75,-.75),(.75,-.75),(.75,.75), (-.75,-.75),(.75,.75),(-.75,.75)]:
+        vertices.extend((x,y,z,*normal,*rgb,1))
+    data = (C.c_float * len(vertices))(*vertices)
+    proc('glBufferData', None, C.c_uint, C.c_ssize_t, C.c_void_p, C.c_uint)(0x8892,C.sizeof(data),data,0x88E4)
+    proc('glDrawArrays', None, C.c_uint, C.c_int, C.c_int)(4,0,6)
+proc('glDisable', None, C.c_uint)(0x0B71)
+proc('glDisable', None, C.c_uint)(0x0BE2)
+surface_inputs(); reset(); square(); material_pixel = pixel()
+assert all(abs(material_pixel[i] - (204,102,51)[i]) <= 2 for i in range(3)), material_pixel
+surface_inputs(lighting=1); reset(); square(); lit_surface_pixel = pixel()
+reset(); square(normal=(0,0,-1)); unlit_surface_pixel = pixel()
+assert lit_surface_pixel[0] > unlit_surface_pixel[0] + 70, (lit_surface_pixel,unlit_surface_pixel)
+surface_inputs(lighting=2); reset(); square(); realistic_pixel = pixel()
+assert realistic_pixel[0] > 80 and realistic_pixel != material_pixel, realistic_pixel
+nonuniform = identity.copy(); nonuniform[0]=2; nonuniform[10]=.5
+surface_inputs(lighting=1,model=nonuniform,normals=[.5,0,0, 0,1,0, 0,0,2])
+reset(); square(normal=(1,0,1)); normal_pixel = pixel()
+normal_length = math.sqrt(.5**2+2**2)
+key_length = math.sqrt(.45**2+.40**2+.80**2)
+illumination = .36 + .64 * ((.5*.45+2*.80)/(normal_length*key_length))
+assert abs(normal_pixel[0]-204*illumination) <= 3, (normal_pixel,illumination)
+surface_inputs(opacity=.28)
+proc('glEnable', None, C.c_uint)(0x0BE2)
+proc('glBlendFunc', None, C.c_uint, C.c_uint)(0x0302,0x0303)
+clear_color(0,0,1,1); reset(); square(); transparent_pixel=pixel()
+assert transparent_pixel[2] > 180 and 50 < transparent_pixel[0] < 65, transparent_pixel
+# Hidden-line depth prepass: a rear line is suppressed, while a front line remains visible.
+surface_inputs(); proc('glDisable',None,C.c_uint)(0x0BE2)
+proc('glEnable',None,C.c_uint)(0x0B71)
+proc('glDepthFunc',None,C.c_uint)(0x0203)
+clear_color(0,0,0,1); reset()
+proc('glColorMask',None,C.c_uint,C.c_uint,C.c_uint,C.c_uint)(0,0,0,0)
+square(z=-.2)
+proc('glColorMask',None,C.c_uint,C.c_uint,C.c_uint,C.c_uint)(1,1,1,1)
+for attrib in surface_attributes:
+    disable_attribute(attrib)
+use_program(program)
+proc('glBindBuffer',None,C.c_uint,C.c_uint)(0x8892,buffer)
+for attrib in [position,color]:
+    proc('glEnableVertexAttribArray',None,C.c_uint)(attrib)
+vertex_pointer(position,3,0x1406,0,28,None)
+vertex_pointer(color,4,0x1406,0,28,C.c_void_p(12))
+matrix(identity)
+matrix_uniform(uniform(program,b'uModel'),1,0,(C.c_float*16)(*identity))
+set_offset(uniform(program,b'uOffset'),0,0,0)
+set_dark(uniform(program,b'uSelection'),0)
+line((1,0,0),z=.5); hidden_pixel=pixel()
+assert max(hidden_pixel[:3]) == 0, hidden_pixel
+line((0,1,0),z=-.5); front_pixel=pixel()
+assert front_pixel[1] > 240, front_pixel
 error=proc('glGetError', C.c_uint)()
 assert error == 0, hex(error)
-print('Mesa EGL/GLES2 smoke passed: production shader compile/link, VBO layout/draw, dark contrast, preserved layer color, plan elevation projection, depth occlusion, selected translation/rotation/local dimension resizing at distant origin, no GL errors.')
+print('Mesa EGL/GLES2 smoke passed: production line/surface shaders, VBO layouts, dark contrast, material colours, plan elevation projection, hidden-line depth, lighting, transparency, inverse-transpose normals and selected local resizing at distant origin, no GL errors.')
 print('Samples:', dark_pixel,color_pixel,plan_pixel,depth_pixel)
 
 print('Selected preview samples:', preview_samples)
+print('Surface samples:',material_pixel,lit_surface_pixel,unlit_surface_pixel,realistic_pixel,normal_pixel,transparent_pixel,hidden_pixel,front_pixel)

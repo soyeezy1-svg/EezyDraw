@@ -1,0 +1,28 @@
+<resources>
+    <string name="panel_draw">Draw</string>
+    <string name="panel_edit">Edit</string>
+    <string name="panel_view">View</string>
+    <string name="panel_measure">Measure</string>
+    <string name="panel_library">Library</string>
+    <string name="panel_hide_panels">Hide all panels</string>
+    <string name="panel_show_panels">Show panels</string>
+    <string name="panel_measure_distance">Measure distance</string>
+    <string name="panel_reference_dimension">Dimension from reference</string>
+    <string name="panel_saved_measurements">Measurements</string>
+    <string name="panel_visibility">Layers and systems</string>
+    <string name="panel_layers">Layers</string>
+    <string name="panel_systems">Systems</string>
+    <string name="panel_no_layers">No layers in this project.</string>
+    <string name="panel_no_systems">No systems in this project.</string>
+    <string name="panel_mode_wireframe">Wireframe</string>
+    <string name="panel_mode_hidden_line">Hidden line</string>
+    <string name="panel_mode_shaded">Shaded</string>
+    <string name="panel_mode_shaded_edges">Shaded with edges</string>
+    <string name="panel_mode_xray">X-ray</string>
+    <string name="panel_mode_realistic">Realistic</string>
+    <string name="panel_collapse_properties">Collapse properties</string>
+    <string name="panel_expand_properties">Expand properties</string>
+    <string name="panel_close_properties">Close properties</string>
+    <string name="panel_library_empty">This project has no library definitions yet. Imported project definitions appear here.</string>
+    <string name="panel_insert_library">Insert %1$s</string>
+</resources>

@@ -14,8 +14,33 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.Architecture
+import androidx.compose.material.icons.outlined.ChangeHistory
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Construction
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.CropSquare
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Flip
+import androidx.compose.material.icons.outlined.Gesture
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Hexagon
+import androidx.compose.material.icons.outlined.HorizontalRule
+import androidx.compose.material.icons.outlined.NearMe
+import androidx.compose.material.icons.outlined.PanoramaFishEye
+import androidx.compose.material.icons.outlined.Polyline
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Straighten
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Title
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.ViewInAr
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
@@ -45,6 +71,7 @@ import com.eezydraw.core.editing.DrawingTool
 import com.eezydraw.core.editing.ToolOptions
 import com.eezydraw.core.editing.supportsDefaultPlacement
 import com.eezydraw.core.model.LengthUnit
+import com.eezydraw.ui.canvas.panels.CanvasToolGroup
 
 /** Compact launcher keeps the canvas clear; expanding never changes the current tool. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -72,14 +99,27 @@ fun ToolsPanel(
     onDelete: () -> Unit,
     onProperties: () -> Unit,
     modifier: Modifier = Modifier,
+    expandedOverride: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    focusGroup: CanvasToolGroup? = null,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var localExpanded by rememberSaveable { mutableStateOf(false) }
+    var drawExpanded by rememberSaveable { mutableStateOf(true) }
+    var editExpanded by rememberSaveable { mutableStateOf(true) }
+    val expanded = expandedOverride ?: localExpanded
+    fun expand(value: Boolean) { localExpanded = value; onExpandedChange?.invoke(value) }
+    LaunchedEffect(expandedOverride, focusGroup) {
+        if (expandedOverride == true && focusGroup != null) {
+            drawExpanded = focusGroup == CanvasToolGroup.DRAW
+            editExpanded = focusGroup == CanvasToolGroup.EDIT
+        }
+    }
     // A blank panel area still owns its down event. Child buttons and scrolling handle
     // their gestures first; the canvas underneath must never start a pan from this area.
     Surface(modifier.pointerInput(Unit) { detectTapGestures(onTap = {}) },
         shape = RoundedCornerShape(16.dp), tonalElevation = 5.dp, shadowElevation = 4.dp) {
         if (!expanded) {
-            TextButton(onClick = { expanded = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("tools_expand")) {
+            TextButton(onClick = { expand(true) }, modifier = Modifier.heightIn(min = 48.dp).testTag("tools_expand")) {
                 Icon(Icons.Outlined.Construction, stringResource(R.string.editing_expand_tools))
                 Text(stringResource(R.string.editing_tools), Modifier.padding(start = 8.dp))
             }
@@ -87,7 +127,7 @@ fun ToolsPanel(
             Column(Modifier.width(300.dp).heightIn(max = 480.dp).testTag("tools_panel")) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.editing_tools), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    IconButton(onClick = { expanded = false }, modifier = Modifier.testTag("tools_collapse")) {
+                    IconButton(onClick = { expand(false) }, modifier = Modifier.testTag("tools_collapse")) {
                         Icon(Icons.Outlined.Close, stringResource(R.string.editing_collapse_tools))
                     }
                 }
@@ -97,10 +137,6 @@ fun ToolsPanel(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     ToolChoices(listOf(DrawingTool.SELECT), tool, onTool)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PanelAction(R.string.editing_undo, "tools_undo", canUndo, onUndo, Modifier.weight(1f))
-                        PanelAction(R.string.editing_redo, "tools_redo", canRedo, onRedo, Modifier.weight(1f))
-                    }
                     if (tool != DrawingTool.SELECT) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             PanelAction(R.string.editing_finish, "tools_finish", canFinish, onFinish, Modifier.weight(1f))
@@ -108,9 +144,15 @@ fun ToolsPanel(
                         }
                     }
                     ToolOptionsFields(tool, options, units, onOptions)
-                    Text(stringResource(R.string.editing_selection_count, selectedCount), style = MaterialTheme.typography.labelLarge)
-                    Text(stringResource(R.string.editing_selection_hint), style = MaterialTheme.typography.bodySmall)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), maxItemsInEachRow = 2) {
+                    ToolGroupHeader(R.string.panel_edit, editExpanded, { editExpanded = !editExpanded }, "tools_edit_group")
+                    if (editExpanded) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PanelAction(R.string.editing_undo, "tools_undo", canUndo, onUndo, Modifier.weight(1f))
+                            PanelAction(R.string.editing_redo, "tools_redo", canRedo, onRedo, Modifier.weight(1f))
+                        }
+                        Text(stringResource(R.string.editing_selection_count, selectedCount), style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.editing_selection_hint), style = MaterialTheme.typography.bodySmall)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), maxItemsInEachRow = 2) {
                         PanelAction(R.string.editing_properties, "tools_properties", selectedCount == 1, onProperties, Modifier.weight(1f))
                         PanelAction(R.string.editing_delete, "tools_delete", selectedCount > 0, onDelete, Modifier.weight(1f))
                         PanelAction(R.string.editing_copy, "tools_copy", selectedCount > 0, onCopy, Modifier.weight(1f))
@@ -118,14 +160,18 @@ fun ToolsPanel(
                         PanelAction(R.string.editing_mirror_x, "tools_mirror_x", selectedCount > 0, onMirrorX, Modifier.weight(1f))
                         PanelAction(R.string.editing_mirror_y, "tools_mirror_y", selectedCount > 0, onMirrorY, Modifier.weight(1f))
                         PanelAction(R.string.editing_array, "tools_array", selectedCount > 0, onArray, Modifier.weight(1f))
+                        }
                     }
-                    ToolSection(R.string.editing_shapes, listOf(DrawingTool.LINE, DrawingTool.POLYLINE,
+                    ToolGroupHeader(R.string.panel_draw, drawExpanded, { drawExpanded = !drawExpanded }, "tools_draw_group")
+                    if (drawExpanded) {
+                        ToolSection(R.string.editing_shapes, listOf(DrawingTool.LINE, DrawingTool.POLYLINE,
                         DrawingTool.ARC, DrawingTool.CIRCLE, DrawingTool.ELLIPSE, DrawingTool.RECTANGLE,
                         DrawingTool.POLYGON, DrawingTool.TRIANGLE, DrawingTool.SPLINE), tool, onTool)
                     ToolSection(R.string.editing_annotations, listOf(DrawingTool.TEXT, DrawingTool.LEADER,
                         DrawingTool.DIM_ALIGNED, DrawingTool.DIM_ANGULAR, DrawingTool.DIM_RADIAL), tool, onTool)
                     ToolSection(R.string.editing_solids, listOf(DrawingTool.BOX, DrawingTool.SPHERE,
                         DrawingTool.CYLINDER, DrawingTool.CONE, DrawingTool.PYRAMID), tool, onTool)
+                    }
                 }
             }
         }
@@ -134,7 +180,32 @@ fun ToolsPanel(
 
 @Composable
 private fun PanelAction(label: Int, tag: String, enabled: Boolean, action: () -> Unit, modifier: Modifier = Modifier) {
-    OutlinedButton(action, modifier.heightIn(min = 48.dp).testTag(tag), enabled = enabled) { Text(stringResource(label)) }
+    OutlinedButton(action, modifier.heightIn(min = 48.dp).testTag(tag), enabled = enabled) {
+        Icon(actionIcon(tag), null, Modifier.padding(end = 6.dp))
+        Text(stringResource(label), maxLines = 1)
+    }
+}
+
+@Composable
+private fun ToolGroupHeader(label: Int, expanded: Boolean, onClick: () -> Unit, tag: String) {
+    TextButton(onClick, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag)) {
+        Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+        Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            stringResource(if (expanded) R.string.editing_collapse_group else R.string.editing_expand_group))
+    }
+}
+
+private fun actionIcon(tag: String): ImageVector = when (tag) {
+    "tools_undo" -> Icons.AutoMirrored.Outlined.Undo
+    "tools_redo" -> Icons.AutoMirrored.Outlined.Redo
+    "tools_copy" -> Icons.Outlined.ContentCopy
+    "tools_paste" -> Icons.Outlined.ContentPaste
+    "tools_delete" -> Icons.Outlined.DeleteOutline
+    "tools_mirror_x", "tools_mirror_y" -> Icons.Outlined.Flip
+    "tools_array" -> Icons.Outlined.GridView
+    "tools_finish" -> Icons.Outlined.Done
+    "tools_cancel" -> Icons.Outlined.Close
+    else -> Icons.Outlined.Tune
 }
 
 @Composable
@@ -152,10 +223,29 @@ private fun ToolChoices(tools: List<DrawingTool>, selected: DrawingTool, onTool:
             FilterChip(
                 selected = item == selected, onClick = { onTool(item) },
                 label = { Text(stringResource(drawingToolLabel(item))) },
+                leadingIcon = { Icon(drawingToolIcon(item), null) },
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("tool_${item.name.lowercase()}"),
             )
         }
     }
+}
+
+private fun drawingToolIcon(tool: DrawingTool): ImageVector = when (tool) {
+    DrawingTool.SELECT -> Icons.Outlined.NearMe
+    DrawingTool.LINE -> Icons.Outlined.HorizontalRule
+    DrawingTool.POLYLINE -> Icons.Outlined.Polyline
+    DrawingTool.ARC, DrawingTool.DIM_ANGULAR -> Icons.Outlined.Architecture
+    DrawingTool.CIRCLE, DrawingTool.ELLIPSE, DrawingTool.DIM_RADIAL -> Icons.Outlined.PanoramaFishEye
+    DrawingTool.RECTANGLE -> Icons.Outlined.CropSquare
+    DrawingTool.POLYGON -> Icons.Outlined.Hexagon
+    DrawingTool.TRIANGLE, DrawingTool.CONE, DrawingTool.PYRAMID -> Icons.Outlined.ChangeHistory
+    DrawingTool.SPLINE -> Icons.Outlined.Gesture
+    DrawingTool.TEXT -> Icons.Outlined.Title
+    DrawingTool.LEADER -> Icons.Outlined.Polyline
+    DrawingTool.DIM_ALIGNED -> Icons.Outlined.Straighten
+    DrawingTool.BOX -> Icons.Outlined.ViewInAr
+    DrawingTool.SPHERE -> Icons.Outlined.Public
+    DrawingTool.CYLINDER -> Icons.Outlined.Storage
 }
 
 @Composable

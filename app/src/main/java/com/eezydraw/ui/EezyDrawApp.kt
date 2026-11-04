@@ -54,6 +54,7 @@ import com.eezydraw.ui.help.HelpScreen
 import com.eezydraw.ui.canvas.DrawingCanvasScreen
 import com.eezydraw.ui.canvas.CanvasFrame
 import com.eezydraw.ui.canvas.CanvasEditorActions
+import com.eezydraw.storage.ViewExportFormat
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.ui.projects.CreateProjectScreen
 import com.eezydraw.ui.projects.ProjectDetailsScreen
@@ -83,6 +84,12 @@ fun EezyDrawApp(
     }
     val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { viewModel.exportProject(it.toString()) }
+    }
+    val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        if(uri!=null)viewModel.exportView(uri.toString()) else viewModel.cancelViewExport()
+    }
+    val exportPdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if(uri!=null)viewModel.exportView(uri.toString()) else viewModel.cancelViewExport()
     }
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let { viewModel.chooseFolder(it.toString()) }
@@ -152,7 +159,16 @@ fun EezyDrawApp(
                                             viewModel::addSketch,viewModel::select,viewModel::transformSelection,viewModel::updateProperties,
                                             viewModel::copySelection,viewModel::pasteSelection,viewModel::deleteSelection,viewModel::undo,viewModel::redo,
                                             viewModel::mirrorSelection,viewModel::arraySelection,
+                                            onViewMode=viewModel::changeViewMode,onLayerVisibility=viewModel::setLayerVisibility,
+                                            onSystemVisibility=viewModel::setSystemVisibility,onMeasurementsVisibility=viewModel::showMeasurements,
+                                            onUpdateMeasurement=viewModel::updateSavedMeasurement,onDeleteElements=viewModel::deleteElements,
+                                            onInsertLibrary=viewModel::insertLibraryItem,
                                         ),
+                                        onExportView={request,format->
+                                            viewModel.prepareViewExport(request,format)
+                                            val base=document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)
+                                            if(format==ViewExportFormat.PNG)exportPng.launch("$base-view.png") else exportPdf.launch("$base-view.pdf")
+                                        },
                                     )
                                 }
                             } ?: LoadingIndicator()

@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.eezydraw.R
@@ -59,11 +61,14 @@ class HelpScreenTest {
     fun drawingGuideAndKeyboardReferenceAreReachable() {
         compose.setContent { EezyDrawTheme { HelpScreen({}, {}) } }
         listOf(R.string.help_shapes_title, R.string.help_annotations_title, R.string.help_primitives_title,
-            R.string.help_editing_title, R.string.help_history_title).forEach { title ->
-            compose.onNodeWithText(context.getString(title)).performScrollTo().assertIsDisplayed()
+            R.string.help_editing_title,R.string.help_view_modes_title,R.string.help_measurements_title,R.string.help_history_title).forEach { title ->
+            compose.onNodeWithTag("help_content").performScrollToNode(hasText(context.getString(title)))
+            compose.onNodeWithText(context.getString(title)).assertIsDisplayed()
         }
         compose.onNodeWithTag("help_section_gestures").performClick()
-        compose.onNodeWithText(context.getString(R.string.help_shortcuts_title)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.help_shortcuts_body)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("help_content").performScrollToNode(hasText(context.getString(R.string.help_shortcuts_title)))
+        compose.onNodeWithText(context.getString(R.string.help_shortcuts_title)).assertIsDisplayed()
+        compose.onNodeWithTag("help_content").performScrollToNode(hasText(context.getString(R.string.help_shortcuts_body)))
+        compose.onNodeWithText(context.getString(R.string.help_shortcuts_body)).assertIsDisplayed()
     }
 }

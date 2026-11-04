@@ -6,6 +6,8 @@ import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.SceneChunk
+import com.eezydraw.core.geometry.SurfaceChunk
+import com.eezydraw.core.geometry.SurfaceScene
 import com.eezydraw.core.geometry.Viewport2D
 import com.eezydraw.core.model.Bounds3
 import com.eezydraw.core.model.Point3
@@ -19,21 +21,23 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.math.tan
 
 /**
- * GLES2 wireframe renderer. A scene's immutable, spatially bounded batches upload once, while camera
+ * GLES2 line/surface renderer. Immutable, spatially bounded batches upload once, while camera
  * gestures change only uniforms, culling and a bounded construction-grid buffer. All origin
  * subtraction happens in doubles before values reach the GPU.
  */
 internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GLSurfaceView.Renderer {
-    private val scene = AtomicReference<DrawingScene?>(null)
-    private val frame = AtomicReference(CanvasFrame(Viewport2D(), OrbitCamera()))
+    private data class RenderState(val scene: DrawingScene?, val frame: CanvasFrame)
+    private val state = AtomicReference(RenderState(null, CanvasFrame(Viewport2D(), OrbitCamera())))
     private val disposed = AtomicBoolean(false)
 
     // The fields below belong exclusively to the GL thread.
@@ -52,6 +56,14 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     private var chunks = emptyList<GpuChunk>()
     private var uploadedSelectionScene: DrawingScene? = null
     private var selectionChunks = emptyList<GpuChunk>()
+    private val annotationCache = ExtraLineCache()
+    private val measurementCache = ExtraLineCache()
+    private val selectionMeasurementCache = ExtraLineCache()
+    private var surfaceShader: SurfaceShader? = null
+    private var uploadedSurfaceScene: SurfaceScene? = null
+    private var surfaceChunks = emptyList<GpuSurfaceChunk>()
+    private var uploadedSelectionSurfaceScene: SurfaceScene? = null
+    private var selectionSurfaceChunks = emptyList<GpuSurfaceChunk>()
     private var gridBuffer = 0
     private var gridVertexCount = 0
     private var gridFrame: CanvasFrame? = null
@@ -62,11 +74,18 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     private val frustumPlanes = DoubleArray(24)
     private val visibleBounds = DoubleArray(6)
 
-    fun update(value: CanvasFrame) { frame.set(value) }
-    fun setScene(value: DrawingScene) { scene.set(value) }
+    fun update(value: CanvasFrame) { state.updateAndGet { it.copy(frame = value) } }
+    fun setScene(value: DrawingScene) { state.updateAndGet { it.copy(scene = value) } }
+    fun submit(scene: DrawingScene, frame: CanvasFrame): Boolean {
+        while (true) {
+            val previous = state.get()
+            if (previous.scene === scene && previous.frame == frame) return false
+            if (state.compareAndSet(previous, RenderState(scene, frame))) return true
+        }
+    }
     fun dispose() {
         disposed.set(true)
-        scene.set(null)
+        state.set(RenderState(null, CanvasFrame(Viewport2D(), OrbitCamera())))
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -75,13 +94,25 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         gridBuffer = 0
         chunks = emptyList()
         selectionChunks = emptyList()
+        annotationCache.chunks = emptyList()
+        measurementCache.chunks = emptyList()
+        selectionMeasurementCache.chunks = emptyList()
+        surfaceChunks = emptyList()
+        selectionSurfaceChunks = emptyList()
+        surfaceShader = null
         uploadedScene = null
         uploadedSelectionScene = null
+        annotationCache.scene = null
+        measurementCache.scene = null
+        selectionMeasurementCache.scene = null
+        uploadedSurfaceScene = null
+        uploadedSelectionSurfaceScene = null
         gridFrame = null
         gridVertexCount = 0
         if (disposed.get()) return
         try {
             program = createProgram()
+            surfaceShader = createSurfaceShader()
             positionAttribute = GLES20.glGetAttribLocation(program, "aPosition")
             colorAttribute = GLES20.glGetAttribLocation(program, "aColor")
             matrixUniform = GLES20.glGetUniformLocation(program, "uMatrix")
@@ -123,34 +154,64 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        val current = frame.get()
+        val snapshot = state.get()
+        val current = snapshot.frame
         if (current.dark) GLES20.glClearColor(0.055f, 0.071f, 0.10f, 1f)
         else GLES20.glClearColor(0.97f, 0.98f, 0.99f, 1f)
+        GLES20.glColorMask(true, true, true, true)
         GLES20.glDepthMask(true)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-        if (disposed.get() || program == 0) return
+        if (disposed.get() || program == 0 || surfaceShader == null) return
 
-        val pendingScene = scene.get()
+        val pendingScene = snapshot.scene
         if (pendingScene !== uploadedScene && !uploadScene(pendingScene)) return
         if (current.selectionScene !== uploadedSelectionScene &&
             !uploadScene(current.selectionScene, selection = true)) return
+        val passes = viewRenderPlan(current.viewMode)
+        if (passes.surfaces) {
+            if (current.surfaceScene !== uploadedSurfaceScene && !uploadSurface(current.surfaceScene)) return
+            if (current.selectionSurfaceScene !== uploadedSelectionSurfaceScene &&
+                !uploadSurface(current.selectionSurfaceScene, selection = true)) return
+        } else {
+            // Retain unchanged buffers for a quick mode switch, but never pin an obsolete
+            // drawing's CPU/GPU mesh merely because the user returned to wireframe.
+            if (uploadedSurfaceScene !== current.surfaceScene) {
+                deleteSurfaceBuffers(); uploadedSurfaceScene = null
+            }
+            if (uploadedSelectionSurfaceScene !== current.selectionSurfaceScene) {
+                deleteSurfaceBuffers(selection = true); uploadedSelectionSurfaceScene = null
+            }
+        }
+        val annotations = current.annotationScene
+        if ((annotations == null || annotations === pendingScene || passes.fullEdges) &&
+            annotationCache.scene !== annotations) deleteExtraBuffers(annotationCache)
+        if (!passes.fullEdges && annotations != null && annotations !== pendingScene &&
+            annotations !== annotationCache.scene && !uploadExtraLines(annotations, annotationCache)) return
+        if (current.measurementScene !== measurementCache.scene && !uploadExtraLines(current.measurementScene, measurementCache)) return
+        if (current.selectionMeasurementScene !== selectionMeasurementCache.scene &&
+            !uploadExtraLines(current.selectionMeasurementScene, selectionMeasurementCache)) return
 
+        val planDepth = if (!current.is3D && passes.surfaces) planDepthRange(pendingScene, current, 0.0) else null
+        val planOriginZ = planDepth?.let { it.first / 2 + it.second / 2 } ?: current.floorElevation
         val origin = if (current.is3D) current.orbit.target else
-            Point3(current.viewport.center.x, current.viewport.center.y)
+            Point3(current.viewport.center.x, current.viewport.center.y, planOriginZ)
         val aspect = width.toDouble() / height
-        val matrix = if (current.is3D) current.orbit.viewProjectionMatrix(aspect) else planMatrix(current)
-        if (current.is3D) {
-            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-            extractFrustumPlanes(matrix)
-        } else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-        GLES20.glUseProgram(program)
-        GLES20.glUniformMatrix4fv(matrixUniform, 1, false, matrix, 0)
-        GLES20.glUniformMatrix4fv(modelUniform, 1, false, IDENTITY_MATRIX, 0)
-        GLES20.glUniform1f(darkUniform, if (current.dark) 1f else 0f)
-        GLES20.glUniform1f(selectionUniform, 0f)
-        GLES20.glEnableVertexAttribArray(positionAttribute)
-        GLES20.glEnableVertexAttribArray(colorAttribute)
+        val matrix = if (current.is3D) current.orbit.viewProjectionMatrix(aspect) else {
+            if (passes.surfaces) {
+                val depth = requireNotNull(planDepth)
+                filledPlanMatrix(current.viewport, width, height, depth.first - origin.z, depth.second - origin.z)
+            } else planMatrix(current)
+        }
+        if (current.is3D) extractFrustumPlanes(matrix)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+        val halfWidth = width / (2 * current.viewport.pixelsPerMetre)
+        val halfHeight = height / (2 * current.viewport.pixelsPerMetre)
 
+        useLineShader(matrix, current.dark)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         if (current.showGrid) {
             updateGrid(current)
             GLES20.glDepthMask(false)
@@ -159,11 +220,36 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             drawBuffer(gridBuffer, gridVertexCount)
             GLES20.glDepthMask(true)
         }
+        disableLineAttributes()
 
+        if (passes.surfaces) {
+            if (passes.transparent) {
+                // X-ray intentionally exposes rear surfaces; sorting batches improves ordinary
+                // transparency without pretending intersecting surfaces are fully order independent.
+                GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+                GLES20.glDepthMask(false)
+            } else {
+                GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+                GLES20.glDepthMask(true)
+                GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+                GLES20.glPolygonOffset(1f, 1f)
+            }
+            if (passes.depthOnly) GLES20.glColorMask(false, false, false, false)
+            drawSurfaces(surfaceChunks, current, matrix, origin, halfWidth, halfHeight, passes)
+            drawSurfaces(selectionSurfaceChunks, current, matrix, origin, halfWidth, halfHeight, passes,
+                current.selectionDelta, selected = true)
+            GLES20.glColorMask(true, true, true, true)
+            GLES20.glDepthMask(true)
+            GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+        }
+
+        useLineShader(matrix, current.dark)
+        if ((current.is3D || passes.surfaces) && !passes.transparent) GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glLineWidth(drawingLineWidth)
-        val halfWidth = width / (2 * current.viewport.pixelsPerMetre)
-        val halfHeight = height / (2 * current.viewport.pixelsPerMetre)
-        drawChunks(chunks, current, origin, halfWidth, halfHeight)
+        val visibleLines = if (passes.fullEdges || annotations == null || annotations === pendingScene) chunks
+            else annotationCache.chunks
+        drawChunks(visibleLines, current, origin, halfWidth, halfHeight)
 
         if (selectionChunks.isNotEmpty()) {
             val delta = current.selectionDelta
@@ -171,12 +257,58 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             if (model.all { it.isFinite() }) {
                 GLES20.glUniformMatrix4fv(modelUniform, 1, false, model, 0)
                 GLES20.glUniform1f(selectionUniform, 1f)
+                // The selected outline remains discoverable in filled modes and during a drag.
+                if (passes.surfaces) GLES20.glDisable(GLES20.GL_DEPTH_TEST)
                 drawChunks(selectionChunks, current, origin, halfWidth, halfHeight, delta)
             }
         }
+        if (measurementCache.chunks.isNotEmpty() || selectionMeasurementCache.chunks.isNotEmpty()) {
+            useLineShader(matrix, current.dark)
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthMask(false)
+            drawChunks(measurementCache.chunks, current, origin, halfWidth, halfHeight)
+            val delta = current.selectionDelta
+            val model = delta?.linearMatrix() ?: IDENTITY_MATRIX
+            if (model.all(Float::isFinite)) {
+                GLES20.glUniformMatrix4fv(modelUniform, 1, false, model, 0)
+                GLES20.glUniform1f(selectionUniform, 1f)
+                drawChunks(selectionMeasurementCache.chunks, current, origin, halfWidth, halfHeight, delta)
+            }
+            GLES20.glDepthMask(true)
+        }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        disableLineAttributes()
+    }
+
+    private fun useLineShader(matrix: FloatArray, dark: Boolean) {
+        GLES20.glUseProgram(program)
+        GLES20.glUniformMatrix4fv(matrixUniform, 1, false, matrix, 0)
+        GLES20.glUniformMatrix4fv(modelUniform, 1, false, IDENTITY_MATRIX, 0)
+        GLES20.glUniform1f(darkUniform, if (dark) 1f else 0f)
+        GLES20.glUniform1f(selectionUniform, 0f)
+        GLES20.glEnableVertexAttribArray(positionAttribute)
+        GLES20.glEnableVertexAttribArray(colorAttribute)
+    }
+
+    private fun disableLineAttributes() {
         GLES20.glDisableVertexAttribArray(positionAttribute)
         GLES20.glDisableVertexAttribArray(colorAttribute)
+    }
+
+    private fun planDepthRange(value: DrawingScene?, current: CanvasFrame, originZ: Double): Pair<Double, Double> {
+        var low = value?.bounds?.min?.z ?: current.floorElevation
+        var high = value?.bounds?.max?.z ?: current.floorElevation
+        current.selectionScene?.bounds?.let { bounds ->
+            val delta = current.selectionDelta
+            for (corner in 0 until 8) {
+                val point = Point3(if (corner and 1 == 0) bounds.min.x else bounds.max.x,
+                    if (corner and 2 == 0) bounds.min.y else bounds.max.y,
+                    if (corner and 4 == 0) bounds.min.z else bounds.max.z)
+                val z = runCatching { delta?.apply(point)?.z ?: point.z }.getOrNull() ?: continue
+                low = min(low, z); high = max(high, z)
+            }
+        }
+        return (low - originZ) to (high - originZ)
     }
 
     /** The small selected batch changes uniforms during handle drags, never its vertex buffers. */
@@ -207,11 +339,69 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             }
             val x = (transformedOrigin.x - origin.x).toFloat()
             val y = (transformedOrigin.y - origin.y).toFloat()
-            val z = if (current.is3D) (transformedOrigin.z - origin.z).toFloat() else 0f
+            val z = if (current.is3D || current.viewMode != com.eezydraw.core.model.ViewMode.WIREFRAME)
+                (transformedOrigin.z - origin.z).toFloat() else 0f
             if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
             GLES20.glUniform3f(offsetUniform, x, y, z)
             drawBuffer(gpu.buffer, chunk.vertices.size / FLOATS_PER_VERTEX)
         }
+    }
+
+    private fun drawSurfaces(
+        batches: List<GpuSurfaceChunk>, current: CanvasFrame, matrix: FloatArray,
+        origin: Point3, halfWidth: Double, halfHeight: Double, passes: ViewRenderPlan,
+        delta: EditDelta? = null, selected: Boolean = false,
+    ) {
+        if (batches.isEmpty()) return
+        val shader = surfaceShader ?: return
+        val model = delta?.linearMatrix() ?: IDENTITY_MATRIX
+        val normal = runCatching { previewNormalMatrix(delta) }.getOrNull() ?: return
+        if (model.any { !it.isFinite() } || normal.any { !it.isFinite() }) return
+        val linear = delta?.linearMatrixDouble()
+        GLES20.glUseProgram(shader.program)
+        GLES20.glUniformMatrix4fv(shader.matrix, 1, false, matrix, 0)
+        GLES20.glUniformMatrix4fv(shader.model, 1, false, model, 0)
+        GLES20.glUniformMatrix3fv(shader.normalMatrix, 1, false, normal, 0)
+        GLES20.glUniform1f(shader.lighting, passes.lighting.toFloat())
+        GLES20.glUniform1f(shader.opacity, if (passes.transparent) .28f else 1f)
+        GLES20.glUniform1f(shader.selection, if (selected) .22f else 0f)
+        GLES20.glUniform1f(shader.dark, if (current.dark) 1f else 0f)
+        val outward = if (current.is3D) Point3(cos(current.orbit.pitch) * cos(current.orbit.yaw),
+            cos(current.orbit.pitch) * sin(current.orbit.yaw), sin(current.orbit.pitch)) else Point3(z = 1.0)
+        GLES20.glUniform3f(shader.viewDirection, outward.x.toFloat(), outward.y.toFloat(), outward.z.toFloat())
+        GLES20.glEnableVertexAttribArray(shader.position)
+        GLES20.glEnableVertexAttribArray(shader.normal)
+        GLES20.glEnableVertexAttribArray(shader.color)
+        val ordered = if (passes.transparent) batches.sortedBy { gpu ->
+            val bounds = gpu.source.bounds
+            val center = Point3(bounds.min.x / 2 + bounds.max.x / 2,
+                bounds.min.y / 2 + bounds.max.y / 2, bounds.min.z / 2 + bounds.max.z / 2)
+            val point = runCatching { delta?.apply(center) ?: center }.getOrNull() ?: center
+            (point.x - origin.x) * outward.x + (point.y - origin.y) * outward.y + (point.z - origin.z) * outward.z
+        } else batches
+        for (gpu in ordered) {
+            val chunk = gpu.source
+            if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
+            boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
+            if (current.is3D) {
+                if (!inFrustum()) continue
+            } else if (visibleBounds[3] < -halfWidth || visibleBounds[0] > halfWidth ||
+                visibleBounds[4] < -halfHeight || visibleBounds[1] > halfHeight) continue
+            val position = runCatching { delta?.apply(chunk.origin) ?: chunk.origin }.getOrNull() ?: continue
+            val x = (position.x - origin.x).toFloat()
+            val y = (position.y - origin.y).toFloat()
+            val z = (position.z - origin.z).toFloat()
+            if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
+            GLES20.glUniform3f(shader.offset, x, y, z)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, gpu.buffer)
+            GLES20.glVertexAttribPointer(shader.position, 3, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 0)
+            GLES20.glVertexAttribPointer(shader.normal, 3, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 3 * FLOAT_BYTES)
+            GLES20.glVertexAttribPointer(shader.color, 4, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 6 * FLOAT_BYTES)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, chunk.vertices.size / SURFACE_FLOATS_PER_VERTEX)
+        }
+        GLES20.glDisableVertexAttribArray(shader.position)
+        GLES20.glDisableVertexAttribArray(shader.normal)
+        GLES20.glDisableVertexAttribArray(shader.color)
     }
 
     /** Called on the GL thread, or reclaimed by EGL itself when a disposed surface is detached. */
@@ -222,8 +412,12 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glUseProgram(0)
         deleteChunkBuffers()
         deleteChunkBuffers(selection = true)
+        for (cache in listOf(annotationCache, measurementCache, selectionMeasurementCache)) deleteExtraBuffers(cache)
+        deleteSurfaceBuffers()
+        deleteSurfaceBuffers(selection = true)
         if (gridBuffer != 0) GLES20.glDeleteBuffers(1, intArrayOf(gridBuffer), 0)
         if (program != 0) GLES20.glDeleteProgram(program)
+        surfaceShader?.let { GLES20.glDeleteProgram(it.program) }
         gridBuffer = 0
         program = 0
         positionAttribute = -1
@@ -235,8 +429,85 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         selectionUniform = -1
         uploadedScene = null
         uploadedSelectionScene = null
+        annotationCache.scene = null
+        measurementCache.scene = null
+        selectionMeasurementCache.scene = null
+        annotationCache.chunks = emptyList()
+        measurementCache.chunks = emptyList()
+        selectionMeasurementCache.chunks = emptyList()
+        uploadedSurfaceScene = null
+        uploadedSelectionSurfaceScene = null
+        surfaceShader = null
         gridFrame = null
         gridVertexCount = 0
+    }
+
+    private fun deleteExtraBuffers(cache: ExtraLineCache) {
+        if (cache.chunks.isNotEmpty()) GLES20.glDeleteBuffers(cache.chunks.size, cache.chunks.map { it.buffer }.toIntArray(), 0)
+        cache.chunks = emptyList()
+        cache.scene = null
+    }
+
+    private fun uploadExtraLines(value: DrawingScene?, cache: ExtraLineCache): Boolean {
+        deleteExtraBuffers(cache)
+        if (value == null || value.chunks.isEmpty()) { cache.scene = value; return true }
+        val ids = IntArray(value.chunks.size)
+        try {
+            GLES20.glGenBuffers(ids.size, ids, 0)
+            checkGlUpload("allocating annotation buffers")
+            check(ids.all { it != 0 }) { "The GPU could not allocate annotation buffers" }
+            val uploaded = value.chunks.mapIndexed { index, chunk ->
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, ids[index])
+                GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, chunk.vertices.size * FLOAT_BYTES,
+                    stage(chunk.vertices, chunk.vertices.size), GLES20.GL_STATIC_DRAW)
+                checkGlUpload("uploading annotations")
+                GpuChunk(chunk, ids[index])
+            }
+            cache.chunks = uploaded
+            cache.scene = value
+            return true
+        } catch (error: IllegalStateException) {
+            GLES20.glDeleteBuffers(ids.size, ids, 0)
+            releaseGlResources()
+            reportError("Annotations could not be uploaded to the GPU: ${error.message.orEmpty()}")
+            return false
+        } finally { GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0) }
+    }
+
+    private fun uploadSurface(value: SurfaceScene?, selection: Boolean = false): Boolean {
+        deleteSurfaceBuffers(selection)
+        if (selection) uploadedSelectionSurfaceScene = null else uploadedSurfaceScene = null
+        if (value == null || value.chunks.isEmpty()) {
+            if (selection) uploadedSelectionSurfaceScene = value else uploadedSurfaceScene = value
+            return true
+        }
+        val ids = IntArray(value.chunks.size)
+        try {
+            GLES20.glGenBuffers(ids.size, ids, 0)
+            checkGlUpload("allocating surface buffers")
+            check(ids.all { it != 0 }) { "The GPU could not allocate surface buffers" }
+            val uploaded = value.chunks.mapIndexed { index, chunk ->
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, ids[index])
+                GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, chunk.vertices.size * FLOAT_BYTES,
+                    stage(chunk.vertices, chunk.vertices.size), GLES20.GL_STATIC_DRAW)
+                checkGlUpload("uploading filled surfaces")
+                GpuSurfaceChunk(chunk, ids[index])
+            }
+            if (selection) { selectionSurfaceChunks = uploaded; uploadedSelectionSurfaceScene = value }
+            else { surfaceChunks = uploaded; uploadedSurfaceScene = value }
+            return true
+        } catch (error: IllegalStateException) {
+            GLES20.glDeleteBuffers(ids.size, ids, 0)
+            releaseGlResources()
+            reportError("Surfaces could not be uploaded to the GPU: ${error.message.orEmpty()}")
+            return false
+        } finally { GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0) }
+    }
+
+    private fun deleteSurfaceBuffers(selection: Boolean = false) {
+        val batches = if (selection) selectionSurfaceChunks else surfaceChunks
+        if (batches.isNotEmpty()) GLES20.glDeleteBuffers(batches.size, batches.map { it.buffer }.toIntArray(), 0)
+        if (selection) selectionSurfaceChunks = emptyList() else surfaceChunks = emptyList()
     }
 
     /** Publish the new GPU scene only after every batch has uploaded successfully. */
@@ -479,9 +750,25 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         return staging
     }
 
-    private fun createProgram(): Int {
-        val vertex = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
-        val fragment = try { compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER) }
+    private fun createSurfaceShader(): SurfaceShader {
+        val id = createProgram(SURFACE_VERTEX_SHADER, SURFACE_FRAGMENT_SHADER)
+        fun attribute(name: String) = GLES20.glGetAttribLocation(id, name)
+        fun uniform(name: String) = GLES20.glGetUniformLocation(id, name)
+        val shader = SurfaceShader(id, attribute("aPosition"), attribute("aNormal"), attribute("aColor"),
+            uniform("uMatrix"), uniform("uModel"), uniform("uNormalMatrix"), uniform("uOffset"),
+            uniform("uLighting"), uniform("uOpacity"), uniform("uSelection"), uniform("uDark"), uniform("uViewDirection"))
+        if (listOf(shader.position, shader.normal, shader.color, shader.matrix, shader.model,
+                shader.normalMatrix, shader.offset, shader.lighting, shader.opacity, shader.selection,
+                shader.dark, shader.viewDirection).any { it < 0 }) {
+            GLES20.glDeleteProgram(id)
+            error("Required surface shader inputs are unavailable")
+        }
+        return shader
+    }
+
+    private fun createProgram(vertexSource: String = VERTEX_SHADER, fragmentSource: String = FRAGMENT_SHADER): Int {
+        val vertex = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
+        val fragment = try { compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource) }
         catch (error: IllegalStateException) { GLES20.glDeleteShader(vertex); throw error }
         val result = GLES20.glCreateProgram()
         try {
@@ -518,11 +805,20 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     }
 
     private data class GpuChunk(val source: SceneChunk, val buffer: Int)
+    private class ExtraLineCache(var scene: DrawingScene? = null, var chunks: List<GpuChunk> = emptyList())
+    private data class GpuSurfaceChunk(val source: SurfaceChunk, val buffer: Int)
+    private data class SurfaceShader(
+        val program: Int, val position: Int, val normal: Int, val color: Int,
+        val matrix: Int, val model: Int, val normalMatrix: Int, val offset: Int,
+        val lighting: Int, val opacity: Int, val selection: Int, val dark: Int, val viewDirection: Int,
+    )
 
     private companion object {
         const val FLOAT_BYTES = 4
         const val FLOATS_PER_VERTEX = 7
         const val VERTEX_BYTES = FLOATS_PER_VERTEX * FLOAT_BYTES
+        const val SURFACE_FLOATS_PER_VERTEX = 10
+        const val SURFACE_VERTEX_BYTES = SURFACE_FLOATS_PER_VERTEX * FLOAT_BYTES
         const val MAX_GRID_LINES = 256
         const val MAX_GRID_FLOATS = MAX_GRID_LINES * 2 * FLOATS_PER_VERTEX
         const val MIN_GRID_PIXELS = 16.0
@@ -563,6 +859,55 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             precision mediump float;
             varying lowp vec4 vColor;
             void main() { gl_FragColor = vColor; }
+        """
+        const val SURFACE_VERTEX_SHADER = """
+            precision highp float;
+            uniform mat4 uMatrix;
+            uniform mat4 uModel;
+            uniform mat3 uNormalMatrix;
+            uniform vec3 uOffset;
+            uniform float uSelection;
+            uniform float uDark;
+            attribute vec3 aPosition;
+            attribute vec3 aNormal;
+            attribute vec4 aColor;
+            varying mediump vec3 vNormal;
+            varying lowp vec4 vColor;
+            void main() {
+                vec3 position = (uModel * vec4(aPosition, 1.0)).xyz + uOffset;
+                gl_Position = uMatrix * vec4(position, 1.0);
+                vNormal = uNormalMatrix * aNormal;
+                vec3 color = aColor.rgb;
+                float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+                if (uDark > 0.5 && luminance < 0.08) {
+                    color = clamp(color + vec3(0.14 - luminance), 0.0, 1.0);
+                }
+                vColor = vec4(mix(color, vec3(0.11, 0.48, 1.0), uSelection), aColor.a);
+            }
+        """
+        const val SURFACE_FRAGMENT_SHADER = """
+            precision mediump float;
+            uniform float uLighting;
+            uniform float uOpacity;
+            uniform vec3 uViewDirection;
+            varying mediump vec3 vNormal;
+            varying lowp vec4 vColor;
+            void main() {
+                vec3 normal = normalize(vNormal);
+                if (!gl_FrontFacing) normal = -normal;
+                vec3 key = normalize(vec3(0.45, -0.40, 0.80));
+                float diffuse = max(dot(normal, key), 0.0);
+                float illumination = 1.0;
+                float specular = 0.0;
+                if (uLighting > 0.5) illumination = 0.36 + 0.64 * diffuse;
+                if (uLighting > 1.5) {
+                    float fill = max(dot(normal, normalize(vec3(-0.60, 0.35, 0.55))), 0.0);
+                    illumination = 0.22 + 0.62 * diffuse + 0.16 * fill;
+                    vec3 halfway = normalize(key + normalize(uViewDirection));
+                    specular = 0.22 * pow(max(dot(normal, halfway), 0.0), 32.0);
+                }
+                gl_FragColor = vec4(clamp(vColor.rgb * illumination + vec3(specular), 0.0, 1.0), vColor.a * uOpacity);
+            }
         """
     }
 }

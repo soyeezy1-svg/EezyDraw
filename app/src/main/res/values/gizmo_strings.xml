@@ -1,5 +1,6 @@
 <resources>
     <string name="gizmo_selection">Selected object transform handles</string>
+    <string name="gizmo_move_free">Move freely</string>
     <string name="gizmo_move_x">Move along X</string>
     <string name="gizmo_move_y">Move along Y</string>
     <string name="gizmo_move_z">Move along Z</string>

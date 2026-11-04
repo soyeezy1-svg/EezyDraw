@@ -49,7 +49,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 enum class GizmoHandle {
-    MOVE_X, MOVE_Y, MOVE_Z, ROTATE_Z, SCALE,
+    MOVE_FREE, MOVE_X, MOVE_Y, MOVE_Z, ROTATE_Z, SCALE,
     RESIZE_WIDTH_NEGATIVE, RESIZE_WIDTH_POSITIVE,
     RESIZE_DEPTH_NEGATIVE, RESIZE_DEPTH_POSITIVE,
     RESIZE_CORNER_MIN_MIN, RESIZE_CORNER_MAX_MIN, RESIZE_CORNER_MAX_MAX, RESIZE_CORNER_MIN_MAX,
@@ -122,6 +122,7 @@ fun gizmoHandles(
     density: Double,
     resizeFrame: ResizeFrame? = null,
     preview: EditDelta? = null,
+    allowResize: Boolean = true,
 ): List<GizmoControl> {
     if (width <= 0.0 || height <= 0.0 || density <= 0.0) return emptyList()
     val shownBounds = previewGizmoBounds(bounds, preview)
@@ -131,18 +132,23 @@ fun gizmoHandles(
     val axes = listOf(GizmoHandle.MOVE_X to Point3(1.0), GizmoHandle.MOVE_Y to Point3(y = 1.0)) +
         if (is3D) listOf(GizmoHandle.MOVE_Z to Point3(z = 1.0)) else emptyList()
     val result = ArrayList<GizmoControl>()
-    if (resizeFrame != null) {
+    if (resizeFrame != null && allowResize) {
         result.addAll(resizeControls(resizeFrame, preview, viewport, orbit, is3D, width, height, density))
     }
-    fun separated(origin: Point2, direction: Point2, initial: Double): Point2 {
+    fun separated(origin: Point2, direction: Point2, initial: Double, minimum: Double = 44.0): Point2 {
         var distance = initial
         repeat(24) {
             val point = Point2(origin.x + direction.x * distance, origin.y + direction.y * distance)
-            if (result.none { hypot(it.center.x - point.x, it.center.y - point.y) < 44.0 * density }) return point
+            if (result.none { hypot(it.center.x - point.x, it.center.y - point.y) <
+                    max(minimum, if (it.handle == GizmoHandle.MOVE_FREE) 52.0 else 44.0) * density }) return point
             distance += 44.0 * density
         }
         return Point2(origin.x + direction.x * distance, origin.y + direction.y * distance)
     }
+    // The free-move affordance is 52dp wide, above the projected object centre. Its
+    // position is separated from resize controls before the smaller axes/ring are added.
+    val free = separated(center, Point2(0.0, -1.0), 52.0 * density, 52.0)
+    result.add(GizmoControl(GizmoHandle.MOVE_FREE, free, accessibleStep = Point2(12.0 * density, 0.0)))
     for ((handle, axis) in axes) {
         // A camera-relative step avoids subtracting almost equal projections at very distant zoom.
         val step = if (is3D) max(orbit.distance, orbit.orthographicHeight) * 0.001 else 1.0
@@ -155,7 +161,7 @@ fun gizmoHandles(
     }
     val diagonal = 1.0 / sqrt(2.0)
     result.add(GizmoControl(GizmoHandle.ROTATE_Z, separated(center, Point2(-diagonal, -diagonal), sqrt(2.0) * 34.0 * density)))
-    if (resizeFrame == null) result.add(GizmoControl(GizmoHandle.SCALE,
+    if (resizeFrame == null && allowResize) result.add(GizmoControl(GizmoHandle.SCALE,
         separated(center, Point2(diagonal, diagonal), sqrt(2.0) * 48.0 * density)))
     return result
 }
@@ -244,6 +250,7 @@ fun SelectionGizmo(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     resizeFrame: ResizeFrame? = null,
+    allowResize: Boolean = true,
 ) {
     val density = LocalDensity.current.density.toDouble()
     val accent = MaterialTheme.colorScheme.primary
@@ -254,6 +261,7 @@ fun SelectionGizmo(
     val latestPreview by rememberUpdatedState(preview)
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     val labels = mapOf(
+        GizmoHandle.MOVE_FREE to stringResource(R.string.gizmo_move_free),
         GizmoHandle.MOVE_X to stringResource(R.string.gizmo_move_x),
         GizmoHandle.MOVE_Y to stringResource(R.string.gizmo_move_y),
         GizmoHandle.MOVE_Z to stringResource(R.string.gizmo_move_z),
@@ -272,7 +280,7 @@ fun SelectionGizmo(
     val description = stringResource(R.string.gizmo_selection)
     fun currentBounds() = previewGizmoBounds(bounds, latestPreview)
     val controls = gizmoHandles(bounds, viewport, orbit, is3D,
-        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview)
+        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview, allowResize)
     Canvas(modifier.fillMaxSize().onSizeChanged { surfaceSize = it }.testTag("selection_gizmo")
         .semantics {
             contentDescription = description
@@ -296,15 +304,16 @@ fun SelectionGizmo(
                 }
             }
         }
-        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame) {
+        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame, allowResize) {
             if (!enabled) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = true)
                 val controlsAtDown = gizmoHandles(bounds, viewport, orbit, is3D,
-                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview)
+                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview, allowResize)
                 val control = controlsAtDown.minByOrNull {
                     hypot(it.center.x - down.position.x, it.center.y - down.position.y)
-                }?.takeIf { hypot(it.center.x - down.position.x, it.center.y - down.position.y) <= 20.0 * density }
+                }?.takeIf { hypot(it.center.x - down.position.x, it.center.y - down.position.y) <=
+                    (if (it.handle == GizmoHandle.MOVE_FREE) 26.0 else 20.0) * density }
                     ?: return@awaitEachGesture
                 if (currentEvent.changes.count { it.pressed } > 1) {
                     currentEvent.changes.forEach { it.consume() }
@@ -350,7 +359,7 @@ fun SelectionGizmo(
         val center = projectGizmo(gizmoCenter(shownBounds), viewport, orbit, is3D, width, height) ?: return@Canvas
         val origin = center.offset()
         if (!enabled) return@Canvas
-        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview)
+        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview, allowResize)
         drawCircle(background.copy(alpha = 0.8f), 5f * this.density, origin)
         drawCircle(accent, 3f * this.density, origin)
         drawCircle(accent.copy(alpha = 0.55f), (sqrt(2.0) * 34 * density).toFloat(), origin,
@@ -372,6 +381,23 @@ fun SelectionGizmo(
                 else -> accent
             }
             when (control.handle) {
+                GizmoHandle.MOVE_FREE -> {
+                    val half = 26f * this.density
+                    drawRoundRect(background, end - Offset(half, half), Size(half * 2, half * 2),
+                        androidx.compose.ui.geometry.CornerRadius(8f * this.density))
+                    drawRoundRect(color, end - Offset(half, half), Size(half * 2, half * 2),
+                        androidx.compose.ui.geometry.CornerRadius(8f * this.density), style = Stroke(2f * this.density))
+                    val arm = 15f * this.density
+                    val head = 5f * this.density
+                    for (direction in listOf(Offset(1f, 0f), Offset(-1f, 0f), Offset(0f, 1f), Offset(0f, -1f))) {
+                        val tip = end + direction * arm
+                        val back = tip - direction * head
+                        val side = Offset(-direction.y, direction.x) * head
+                        drawLine(color, end, tip, 2.5f * this.density)
+                        drawLine(color, tip, back + side, 2.5f * this.density)
+                        drawLine(color, tip, back - side, 2.5f * this.density)
+                    }
+                }
                 GizmoHandle.MOVE_X, GizmoHandle.MOVE_Y, GizmoHandle.MOVE_Z -> {
                     drawLine(color, origin, end, 2.5f * this.density)
                     val direction = end - origin

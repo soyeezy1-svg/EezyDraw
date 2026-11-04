@@ -50,6 +50,22 @@ class ToolsPanelTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    fun drawAndEditGroupsCollapseIndependentlyWithoutChangingTheActiveTool() {
+        var selected by mutableStateOf(DrawingTool.SELECT)
+        compose.setContent { EezyDrawTheme { Panel(selected, onTool = { selected = it }) } }
+        compose.onNodeWithTag("tools_expand").performClick()
+        compose.onNodeWithTag("tools_draw_group").performScrollTo().performClick()
+        compose.onNodeWithTag("tool_line").assertDoesNotExist()
+        compose.onNodeWithTag("tools_copy").assertExists()
+        compose.onNodeWithTag("tools_edit_group").performScrollTo().performClick()
+        compose.onNodeWithTag("tools_copy").assertDoesNotExist()
+        assertEquals(DrawingTool.SELECT, selected)
+        compose.onNodeWithTag("tools_draw_group").performScrollTo().performClick()
+        compose.onNodeWithTag("tool_circle").performScrollTo().performClick()
+        assertEquals(DrawingTool.CIRCLE, selected)
+    }
+
+    @Test
     fun panelStartsCollapsedSelectsAToolAndRetainsExpansionAcrossRestoration() {
         var selected by mutableStateOf(DrawingTool.SELECT)
         val restoration = StateRestorationTester(compose)

@@ -20,6 +20,9 @@ import com.eezydraw.core.editing.ElementProperties
 import com.eezydraw.core.editing.MirrorAxis
 import com.eezydraw.core.editing.SketchGeometry
 import com.eezydraw.core.editing.applyProperties
+import com.eezydraw.core.editing.createMeasurement
+import com.eezydraw.core.editing.updateMeasurement
+import com.eezydraw.core.model.*
 import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.Element
 import com.eezydraw.core.model.ElementBody
@@ -33,6 +36,9 @@ import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.ProjectTemplate
 import com.eezydraw.core.model.SnapSettings
 import com.eezydraw.storage.ProjectExchange
+import com.eezydraw.storage.ViewExport
+import com.eezydraw.storage.ViewExportFormat
+import com.eezydraw.storage.ViewExportRequest
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +98,7 @@ class AppViewModel(
     private var clipboard = emptyList<Element>()
     private var pasteSequence = 0L
     private val storageMutex = Mutex()
+    private var pendingViewExport: Pair<ViewExportRequest, ViewExportFormat>? = null
 
     init {
         viewModelScope.launch {
@@ -176,20 +183,38 @@ class AppViewModel(
         it.copy(project = it.project.copy(settings = it.project.settings.copy(snap = settings)))
     }
 
+    fun changeViewMode(mode: ViewMode) = edit {
+        it.copy(project = it.project.copy(settings = it.project.settings.copy(viewMode = mode)))
+    }
+
+    fun showMeasurements(show: Boolean) = edit {
+        it.copy(project = it.project.copy(settings = it.project.settings.copy(showMeasurements = show)))
+    }
+
+    fun setLayerVisibility(id: LayerId, visible: Boolean) {
+        drawingEdit { _, document -> EditCommands.between(document,
+            document.copy(layers = document.layers.map { if (it.id == id) it.copy(visible = visible) else it }), "Layer visibility") }
+    }
+
+    fun setSystemVisibility(id: SystemId, visible: Boolean) = edit { document ->
+        document.copy(systems = document.systems.map { if (it.id == id) it.copy(visible = visible) else it })
+    }
+
     private fun edit(change: (ProjectDocument) -> ProjectDocument) {
         if (state.value.busy) return
         mutableState.update { current ->
             val document = current.document ?: return@update current
             val changed = change(document)
-            current.copy(document = changed, dirty = changed != savedDocument)
+            current.copy(document = changed, dirty = changed != savedDocument,
+                selectedIds = visibleSelection(changed,current.selectedIds))
         }
     }
 
     fun select(ids: Set<ElementId>) {
         val current = state.value
         if (current.busy) return
-        val existing = current.document?.elements?.mapTo(HashSet()) { it.id } ?: emptySet()
-        mutableState.update { it.copy(selectedIds = ids.intersect(existing)) }
+        val document = current.document ?: return
+        mutableState.update { it.copy(selectedIds = visibleSelection(document,ids)) }
     }
 
     fun addSketch(geometry: SketchGeometry, levelId: String?): Boolean {
@@ -218,6 +243,29 @@ class AppViewModel(
                 "The selected object no longer exists."
             }
             EditCommands.replace(document, listOf(applyProperties(document, element, properties)))
+        }
+    }
+
+    fun updateSavedMeasurement(id: ElementId, start: Point3, end: Point3, label: Point3,
+        name: String, coordinates: Boolean, heightAboveFloor: Boolean) {
+        drawingEdit { _, document ->
+            val element = requireNotNull(document.elements.find { it.id == id }) { "The measurement no longer exists." }
+            EditCommands.replace(document,listOf(updateMeasurement(document,element,start,end,label,name,coordinates,heightAboveFloor)),"Edit measurement")
+        }
+    }
+
+    fun deleteElements(ids: Set<ElementId>) {
+        drawingEdit { _, document -> EditCommands.delete(document,ids) }
+    }
+
+    fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?) {
+        drawingEdit(selectAdded = true) { current, document ->
+            val item = requireNotNull(document.libraryItems.find { it.id == id }) { "The library item is no longer available." }
+            val (prepared, layer) = drawingLayer(document,current.settings.defaultLineWeightMm)
+            val element = Element(ElementId(UUID.randomUUID().toString()),document.project.id,layer.id,
+                ElementBody.Component(item.id,item.defaultSize, item.parameters),levelId?.let(::LevelId),
+                name = item.name,transform = Transform3(translation = at),materialId = item.materialId)
+            EditCommands.between(document,prepared.copy(elements = document.elements + element),"Insert library item")
         }
     }
 
@@ -295,17 +343,40 @@ class AppViewModel(
     }
 
     private fun publishDrawing(current: AppUiState, document: ProjectDocument, selected: Set<ElementId>) {
-        val existing = document.elements.mapTo(HashSet()) { it.id }
         mutableState.value = current.copy(
             document = document,
             dirty = document != savedDocument,
-            selectedIds = selected.intersect(existing),
+            selectedIds = visibleSelection(document,selected),
             canUndo = history.canUndo,
             canRedo = history.canRedo,
             canPaste = clipboard.isNotEmpty(),
             error = null,
             notice = null,
         )
+    }
+
+    private fun visibleSelection(document: ProjectDocument, ids: Set<ElementId>): Set<ElementId> {
+        if (ids.isEmpty()) return emptySet()
+        val hiddenLayers = document.layers.filterNot { it.visible }.mapTo(HashSet()) { it.id }
+        val hiddenSystems = document.systems.filterNot { it.visible }.mapTo(HashSet()) { it.id }
+        return document.elements.asSequence().filter { it.id in ids && it.layerId !in hiddenLayers &&
+            it.systemId !in hiddenSystems && (document.project.settings.showMeasurements || !isMeasurement(it)) }.map { it.id }.toSet()
+    }
+
+    fun prepareViewExport(request: ViewExportRequest, format: ViewExportFormat) {
+        pendingViewExport = request to format
+    }
+
+    fun cancelViewExport() { pendingViewExport = null }
+
+    fun exportView(uri: String) = operation {
+        val (request, format) = pendingViewExport ?: error("Choose a current view to export again.")
+        withContext(Dispatchers.IO) {
+            application.contentResolver.openOutputStream(uri.toUri(),"w")?.use { ViewExport.write(request,format,it) }
+                ?: error(application.getString(R.string.file_unavailable_error))
+        }
+        pendingViewExport = null
+        mutableState.update { it.copy(notice = application.getString(R.string.canvas_view_exported)) }
     }
 
     private fun drawingLayer(document: ProjectDocument, lineWeight: Double): Pair<ProjectDocument, Layer> {

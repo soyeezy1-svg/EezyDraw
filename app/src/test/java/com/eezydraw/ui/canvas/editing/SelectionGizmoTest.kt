@@ -49,6 +49,63 @@ class SelectionGizmoTest {
     private val viewport = Viewport2D(pixelsPerMetre = 20.0)
 
     @Test
+    fun freeMoveHandleStaysSeparateFromRotationAndResizingInPlanAndOrbit() {
+        val box = Bounds3(Point3(), Point3(1.0, 1.0, 1.0))
+        val resize = ResizeFrame(box, Transform3())
+        for (density in listOf(1.0, 2.0)) for (is3D in listOf(false, true)) {
+            val controls = gizmoHandles(box, Viewport2D(Point2(.5, .5), 80.0),
+                OrbitCamera(target = Point3(.5, .5, .5)), is3D, 1200.0, 1000.0, density, resize)
+            val free = controls.single { it.handle == GizmoHandle.MOVE_FREE }
+            controls.filterNot { it.handle == GizmoHandle.MOVE_FREE }.forEach {
+                assertTrue("The 52dp grab control must not overlap ${it.handle}",
+                    hypot(free.center.x - it.center.x, free.center.y - it.center.y) >= 52.0 * density - 1e-7)
+            }
+            assertTrue(controls.any { it.handle == GizmoHandle.ROTATE_Z })
+            assertTrue(controls.any { it.handle == GizmoHandle.MOVE_X })
+            assertTrue(controls.any { it.handle.resizeHandle() != null })
+        }
+    }
+
+    @Test
+    fun fingerCanGrabAtLeastFortyEightDpWideFreeMoveTarget() {
+        var density = 1.0
+        var active: GizmoHandle? = null
+        var commits = 0
+        var preview by mutableStateOf<EditDelta?>(null)
+        compose.setContent {
+            val currentDensity = LocalDensity.current.density
+            SideEffect { density = currentDensity.toDouble() }
+            EezyDrawTheme { Surface { Box(Modifier.fillMaxSize()) {
+                SelectionGizmo(bounds, viewport, OrbitCamera(), false, preview,
+                    onStart = { handle, _ -> active = handle },
+                    onDrag = { _, start, current -> preview = EditDelta(translation = Point3(
+                        (current.x - start.x) / viewport.pixelsPerMetre, -(current.y - start.y) / viewport.pixelsPerMetre)) },
+                    onEnd = { cancelled -> if (!cancelled) commits++; preview = null })
+            } } }
+        }
+        val node = compose.onNodeWithTag("selection_gizmo")
+        val area = node.fetchSemanticsNode().boundsInRoot
+        val free = gizmoHandles(bounds, viewport, OrbitCamera(), false, area.width.toDouble(), area.height.toDouble(), density)
+            .single { it.handle == GizmoHandle.MOVE_FREE }
+        val edge = Offset((free.center.x + 24.0 * density).toFloat(), free.center.y.toFloat())
+        node.performTouchInput { down(edge); moveTo(edge + Offset(30f, 20f), delayMillis = 32); up() }
+        compose.runOnIdle {
+            assertEquals(GizmoHandle.MOVE_FREE, active)
+            assertEquals(1, commits)
+            assertNull(preview)
+        }
+    }
+
+    @Test
+    fun attachedAnnotationsCanKeepMoveAndRotationWithoutResizeControls() {
+        val controls = gizmoHandles(bounds, viewport, OrbitCamera(), false, 1000.0, 800.0, 1.0,
+            resizeFrame = ResizeFrame(bounds, Transform3()), allowResize = false)
+        assertTrue(controls.any { it.handle == GizmoHandle.MOVE_FREE })
+        assertTrue(controls.any { it.handle == GizmoHandle.ROTATE_Z })
+        assertFalse(controls.any { it.handle == GizmoHandle.SCALE || it.handle.resizeHandle() != null })
+    }
+
+    @Test
     fun frontAndSideRotationRemainUsableInBothProjections() {
         val pivot = Point3(1e9, -1e9, 2.0)
         for (projection in Projection.entries) for (view in listOf(ViewPreset.FRONT, ViewPreset.SIDE)) {
