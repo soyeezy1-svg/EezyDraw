@@ -33,11 +33,15 @@ data class ProjectSettings(
     val defaultRouteElevations: Map<RouteKind, ElevationSetting> = emptyMap(),
     val viewMode: ViewMode = ViewMode.WIREFRAME,
     val showMeasurements: Boolean = true,
+    /** Render/readout option; the app's detailed-measurement preference overrides this at display time. */
+    val showDetailedMeasurements: Boolean = false,
+    val rotationSnapDegrees: Int = 15,
 ) {
     init {
         require(decimalPlaces in 0..8)
         require(defaultWallThickness.isFinite() && defaultWallThickness > 0)
         require(defaultWallHeight.isFinite() && defaultWallHeight > 0)
+        require(rotationSnapDegrees in setOf(1, 5, 15, 45, 90))
     }
 }
 
@@ -61,6 +65,8 @@ data class AppSettings(
     val exportIncludeUnderlays: Boolean = true,
     val showAutosaveNotification: Boolean = false,
     val bodyDragMovesSelection: Boolean = false,
+    val showDetailedMeasurement: Boolean = false,
+    val keepToolActiveAfterPlacing: Boolean = false,
 ) {
     init {
         require(languageTag.isNotBlank())

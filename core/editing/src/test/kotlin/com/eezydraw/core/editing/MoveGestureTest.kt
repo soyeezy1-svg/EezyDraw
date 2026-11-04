@@ -54,33 +54,33 @@ class MoveGestureTest {
         assertTrue("A perpendicular drag must not jump the move axis onto a grid", perpendicular.isIdentity)
     }
 
-    @Test fun freeOrbitDraggingStaysOnTheCameraFacingPlaneInBothLensTypes() {
+    @Test fun freeOrbitDraggingStaysOnTheHorizontalGroundPlaneInBothLensTypes() {
         val pivot = Point3(1.0, 2.0, 3.0)
-        val target = Point3(1.6, 2.0, 3.4)
+        val target = Point3(1.6, 2.4, 3.0)
         for (projection in Projection.entries) {
-            val camera = orbit.copy(target = pivot, projection = projection)
+            val camera = orbit.copy(target = pivot, projection = projection).preset(ViewPreset.ISOMETRIC)
             val delta = orbitMove(context(), pivot, target, camera, SnapSettings(enabled = false))
-            assertPoint(Point3(.6, 0.0, .4), delta.translation)
+            assertPoint(Point3(.6, .4, 0.0), delta.translation)
         }
     }
 
-    @Test fun orbitSnapsUseActualElevationAndRejectGeometryAtAnotherDepth() {
-        val pivot = Point3()
-        val target = Point3(.98, 0.0, 1.98)
-        val endpoint = Point3(1.0, 0.0, 2.0)
-        val ctx = context(listOf(edge(endpoint, Point3(2.0, 0.0, 2.0))))
+    @Test fun axisSnapsUseActualElevationAndRejectGeometryOffTheConstrainedLine() {
+        val pivot = Point3(.5, .5, 0.0)
+        val target = Point3(.5, .5, 1.98)
+        val endpoint = Point3(.5, .5, 2.0)
+        val ctx = context(listOf(edge(endpoint, Point3(.5, .5, 3.0))))
         for (projection in Projection.entries) {
-            val camera = orbit.copy(projection = projection)
-            assertPoint(endpoint, orbitMove(ctx, pivot, target, camera, snaps(SnapMode.ENDPOINT)).translation)
-            val behind = context(listOf(edge(Point3(.98, .04, 1.98), Point3(2.0, .04, 2.0))))
-            assertPoint(target, orbitMove(behind, pivot, target, camera, snaps(SnapMode.ENDPOINT)).translation)
+            val camera = orbit.copy(target=pivot,projection = projection).preset(ViewPreset.ISOMETRIC)
+            assertPoint(Point3(0.0,0.0,2.0), orbitMove(ctx, pivot, target, camera, snaps(SnapMode.ENDPOINT),Point3(z=1.0)).translation)
+            val offAxis = context(listOf(edge(Point3(.54, .5, 1.98), Point3(.54, .5, 3.0))))
+            assertPoint(Point3(0.0,0.0,1.98), orbitMove(offAxis, pivot, target, camera, snaps(SnapMode.ENDPOINT),Point3(z=1.0)).translation)
         }
     }
 
     @Test fun orbitGridAndZConstrainedMovesPreserveTheirPlaneOrAxis() {
         val ctx = context()
-        val free = orbitMove(ctx, Point3(), Point3(.23, 0.0, .28), orbit, snaps(SnapMode.GRID))
-        assertPoint(Point3(.2, 0.0, .3), free.translation)
+        val free = orbitMove(ctx, Point3(), Point3(.23, .28, 0.0), orbit.preset(ViewPreset.ISOMETRIC), snaps(SnapMode.GRID))
+        assertPoint(Point3(.2, .3, 0.0), free.translation)
         val pivot = Point3(.17, .21, 1.2)
         val camera = orbit.copy(target = pivot)
         val z = orbitMove(ctx, pivot, pivot.copy(z = 1.463), camera, snaps(SnapMode.GRID), Point3(z = 1.0))
@@ -120,6 +120,50 @@ class MoveGestureTest {
         val ctx = MoveContext(doc, setOf(selectedId), scene(listOf(edge(Point3(.3, .4), Point3(2.0, .4), measurement.id.value))))
         val target = Point3(.29, .39)
         assertPoint(target, planMove(ctx, Point3(), target, snaps(SnapMode.ENDPOINT)).translation)
+    }
+
+    @Test fun everyWorldArrowWorksAndSnapsInPlanTopFrontSideAndIsometricViews() {
+        val axes=listOf(Point3(x=1.0),Point3(y=1.0),Point3(z=1.0))
+        val cameras=ViewPreset.entries.map {orbit.copy(target=Point3(),projection=Projection.ORTHOGRAPHIC).preset(it)}
+        for(is3D in listOf(false,true))for(camera in cameras)for((index,axis)in axes.withIndex()) {
+            val pivot=Point3()
+            val start=if(is3D)camera.project(pivot,width,height)!!.let {Point2(it.x,it.y)} else viewport.worldToScreen(Point2(0.0,0.0),width,height)
+            val endWorld=Point3(axis.x*.28,axis.y*.28,axis.z*.28)
+            var end=if(is3D)camera.project(endWorld,width,height)!!.let {Point2(it.x,it.y)} else viewport.worldToScreen(Point2(endWorld.x,endWorld.y),width,height)
+            if(kotlin.math.hypot(end.x-start.x,end.y-start.y)<1.0) {
+                val direction=moveAxisScreenDirection(axis,viewport,camera,is3D,width,height,pivot)
+                val metresPerPixel=if(is3D)camera.orthographicHeight/height else 1.0/viewport.pixelsPerMetre
+                end=Point2(start.x+direction.x*.28/metresPerPixel,start.y+direction.y*.28/metresPerPixel)
+            }
+            val result=context().delta(pivot,start,end,axis,viewport,camera,is3D,width,height,snaps(SnapMode.GRID),14.0).translation
+            assertPoint(Point3(if(index==0).3 else 0.0,if(index==1).3 else 0.0,if(index==2).3 else 0.0),result)
+        }
+    }
+
+    @Test fun freeGroundSquareStillMovesBothHorizontalAxesInEdgeOnFrontAndSideViews() {
+        for(preset in listOf(ViewPreset.FRONT,ViewPreset.SIDE)) {
+            val camera=orbit.copy(target=Point3(2.0,3.0,1.2),projection=Projection.ORTHOGRAPHIC).preset(preset)
+            val result=context().delta(camera.target,Point2(500.0,400.0),Point2(580.0,360.0),null,viewport,camera,true,width,height,
+                SnapSettings(enabled=false),14.0).translation
+            assertEquals(0.0,result.z,0.0)
+            assertTrue("Both X and Y stay controllable from $preset",kotlin.math.abs(result.x)>.1 && kotlin.math.abs(result.y)>.1)
+        }
+    }
+
+    @Test fun planZVirtualArrowRaisesAndLowersWithoutChangingXYAndIsUndoable() {
+        val document=document().copy(layers=listOf(Layer(LayerId("drawing"),projectId,"Drawing")))
+        val pivot=Point3(2.0,3.0,1.2)
+        val raised=context().delta(pivot,Point2(500.0,400.0),Point2(500.0,350.0),Point3(z=1.0),viewport,orbit,false,width,height,
+            SnapSettings(enabled=false),14.0)
+        assertPoint(Point3(0.0,0.0,.5),raised.translation)
+        val history=EditHistory()
+        val after=history.execute(document,EditCommands.transform(document,setOf(selectedId),raised))
+        assertPoint(Point3(z=.5),after.elements.single().transform.translation)
+        assertEquals(document,history.undo(after))
+        assertEquals(after,history.redo(document))
+        val lowered=context().delta(pivot,Point2(500.0,400.0),Point2(500.0,450.0),Point3(z=1.0),viewport,orbit,false,width,height,
+            SnapSettings(enabled=false),14.0)
+        assertPoint(Point3(0.0,0.0,-.5),lowered.translation)
     }
 
     private fun context(edges: List<SceneSegment> = emptyList()) = MoveContext(document(), setOf(selectedId), scene(edges))

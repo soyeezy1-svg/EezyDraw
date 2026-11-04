@@ -29,12 +29,14 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntSize
 import com.eezydraw.R
 import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.editing.ResizeFrame
 import com.eezydraw.core.editing.ResizeHandle
 import com.eezydraw.core.editing.resizePlaneVisible
+import com.eezydraw.core.editing.moveAxisScreenDirection
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.Viewport2D
 import com.eezydraw.core.model.Bounds3
@@ -47,9 +49,13 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.PI
+import java.util.Locale
+
+enum class GizmoMode { MOVE, ROTATE, SCALE }
 
 enum class GizmoHandle {
-    MOVE_FREE, MOVE_X, MOVE_Y, MOVE_Z, ROTATE_Z, SCALE,
+    MOVE_FREE, MOVE_X, MOVE_Y, MOVE_Z, ROTATE_X, ROTATE_Y, ROTATE_Z, SCALE,
     RESIZE_WIDTH_NEGATIVE, RESIZE_WIDTH_POSITIVE,
     RESIZE_DEPTH_NEGATIVE, RESIZE_DEPTH_POSITIVE,
     RESIZE_CORNER_MIN_MIN, RESIZE_CORNER_MAX_MIN, RESIZE_CORNER_MAX_MAX, RESIZE_CORNER_MIN_MAX,
@@ -75,6 +81,8 @@ data class GizmoControl(
     val center: Point2,
     val anchor: Point2? = null,
     val accessibleStep: Point2? = null,
+    /** Closed, projected rotation band; all points share the handle's rotation axis. */
+    val rotationRing: List<Point2> = emptyList(),
 )
 
 /**
@@ -111,7 +119,7 @@ fun gizmoRotationZ(
     return atan2(sin(angle), cos(angle))
 }
 
-/** Fixed-size screen controls; axes which point directly toward the eye have no handle. */
+/** Fixed-size, mode-specific controls. Unobservable move axes retain a virtual drag arrow. */
 fun gizmoHandles(
     bounds: Bounds3,
     viewport: Viewport2D,
@@ -123,46 +131,71 @@ fun gizmoHandles(
     resizeFrame: ResizeFrame? = null,
     preview: EditDelta? = null,
     allowResize: Boolean = true,
+    mode: GizmoMode = GizmoMode.MOVE,
 ): List<GizmoControl> {
     if (width <= 0.0 || height <= 0.0 || density <= 0.0) return emptyList()
     val shownBounds = previewGizmoBounds(bounds, preview)
     val pivot = gizmoCenter(shownBounds)
     val center = projectGizmo(pivot, viewport, orbit, is3D, width, height) ?: return emptyList()
-    val arm = 72.0 * density
-    val axes = listOf(GizmoHandle.MOVE_X to Point3(1.0), GizmoHandle.MOVE_Y to Point3(y = 1.0)) +
-        if (is3D) listOf(GizmoHandle.MOVE_Z to Point3(z = 1.0)) else emptyList()
+    if (mode == GizmoMode.ROTATE) return rotationControls(pivot, center, viewport, orbit, is3D, width, height, density)
+    if (mode == GizmoMode.SCALE) {
+        if (!allowResize) return emptyList()
+        return resizeFrame?.let { resizeControls(it, preview, viewport, orbit, is3D, width, height, density) }
+            ?: listOf(GizmoControl(GizmoHandle.SCALE,
+                Point2(center.x + 64.0 * density, center.y + 64.0 * density)))
+    }
     val result = ArrayList<GizmoControl>()
-    if (resizeFrame != null && allowResize) {
-        result.addAll(resizeControls(resizeFrame, preview, viewport, orbit, is3D, width, height, density))
-    }
-    fun separated(origin: Point2, direction: Point2, initial: Double, minimum: Double = 44.0): Point2 {
-        var distance = initial
-        repeat(24) {
-            val point = Point2(origin.x + direction.x * distance, origin.y + direction.y * distance)
-            if (result.none { hypot(it.center.x - point.x, it.center.y - point.y) <
-                    max(minimum, if (it.handle == GizmoHandle.MOVE_FREE) 52.0 else 44.0) * density }) return point
-            distance += 44.0 * density
-        }
-        return Point2(origin.x + direction.x * distance, origin.y + direction.y * distance)
-    }
-    // The free-move affordance is 52dp wide, above the projected object centre. Its
-    // position is separated from resize controls before the smaller axes/ring are added.
-    val free = separated(center, Point2(0.0, -1.0), 52.0 * density, 52.0)
-    result.add(GizmoControl(GizmoHandle.MOVE_FREE, free, accessibleStep = Point2(12.0 * density, 0.0)))
+    // The square stays at the object centre. Axis arrows are separated from its 52dp target.
+    result.add(GizmoControl(GizmoHandle.MOVE_FREE, center, accessibleStep = Point2(12.0 * density, 0.0)))
+    val axes = listOf(GizmoHandle.MOVE_X to Point3(1.0), GizmoHandle.MOVE_Y to Point3(y = 1.0),
+        GizmoHandle.MOVE_Z to Point3(z = 1.0))
     for ((handle, axis) in axes) {
-        // A camera-relative step avoids subtracting almost equal projections at very distant zoom.
-        val step = if (is3D) max(orbit.distance, orbit.orthographicHeight) * 0.001 else 1.0
-        val endpoint = projectGizmo(Point3(pivot.x + axis.x * step, pivot.y + axis.y * step, pivot.z + axis.z * step),
-            viewport, orbit, is3D, width, height) ?: continue
-        val dx = endpoint.x - center.x; val dy = endpoint.y - center.y
-        val length = hypot(dx, dy)
-        if (length < 1e-8 * density) continue
-        result.add(GizmoControl(handle, separated(center, Point2(dx / length, dy / length), arm)))
+        val direction = moveAxisScreenDirection(axis, viewport, orbit, is3D, width, height, pivot)
+        var distance = 84.0 * density
+        var end = Point2(center.x + direction.x * distance, center.y + direction.y * distance)
+        while (result.any { hypot(it.center.x - end.x, it.center.y - end.y) < 52.0 * density } && distance < 1300.0 * density) {
+            distance += 52.0 * density
+            end = Point2(center.x + direction.x * distance, center.y + direction.y * distance)
+        }
+        result.add(GizmoControl(handle, end, accessibleStep = Point2(direction.x * 12.0 * density, direction.y * 12.0 * density)))
     }
-    val diagonal = 1.0 / sqrt(2.0)
-    result.add(GizmoControl(GizmoHandle.ROTATE_Z, separated(center, Point2(-diagonal, -diagonal), sqrt(2.0) * 34.0 * density)))
-    if (resizeFrame == null && allowResize) result.add(GizmoControl(GizmoHandle.SCALE,
-        separated(center, Point2(diagonal, diagonal), sqrt(2.0) * 48.0 * density)))
+    return result
+}
+
+/** The three world-axis bands remain distinct; a collapsed plane becomes a screen dial. */
+private fun rotationControls(
+    pivot: Point3, center: Point2, viewport: Viewport2D, orbit: OrbitCamera,
+    is3D: Boolean, width: Double, height: Double, density: Double,
+): List<GizmoControl> {
+    val result = ArrayList<GizmoControl>()
+    val axes = listOf(Point3(1.0), Point3(y = 1.0), Point3(z = 1.0))
+    val handles = listOf(GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z)
+    val step = if (is3D) max(orbit.distance, orbit.orthographicHeight) * .001 else 1.0
+    for (axis in 0..2) {
+        val radius = (72.0 + axis * 24.0) * density
+        fun projectedDirection(direction: Point3): Point2? = projectGizmo(Point3(
+            pivot.x + direction.x * step, pivot.y + direction.y * step, pivot.z + direction.z * step,
+        ), viewport, orbit, is3D, width, height)?.let { Point2(it.x - center.x, it.y - center.y) }
+        val pu = projectedDirection(axes[(axis + 1) % 3]) ?: Point2(0.0, 0.0)
+        val pv = projectedDirection(axes[(axis + 2) % 3]) ?: Point2(0.0, 0.0)
+        val lu = hypot(pu.x, pu.y); val lv = hypot(pv.x, pv.y)
+        val collapsed = lu < 1e-7 || lv < 1e-7 || abs(pu.x * pv.y - pu.y * pv.x) / (lu * lv) < .15
+        val longest = max(lu, lv).coerceAtLeast(1e-12)
+        val u = if (collapsed) Point2(radius, 0.0) else Point2(pu.x / longest * radius, pu.y / longest * radius)
+        val v = if (collapsed) Point2(0.0, -radius) else Point2(pv.x / longest * radius, pv.y / longest * radius)
+        val points = (0 until 64).map { index ->
+            val angle = index * 2 * PI / 64
+            Point2(center.x + u.x * cos(angle) + v.x * sin(angle), center.y + u.y * cos(angle) + v.y * sin(angle))
+        }.let { it + it.first() }
+        val preferred = listOf(24, 40, 8)[axis]
+        val index = (0 until 64).map { (preferred + it) % 64 }.firstOrNull { at ->
+            result.all { hypot(it.center.x - points[at].x, it.center.y - points[at].y) >= 52.0 * density }
+        } ?: preferred
+        val handlePoint = points[index]
+        val next = points[(index + 16) % 64]
+        result.add(GizmoControl(handles[axis], handlePoint,
+            accessibleStep = Point2(next.x - handlePoint.x, next.y - handlePoint.y), rotationRing = points))
+    }
     return result
 }
 
@@ -202,8 +235,8 @@ private fun resizeControls(
         var attempts = 0
         while (attempts++ < 24) {
             displayed = Point2(baseCenter.x + dx / length * arm, baseCenter.y + dy / length * arm)
-            if (result.none { hypot(it.center.x - displayed.x, it.center.y - displayed.y) < 44.0 * density }) break
-            arm += 44.0 * density
+            if (result.none { hypot(it.center.x - displayed.x, it.center.y - displayed.y) < 52.0 * density }) break
+            arm += 52.0 * density
         }
         // A small action uses ten percent of this physical dimension, independent of zoom/units.
         val axes = listOf(frame.axis(0), frame.axis(1), frame.axis(2))
@@ -251,6 +284,8 @@ fun SelectionGizmo(
     enabled: Boolean = true,
     resizeFrame: ResizeFrame? = null,
     allowResize: Boolean = true,
+    mode: GizmoMode = GizmoMode.MOVE,
+    rotationAngleDegrees: Double? = null,
 ) {
     val density = LocalDensity.current.density.toDouble()
     val accent = MaterialTheme.colorScheme.primary
@@ -260,11 +295,14 @@ fun SelectionGizmo(
     val latestEnd by rememberUpdatedState(onEnd)
     val latestPreview by rememberUpdatedState(preview)
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+    var activeHandle by remember { mutableStateOf<GizmoHandle?>(null) }
     val labels = mapOf(
         GizmoHandle.MOVE_FREE to stringResource(R.string.gizmo_move_free),
         GizmoHandle.MOVE_X to stringResource(R.string.gizmo_move_x),
         GizmoHandle.MOVE_Y to stringResource(R.string.gizmo_move_y),
         GizmoHandle.MOVE_Z to stringResource(R.string.gizmo_move_z),
+        GizmoHandle.ROTATE_X to stringResource(R.string.gizmo_rotate_x),
+        GizmoHandle.ROTATE_Y to stringResource(R.string.gizmo_rotate_y),
         GizmoHandle.ROTATE_Z to stringResource(R.string.gizmo_rotate_z),
         GizmoHandle.SCALE to stringResource(R.string.gizmo_scale),
         GizmoHandle.RESIZE_WIDTH_NEGATIVE to stringResource(R.string.gizmo_resize_width_negative),
@@ -280,10 +318,11 @@ fun SelectionGizmo(
     val description = stringResource(R.string.gizmo_selection)
     fun currentBounds() = previewGizmoBounds(bounds, latestPreview)
     val controls = gizmoHandles(bounds, viewport, orbit, is3D,
-        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview, allowResize)
+        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode)
     Canvas(modifier.fillMaxSize().onSizeChanged { surfaceSize = it }.testTag("selection_gizmo")
         .semantics {
             contentDescription = description
+            if (mode == GizmoMode.ROTATE && rotationAngleDegrees != null) stateDescription = angleLabel(rotationAngleDegrees)
             if (enabled) customActions = controls.map { control ->
                 CustomAccessibilityAction(labels.getValue(control.handle)) {
                     val center = projectGizmo(gizmoCenter(currentBounds()), viewport, orbit, is3D,
@@ -292,7 +331,7 @@ fun SelectionGizmo(
                         val start = Offset(control.center.x.toFloat(), control.center.y.toFloat())
                         val dx = control.center.x - center.x; val dy = control.center.y - center.y
                         val end = control.accessibleStep?.let { start + it.offset() } ?: when (control.handle) {
-                            GizmoHandle.ROTATE_Z -> Offset((center.x - dy).toFloat(), (center.y + dx).toFloat())
+                            GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z -> Offset((center.x - dy).toFloat(), (center.y + dx).toFloat())
                             GizmoHandle.SCALE -> Offset((center.x + dx * 1.1).toFloat(), (center.y + dy * 1.1).toFloat())
                             else -> start + Offset((dx / 6).toFloat(), (dy / 6).toFloat())
                         }
@@ -304,16 +343,22 @@ fun SelectionGizmo(
                 }
             }
         }
-        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame, allowResize) {
+        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame, allowResize, mode) {
             if (!enabled) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = true)
                 val controlsAtDown = gizmoHandles(bounds, viewport, orbit, is3D,
-                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview, allowResize)
-                val control = controlsAtDown.minByOrNull {
-                    hypot(it.center.x - down.position.x, it.center.y - down.position.y)
-                }?.takeIf { hypot(it.center.x - down.position.x, it.center.y - down.position.y) <=
-                    (if (it.handle == GizmoHandle.MOVE_FREE) 26.0 else 20.0) * density }
+                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode)
+                val position = Point2(down.position.x.toDouble(), down.position.y.toDouble())
+                val knob = controlsAtDown.minByOrNull { hypot(it.center.x - position.x, it.center.y - position.y) }
+                    ?.takeIf {
+                        if (it.handle == GizmoHandle.MOVE_FREE)
+                            max(abs(it.center.x - position.x), abs(it.center.y - position.y)) <= 26.0 * density
+                        else hypot(it.center.x - position.x, it.center.y - position.y) <= 24.0 * density
+                    }
+                val control = knob ?: controlsAtDown.filter { it.rotationRing.isNotEmpty() }.minByOrNull {
+                    distanceToRing(position, it.rotationRing)
+                }?.takeIf { distanceToRing(position, it.rotationRing) <= 24.0 * density }
                     ?: return@awaitEachGesture
                 if (currentEvent.changes.count { it.pressed } > 1) {
                     currentEvent.changes.forEach { it.consume() }
@@ -322,6 +367,7 @@ fun SelectionGizmo(
                 down.consume()
                 var completed = false
                 try {
+                    activeHandle = control.handle
                     latestStart(control.handle, down.position)
                     var cancelled = false
                     while (true) {
@@ -338,32 +384,32 @@ fun SelectionGizmo(
                     }
                     completed = true
                     latestEnd(cancelled)
+                    activeHandle = null
                 } finally {
                     if (!completed) latestEnd(true)
+                    activeHandle = null
                 }
             }
         }) {
         val width = size.width.toDouble(); val height = size.height.toDouble()
-        val originalCorners = if (resizeFrame == null) gizmoCorners(bounds)
-            else gizmoCorners(resizeFrame.localBounds).map(resizeFrame::worldPoint)
-        val corners = originalCorners.map { latestPreview?.apply(it) ?: it }
-        val projected = corners.map { projectGizmo(it, viewport, orbit, is3D, width, height) }
         val dash = PathEffect.dashPathEffect(floatArrayOf(6f * this.density, 4f * this.density))
-        for (i in corners.indices) for (axis in listOf(1, 2, 4)) {
-            val j = i xor axis
-            if (j <= i || !is3D && axis == 1) continue
-            val a = projected[i] ?: continue; val b = projected[j] ?: continue
-            drawLine(accent.copy(alpha = 0.8f), a.offset(), b.offset(), 1.5f * this.density, pathEffect = dash)
+        if (mode == GizmoMode.SCALE) {
+            val originalCorners = if (resizeFrame == null) gizmoCorners(bounds)
+                else gizmoCorners(resizeFrame.localBounds).map(resizeFrame::worldPoint)
+            val corners = originalCorners.map { latestPreview?.apply(it) ?: it }
+            val projected = corners.map { projectGizmo(it, viewport, orbit, is3D, width, height) }
+            for (i in corners.indices) for (axis in listOf(1, 2, 4)) {
+                val j = i xor axis
+                if (j <= i || !is3D && axis == 1) continue
+                val a = projected[i] ?: continue; val b = projected[j] ?: continue
+                drawLine(accent.copy(alpha = .7f), a.offset(), b.offset(), 1.5f * this.density, pathEffect = dash)
+            }
         }
         val shownBounds = previewGizmoBounds(bounds, latestPreview)
         val center = projectGizmo(gizmoCenter(shownBounds), viewport, orbit, is3D, width, height) ?: return@Canvas
         val origin = center.offset()
         if (!enabled) return@Canvas
-        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview, allowResize)
-        drawCircle(background.copy(alpha = 0.8f), 5f * this.density, origin)
-        drawCircle(accent, 3f * this.density, origin)
-        drawCircle(accent.copy(alpha = 0.55f), (sqrt(2.0) * 34 * density).toFloat(), origin,
-            style = Stroke(1.5f * this.density))
+        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview, allowResize, mode)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 12f * this@Canvas.density
             textAlign = Paint.Align.CENTER
@@ -372,9 +418,9 @@ fun SelectionGizmo(
         for (control in visibleControls) {
             val end = control.center.offset()
             val color = when (control.handle) {
-                GizmoHandle.MOVE_X -> Color(0xFFD64747)
-                GizmoHandle.MOVE_Y -> Color(0xFF23965C)
-                GizmoHandle.MOVE_Z -> Color(0xFF3976D2)
+                GizmoHandle.MOVE_X, GizmoHandle.ROTATE_X -> Color(0xFFD64747)
+                GizmoHandle.MOVE_Y, GizmoHandle.ROTATE_Y -> Color(0xFF23965C)
+                GizmoHandle.MOVE_Z, GizmoHandle.ROTATE_Z -> Color(0xFF3976D2)
                 GizmoHandle.RESIZE_WIDTH_NEGATIVE, GizmoHandle.RESIZE_WIDTH_POSITIVE -> Color(0xFFD64747)
                 GizmoHandle.RESIZE_DEPTH_NEGATIVE, GizmoHandle.RESIZE_DEPTH_POSITIVE -> Color(0xFF23965C)
                 GizmoHandle.RESIZE_HEIGHT -> Color(0xFF3976D2)
@@ -384,9 +430,9 @@ fun SelectionGizmo(
                 GizmoHandle.MOVE_FREE -> {
                     val half = 26f * this.density
                     drawRoundRect(background, end - Offset(half, half), Size(half * 2, half * 2),
-                        androidx.compose.ui.geometry.CornerRadius(8f * this.density))
+                        androidx.compose.ui.geometry.CornerRadius(3f * this.density))
                     drawRoundRect(color, end - Offset(half, half), Size(half * 2, half * 2),
-                        androidx.compose.ui.geometry.CornerRadius(8f * this.density), style = Stroke(2f * this.density))
+                        androidx.compose.ui.geometry.CornerRadius(3f * this.density), style = Stroke(2f * this.density))
                     val arm = 15f * this.density
                     val head = 5f * this.density
                     for (direction in listOf(Offset(1f, 0f), Offset(-1f, 0f), Offset(0f, 1f), Offset(0f, -1f))) {
@@ -400,34 +446,45 @@ fun SelectionGizmo(
                 }
                 GizmoHandle.MOVE_X, GizmoHandle.MOVE_Y, GizmoHandle.MOVE_Z -> {
                     drawLine(color, origin, end, 2.5f * this.density)
+                    drawCircle(background.copy(alpha = .95f), 24f * this.density, end)
+                    drawCircle(color, 24f * this.density, end, style = Stroke(2f * this.density))
                     val direction = end - origin
                     val unit = direction / direction.getDistance()
                     val perpendicular = Offset(-unit.y, unit.x)
-                    val back = end - unit * (10f * this.density)
-                    drawLine(color, end, back + perpendicular * (5f * this.density), 2.5f * this.density)
-                    drawLine(color, end, back - perpendicular * (5f * this.density), 2.5f * this.density)
+                    val tip = end + unit * (12f * this.density)
+                    val back = end - unit * (2f * this.density)
+                    drawLine(color, end - unit * (12f * this.density), tip, 2.5f * this.density)
+                    drawLine(color, tip, back + perpendicular * (7f * this.density), 2.5f * this.density)
+                    drawLine(color, tip, back - perpendicular * (7f * this.density), 2.5f * this.density)
                     val label = when (control.handle) { GizmoHandle.MOVE_X -> "X"; GizmoHandle.MOVE_Y -> "Y"; else -> "Z" }
                     paint.color = color.toArgb()
-                    val textAt = end + unit * (14f * this.density)
+                    val textAt = end + perpendicular * (17f * this.density)
                     drawContext.canvas.nativeCanvas.drawText(label, textAt.x, textAt.y + 4f * this.density, paint)
                 }
-                GizmoHandle.ROTATE_Z -> {
-                    drawCircle(background, 10f * this.density, end)
-                    drawArc(color, 35f, 290f, false, end - Offset(7f, 7f) * this.density,
-                        Size(14f, 14f) * this.density, style = Stroke(2f * this.density))
+                GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z -> {
+                    val ringWidth = if (activeHandle == control.handle) 4f else 2.5f
+                    control.rotationRing.zipWithNext().forEach { (a, b) ->
+                        drawLine(color.copy(alpha = if (activeHandle == null || activeHandle == control.handle) .95f else .45f),
+                            a.offset(), b.offset(), ringWidth * this.density)
+                    }
+                    drawCircle(background, 24f * this.density, end)
+                    drawCircle(color, 24f * this.density, end, style = Stroke(2.5f * this.density))
+                    val label = when (control.handle) { GizmoHandle.ROTATE_X -> "X"; GizmoHandle.ROTATE_Y -> "Y"; else -> "Z" }
+                    paint.color = color.toArgb()
+                    drawContext.canvas.nativeCanvas.drawText(label, end.x, end.y + 4f * this.density, paint)
                 }
                 GizmoHandle.SCALE -> {
                     drawLine(color, origin, end, 1.5f * this.density, pathEffect = dash)
-                    drawRect(background, end - Offset(7f, 7f) * this.density, Size(14f, 14f) * this.density)
-                    drawRect(color, end - Offset(7f, 7f) * this.density, Size(14f, 14f) * this.density, style = Stroke(2f * this.density))
+                    drawRect(background, end - Offset(24f, 24f) * this.density, Size(48f, 48f) * this.density)
+                    drawRect(color, end - Offset(24f, 24f) * this.density, Size(48f, 48f) * this.density, style = Stroke(2f * this.density))
                 }
                 else -> {
                     control.anchor?.let { anchor ->
                         if (hypot(anchor.x - control.center.x, anchor.y - control.center.y) > 3 * density)
                             drawLine(color.copy(alpha = .65f), anchor.offset(), end, this.density, pathEffect = dash)
                     }
-                    drawRect(background, end - Offset(7f, 7f) * this.density, Size(14f, 14f) * this.density)
-                    drawRect(color, end - Offset(7f, 7f) * this.density, Size(14f, 14f) * this.density,
+                    drawRect(background, end - Offset(24f, 24f) * this.density, Size(48f, 48f) * this.density)
+                    drawRect(color, end - Offset(24f, 24f) * this.density, Size(48f, 48f) * this.density,
                         style = Stroke(2f * this.density))
                     val text = when (control.handle) {
                         GizmoHandle.RESIZE_WIDTH_NEGATIVE, GizmoHandle.RESIZE_WIDTH_POSITIVE -> "W"
@@ -437,11 +494,25 @@ fun SelectionGizmo(
                     }
                     if (text != null) {
                         paint.color = color.toArgb()
-                        drawContext.canvas.nativeCanvas.drawText(text, end.x, end.y - 12f * this.density, paint)
+                        drawContext.canvas.nativeCanvas.drawText(text, end.x, end.y + 4f * this.density, paint)
                     }
                 }
             }
         }
+        if (mode == GizmoMode.ROTATE && rotationAngleDegrees != null) {
+            paint.color = accent.toArgb()
+            paint.textSize = 16f * this.density
+            val text = angleLabel(rotationAngleDegrees)
+            val textWidth = paint.measureText(text)
+            val margin = textWidth / 2 + 12f * this.density
+            val labelX = if (size.width < margin * 2) size.width / 2 else origin.x.coerceIn(margin, size.width - margin)
+            val labelY = (origin.y + 156f * this.density).coerceIn(28f * this.density, max(28f * this.density, size.height - 12f * this.density))
+            val at = Offset(labelX, labelY)
+            drawRoundRect(background.copy(alpha = .96f), at - Offset(textWidth / 2 + 12f * this.density, 22f * this.density),
+                Size(textWidth + 24f * this.density, 32f * this.density), androidx.compose.ui.geometry.CornerRadius(6f * this.density))
+            drawContext.canvas.nativeCanvas.drawText(text, at.x, at.y, paint)
+        }
+
     }
 }
 
@@ -460,3 +531,12 @@ private fun previewGizmoBounds(bounds: Bounds3, preview: EditDelta?): Bounds3 {
 private fun projectGizmo(point: Point3, viewport: Viewport2D, orbit: OrbitCamera, is3D: Boolean, width: Double, height: Double): Point2? =
     if (is3D) orbit.project(point, width, height)?.let { Point2(it.x, it.y) }
     else viewport.worldToScreen(Point2(point.x, point.y), width, height)
+
+private fun angleLabel(angle: Double): String = String.format(Locale.getDefault(), "%+.0f°", angle)
+
+private fun distanceToRing(point: Point2, ring: List<Point2>): Double = ring.zipWithNext().minOfOrNull { (a, b) ->
+    val dx = b.x - a.x; val dy = b.y - a.y
+    val length = dx * dx + dy * dy
+    val t = if (length < 1e-12) 0.0 else (((point.x - a.x) * dx + (point.y - a.y) * dy) / length).coerceIn(0.0, 1.0)
+    hypot(point.x - a.x - t * dx, point.y - a.y - t * dy)
+} ?: Double.POSITIVE_INFINITY

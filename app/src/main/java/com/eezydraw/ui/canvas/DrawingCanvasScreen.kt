@@ -14,6 +14,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Save
@@ -45,6 +47,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import com.eezydraw.R
 import com.eezydraw.core.geometry.*
 import com.eezydraw.core.editing.*
@@ -57,6 +60,7 @@ import com.eezydraw.ui.projects.lengthUnitLabel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -84,6 +88,7 @@ private sealed interface SceneLoad {
         val selectedAnnotationScene: DrawingScene?,
         val measurementScene: DrawingScene,
         val selectedMeasurementScene: DrawingScene?,
+        val detailedMeasurements:Boolean,
     ) : SceneLoad
     data object Failed : SceneLoad
 }
@@ -128,6 +133,9 @@ fun DrawingCanvasScreen(
     var is3D by rememberSaveable(document.project.id.value) { mutableStateOf(false) }
     var initialized by rememberSaveable(document.project.id.value) { mutableStateOf(false) }
     var orbitShown by rememberSaveable(document.project.id.value) { mutableStateOf(false) }
+    var gizmoMode by rememberSaveable(document.project.id.value) { mutableStateOf(GizmoMode.MOVE) }
+    var cameraOrbiting by remember {mutableStateOf(false)}
+    var rotationAngle by remember {mutableStateOf<Double?>(null)}
     var level by rememberSaveable(document.project.id.value) { mutableStateOf(document.levels.firstOrNull()?.id?.value) }
     var orbitLevel by rememberSaveable(document.project.id.value) { mutableStateOf<String?>(null) }
     var anchorX by rememberSaveable(document.project.id.value) { mutableStateOf<Double?>(null) }
@@ -149,6 +157,10 @@ fun DrawingCanvasScreen(
             it.getOrNull(6) as? Boolean ?: true,it.getOrNull(7) as? Boolean ?: false) },
     )) { mutableStateOf(ToolOptions()) }
     var points by remember(document.project.id.value) { mutableStateOf(emptyList<Point3>()) }
+    var pointerWorld by remember {mutableStateOf<Point3?>(null)}
+    var pendingLibrary by rememberSaveable {mutableStateOf<String?>(null)}
+    var placedToken by remember {mutableIntStateOf(0)}
+    var placedFeedback by remember {mutableStateOf(false)}
     var addSelection by rememberSaveable { mutableStateOf(false) }
     var propertiesOpen by rememberSaveable { mutableStateOf(false) }
     var propertiesSession by rememberSaveable { mutableIntStateOf(0) }
@@ -173,6 +185,8 @@ fun DrawingCanvasScreen(
     val fallbackSnaps = remember { SnapEngine(SpatialIndex(emptyList())) }
     val window = remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
     val ready = prepared
+    val renderDocument=remember(document,settings.showDetailedMeasurement) {document.copy(project=document.project.copy(
+        settings=document.project.settings.copy(showDetailedMeasurements=settings.showDetailedMeasurement)))}
     val selectedIds = editor?.selectedIds ?: emptySet()
     val density = LocalDensity.current.density
     val selectedLevel = if (is3D) orbitLevel else level
@@ -198,9 +212,10 @@ fun DrawingCanvasScreen(
     val selectedProperties=remember(document,selectedElement) { selectedElement?.let {readProperties(document,it)} }
     val lockedSelection = remember(document.elements,document.layers,selectedIds) {
         val lockedLayers = document.layers.filter { it.locked }.mapTo(HashSet()) { it.id }
-        document.elements.any { it.id in selectedIds && it.layerId in lockedLayers }
+        document.elements.any { it.id in selectedIds && (it.layerId in lockedLayers || it.objectLocked) }
     }
-    val geometryMatches = remember(ready?.document,document) { ready?.let { sameCanvasGeometry(it.document,document) } == true }
+    val geometryMatches = remember(ready?.document,document,ready?.detailedMeasurements,settings.showDetailedMeasurement) {
+        ready?.let { sameCanvasGeometry(it.document,document) && it.detailedMeasurements==settings.showDetailedMeasurement } == true }
     val sceneMatches = geometryMatches && ready?.selectedIds == selectedIds
     val selectionResizeFrame = if (sceneMatches) ready?.resizeFrame else null
     val latestGeometryMatches = rememberUpdatedState(geometryMatches)
@@ -209,6 +224,16 @@ fun DrawingCanvasScreen(
     val latestLocked = rememberUpdatedState(lockedSelection)
     val latestBusy = rememberUpdatedState(busy)
     val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE
+    val placementActive=tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
+    val latestPlacementActive=rememberUpdatedState(placementActive)
+
+    LaunchedEffect(selectedIds) {
+        gizmoMode=GizmoMode.MOVE;propertiesOpen=false;rotationAngle=null
+        if(selectedIds.isNotEmpty()) {libraryOpen=false;measurementsOpen=false}
+    }
+    LaunchedEffect(placedToken) {
+        if(placedToken>0) {placedFeedback=true;delay(1200);placedFeedback=false}
+    }
 
     LaunchedEffect(document.levels) {
         if(level!=null && document.levels.none {it.id.value==level})level=document.levels.firstOrNull()?.id?.value
@@ -217,33 +242,33 @@ fun DrawingCanvasScreen(
 
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
-        document.project.settings.showMeasurements,selectedIds,needsSurfaces) {
+        document.project.settings.showMeasurements,settings.showDetailedMeasurement,selectedIds,needsSurfaces) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
-                val sameGeometry = previous != null && sameCanvasGeometry(previous.document,document)
-                val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(document)
+                val sameGeometry = previous != null && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement
+                val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument)
                 val index = SpatialIndex(scene.segments)
                 val allIds=document.elements.mapTo(HashSet()) {it.id}
                 val mainIds=allIds-selectedIds
-                val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(document,mainIds)
-                val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(document,selectedIds)
+                val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(renderDocument,mainIds)
+                val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(renderDocument,selectedIds)
                 val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)buildSurfaceScene(document) else null
                 val mainSurfaces=surfaces?.let {if(selectedIds.isEmpty())it else it.partition(selectedIds,false)}
                 val selectedSurfaces=if(selectedIds.isEmpty())null else surfaces?.partition(selectedIds,true)
                 val surfacedIds=surfaces?.chunks.orEmpty().mapTo(HashSet()) {ElementId(it.elementId)}
                 val annotationIds=allIds-surfacedIds
-                val annotations=if(surfaces==null)main else buildDrawingScene(document,annotationIds-selectedIds)
-                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else buildDrawingScene(document,annotationIds.intersect(selectedIds))
+                val annotations=if(surfaces==null)main else buildDrawingScene(renderDocument,annotationIds-selectedIds)
+                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else buildDrawingScene(renderDocument,annotationIds.intersect(selectedIds))
                 val dimensionIds=document.elements.filter {((it.body as? ElementBody.DrawingShape)?.shape is Shape.Dimension)}.mapTo(HashSet()){it.id}
-                val measurementScene=buildDrawingScene(document,dimensionIds-selectedIds)
-                val selectedMeasurements=if(selectedIds.isEmpty())null else buildDrawingScene(document,dimensionIds.intersect(selectedIds))
+                val measurementScene=buildDrawingScene(renderDocument,dimensionIds-selectedIds)
+                val selectedMeasurements=if(selectedIds.isEmpty())null else buildDrawingScene(renderDocument,dimensionIds.intersect(selectedIds))
                 val resize = if (sameGeometry && previous!!.selectedIds == selectedIds) previous.resizeFrame else
                     if (selectedIds.size == 1) document.elements.find { it.id in selectedIds && !isMeasurement(it) }?.let { resizeFrame(document,it) } else null
                 SceneLoad.Ready(document, selectedIds, scene, main, selected,
                     if (sameGeometry) previous!!.snaps else SnapEngine(index),
                     if (sameGeometry) previous!!.picker else EditorPicker(document, scene, index),resize,
-                    MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements)
+                    MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement)
             }
             prepared = compiled
             loading = compiled
@@ -266,7 +291,14 @@ fun DrawingCanvasScreen(
     fun cancelConstruction() {
         points = emptyList(); preview = null; waitingForCommit = null
         measurementPicks=emptyList();measurementMode=MeasurementMode.NONE
+        pendingLibrary=null;tool=DrawingTool.SELECT;rotationAngle=null
         anchorX = null; anchorY = null
+    }
+    fun placed() {
+        points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
+        propertiesOpen=false;measurementsOpen=false;libraryOpen=false;toolsExpanded=false;gizmoMode=GizmoMode.MOVE
+        placedToken++
+        if(!settings.keepToolActiveAfterPlacing) {tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
     }
     fun commitMeasurement(picks:List<MeasurementPick>,label:Point3):Boolean {
         if(picks.size<2 || busy)return false
@@ -283,9 +315,10 @@ fun DrawingCanvasScreen(
             } else "Measurement"
             val geometry=createMeasurement(document,picks[0].point,picks[1].point,label,source,picks[1].elementId,
                 name=name,
+                showCoordinates=settings.showDetailedMeasurement,
                 showHeightAboveFloor=source!=null,floorLevelId=sourceLevel)
             val success=editor?.onAddSketch?.invoke(geometry,selectedLevel)==true
-            if(success) {measurementPicks=emptyList();measurementsOpen=true;propertiesOpen=false;libraryOpen=false}
+            if(success) placed()
             success
         } catch(error:IllegalArgumentException) {toolError=error.message;measurementPicks=picks.take(1);false}
     }
@@ -295,8 +328,7 @@ fun DrawingCanvasScreen(
             val sketch = if (options.useDefaultDimensions && supportsDefaultPlacement(tool))
                 createDefaultSketch(tool,picks.first(),options) else createSketch(tool, picks, options)
             if (editor?.onAddSketch?.invoke(sketch, level) == true) {
-                points = emptyList()
-                anchorX = null; anchorY = null
+                placed()
             }
         } catch (error: IllegalArgumentException) {
             toolError = error.message
@@ -305,12 +337,15 @@ fun DrawingCanvasScreen(
     }
     val onCanvasTap = rememberUpdatedState<(Offset) -> Unit>({ position ->
         val actions = latestEditor.value
-        if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
+        if(actions!=null && !busy && pendingLibrary!=null) {
+            val at=pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
+            if(actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed()
+        } else if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
             val sceneHit=if(is3D)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
                 position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density) else null
             val picked=if(is3D)ready.picker.pick3D(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,selectedLevel) ?: sceneHit?.elementId
                 else ready.picker.pickPlan(viewport.screenToWorld(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble()),14.0*density/viewport.pixelsPerMetre,selectedLevel)
-            val raw=if(is3D)sceneHit?.point
+            val raw=if(is3D)sceneHit?.point ?: pointerWorld
                 else cursor.value?.point?.let {Point3(it.x,it.y,floorZ)}
             raw?.let {point->
                 if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty() && picked==null) toolError="Tap a visible object for the first reference."
@@ -340,10 +375,10 @@ fun DrawingCanvasScreen(
             else picker?.pickPlan(viewport.screenToWorld(position.x.toDouble(), position.y.toDouble(),
                 size.width.toDouble(), size.height.toDouble()), 14.0 * density / viewport.pixelsPerMetre, selectedLevel)
             actions.onSelect(if (latestAddSelection.value) {
-                if (picked == null) actions.selectedIds else if (picked in actions.selectedIds) actions.selectedIds - picked else actions.selectedIds + picked
+                if (picked == null) emptySet() else if (picked in actions.selectedIds) actions.selectedIds - picked else actions.selectedIds + picked
             } else setOfNotNull(picked))
-        } else if (actions != null && !busy && latestTool.value != DrawingTool.SELECT && !is3D) {
-            cursor.value?.point?.let { point ->
+        } else if (actions != null && !busy && latestTool.value != DrawingTool.SELECT) {
+            (if(is3D)pointerWorld?.let {Point2(it.x,it.y)} else cursor.value?.point)?.let { point ->
                 if (points.size >= 512) toolError = "Finish this shape before adding more than 512 points."
                 else {
                     val picks = points + Point3(point.x, point.y, latestFloorZ.value)
@@ -359,7 +394,7 @@ fun DrawingCanvasScreen(
         if (!geometryMatches) return
         val scene = ready?.scene ?: return
         if (size.width <= 0 || size.height <= 0) return
-        val bounds = scene.boundsForLevel(selectedLevel)
+        val bounds = if(scene.segments.isEmpty())Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+2.0)) else scene.boundsForLevel(selectedLevel)
         if (is3D) orbit = orbit.fit(bounds, size.width.toDouble() / size.height)
         else viewport = viewport.fit(bounds, size.width.toDouble(), size.height.toDouble(), 48.0 * density)
     }
@@ -380,8 +415,50 @@ fun DrawingCanvasScreen(
                 point, latestSnaps.value, max(latestSnaps.value.tolerance, 14.0 * density / viewport.pixelsPerMetre),
                 latestAnchor.value, latestLevel.value,
             )
+            pointerWorld=cursor.value?.point?.let {Point3(it.x,it.y,floorZ)}
+        } else if(size.width>0 && size.height>0 && placementActive) {
+            val point=orbit.rayToPlaneZ(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),floorZ)
+                ?: viewPlanePoint(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble())
+            pointerWorld=if(measurementMode==MeasurementMode.NONE)point.copy(z=floorZ) else point
         }
     })
+    fun beginTool(next:DrawingTool) {
+        cancelConstruction();tool=next;probe=false;zoomWindow=false;gizmoMode=GizmoMode.MOVE
+        if(next!=DrawingTool.SELECT) {
+            is3D=false;editor?.onSelect?.invoke(emptySet())
+            pointerWorld=Point3(viewport.center.x,viewport.center.y,floorZ)
+            cursor.value=SnapResult(viewport.center,null)
+        }
+    }
+    fun beginMeasurement(mode:MeasurementMode) {
+        cancelConstruction();measurementMode=mode;editor?.onSelect?.invoke(emptySet());probe=false
+        toolsExpanded=false;measurementsOpen=false;propertiesOpen=false;libraryOpen=false;viewOpen=true
+        pointerWorld=if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
+    }
+    fun cubeDirection(normal:Point3) {
+        is3D=true;zoomWindow=false;window.value=null
+        val horizontal=kotlin.math.hypot(normal.x,normal.y)
+        orbit=orbit.copy(yaw=if(horizontal<1e-12)-PI/2 else atan2(normal.y,normal.x),pitch=atan2(normal.z,horizontal),projection=Projection.ORTHOGRAPHIC)
+        orbitLevel=level
+        if(!orbitShown &&ready!=null&&size.height>0) {orbit=orbit.fit(if(ready.scene.segments.isEmpty())Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+2.0)) else ready.scene.boundsForLevel(orbitLevel),size.width.toDouble()/size.height);orbitShown=true}
+    }
+    fun homeView() {
+        is3D=true;orbitLevel=level;orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC)
+        if(ready!=null&&size.height>0)orbit=orbit.fit(if(ready.scene.segments.isEmpty())Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+2.0)) else ready.scene.boundsForLevel(orbitLevel),size.width.toDouble()/size.height)
+        orbitShown=true
+    }
+    fun finishTool() {
+        if(tool!=DrawingTool.SELECT && points.size>=tool.minimumPoints && points.isNotEmpty())finishConstruction()
+        else if(measurementPicks.size>=2)commitMeasurement(measurementPicks,pointerWorld ?: measurementPicks.last().point)
+        else cancelConstruction()
+    }
+    val activeLabel=when {
+        pendingLibrary!=null->document.libraryItems.find {it.id.value==pendingLibrary}?.name ?: "Library item"
+        measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.panel_measure_distance)
+        measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.panel_reference_dimension)
+        tool!=DrawingTool.SELECT->stringResource(drawingToolLabel(tool))
+        else->""
+    }
     val accent = MaterialTheme.colorScheme.primary
     val frame = CanvasFrame(viewport, orbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
@@ -404,15 +481,12 @@ fun DrawingCanvasScreen(
             }
         }.onFocusChanged { canvasFocused = it.isFocused }.focusable(),
         topBar = {
-            if(!panelsHidden) TopAppBar(
+            if(!panelsHidden && selectedIds.isEmpty()) TopAppBar(
                 title = { Text(document.project.name, maxLines = 1) },
                 navigationIcon = { IconButton(onBack, enabled = !busy) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
                 } },
                 actions = {
-                    IconButton(onSave, enabled = dirty && !busy, modifier = Modifier.testTag("canvas_save")) {
-                        Icon(Icons.Outlined.Save, stringResource(R.string.canvas_save))
-                    }
                     IconButton(onExport, enabled = !busy) { Icon(Icons.Outlined.Share, stringResource(R.string.canvas_export)) }
                     IconButton(onDetails, enabled = !busy, modifier = Modifier.testTag("canvas_details")) {
                         Icon(Icons.Outlined.Description, stringResource(R.string.canvas_project_details))
@@ -427,63 +501,50 @@ fun DrawingCanvasScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if(!panelsHidden) {
-                if(editor!=null) CanvasToolbars(
+                if(editor!=null && (selectedIds.isEmpty() || placementActive)) CanvasToolbars(
                     onDraw={toolsExpanded=!(toolsExpanded && focusedTools==CanvasToolGroup.DRAW);focusedTools=CanvasToolGroup.DRAW},
                     onEdit={toolsExpanded=!(toolsExpanded && focusedTools==CanvasToolGroup.EDIT);focusedTools=CanvasToolGroup.EDIT},
                     onView={viewOpen=!viewOpen},
-                    onMeasure={cancelConstruction();tool=DrawingTool.SELECT;measurementMode=MeasurementMode.DISTANCE;probe=false;toolsExpanded=false;measurementsOpen=false;viewOpen=true},
-                    onReferenceDimension={cancelConstruction();tool=DrawingTool.SELECT;measurementMode=MeasurementMode.REFERENCE;probe=false;toolsExpanded=false;measurementsOpen=false;viewOpen=true},
+                    onMeasure={beginMeasurement(MeasurementMode.DISTANCE)},
+                    onReferenceDimension={beginMeasurement(MeasurementMode.REFERENCE)},
                     onMeasurements={measurementsOpen=!measurementsOpen;propertiesOpen=false;libraryOpen=false},
                     onLibrary={libraryOpen=!libraryOpen;propertiesOpen=false;measurementsOpen=false},
-                    onTogglePanels={panelsHidden=true},panelsHidden=false,modifier=Modifier.fillMaxWidth())
-                if(viewOpen) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
+                    onTogglePanels={panelsHidden=true},panelsHidden=false,modifier=Modifier.fillMaxWidth(),
+                    activeTool=if(placementActive)activeLabel else null,
+                    measureActive=measurementMode!=MeasurementMode.NONE,libraryActive=pendingLibrary!=null)
+                if(viewOpen || selectedIds.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
                     horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
-                    if(measurementMode!=MeasurementMode.NONE)CanvasActionButton(Icons.Outlined.Close,stringResource(R.string.editing_cancel),{cancelConstruction()},Modifier.testTag("canvas_cancel_measurement"))
-                    CanvasActionButton(Icons.Outlined.ViewInAr,stringResource(if(is3D)R.string.canvas_plan else R.string.canvas_3d),{
-                        cancelConstruction();tool=DrawingTool.SELECT
-                        val nextLevel=if(is3D)level else orbitLevel
-                        editor?.onSelect?.invoke(document.elements.asSequence().filter {
-                            it.id in selectedIds && (nextLevel==null || it.levelId==null || it.levelId?.value==nextLevel)
-                        }.map {it.id}.toSet())
-                        if(!is3D && !orbitShown && geometryMatches && ready!=null && ready.scene.segments.isNotEmpty() && size.height>0) {
-                            orbit=orbit.fit(ready.scene.boundsForLevel(nextLevel),size.width.toDouble()/size.height);orbitShown=true
-                        }
-                        is3D=!is3D;zoomWindow=false;window.value=null
-                    },Modifier.testTag("canvas_3d"),selected=is3D)
                     CanvasActionButton(Icons.Outlined.FitScreen,stringResource(R.string.canvas_extents),{fit()},Modifier.testTag("canvas_extents"),enabled=geometryMatches)
                     CanvasActionButton(Icons.Outlined.CropFree,stringResource(R.string.canvas_window),{zoomWindow=!zoomWindow;window.value=null},Modifier.testTag("canvas_zoom_window"),selected=zoomWindow)
-                    editor?.let {actions->ViewControls(document,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility)}
-                    if(is3D) {
-                        CanvasActionButton(Icons.Outlined.PanTool,stringResource(if(orbitPan)R.string.canvas_pan else R.string.canvas_orbit),{orbitPan=!orbitPan},selected=orbitPan)
-                        for((preset,label)in listOf(ViewPreset.TOP to R.string.canvas_top,ViewPreset.FRONT to R.string.canvas_front,
-                            ViewPreset.SIDE to R.string.canvas_side,ViewPreset.ISOMETRIC to R.string.canvas_iso)) {
-                            CanvasActionButton(if(preset==ViewPreset.ISOMETRIC)Icons.Outlined.ViewInAr else Icons.Outlined.CropSquare,
-                                stringResource(label),{orbit=orbit.preset(preset)},Modifier.testTag("canvas_${preset.name.lowercase().let {if(it=="isometric")"iso" else it}}"))
-                        }
-                        CanvasActionButton(Icons.Outlined.CameraAlt,stringResource(R.string.canvas_perspective),{orbit=orbit.withProjection(Projection.PERSPECTIVE)},Modifier.testTag("canvas_perspective"),selected=orbit.projection==Projection.PERSPECTIVE)
-                        CanvasActionButton(Icons.Outlined.GridView,stringResource(R.string.canvas_orthographic),{orbit=orbit.withProjection(Projection.ORTHOGRAPHIC)},Modifier.testTag("canvas_orthographic"),selected=orbit.projection==Projection.ORTHOGRAPHIC)
-                    } else {
+                    editor?.let {actions->
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{cancelConstruction();actions.onUndo()},Modifier.testTag("view_undo"),enabled=actions.canUndo)
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{cancelConstruction();actions.onRedo()},Modifier.testTag("view_redo"),enabled=actions.canRedo)
+                        ViewControls(renderDocument,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility)
+                    }
+                    CanvasActionButton(Icons.Outlined.Save,stringResource(R.string.canvas_save),onSave,Modifier.testTag("canvas_save"),enabled=dirty && !busy)
+                    if(selectedIds.isNotEmpty()) CanvasActionButton(Icons.Outlined.Fullscreen,stringResource(R.string.panel_hide_panels),{panelsHidden=true},Modifier.testTag("canvas_hide_panels"))
+                    if(!is3D) {
                         CanvasActionButton(Icons.Outlined.MyLocation,stringResource(R.string.canvas_probe),{probe=!probe},Modifier.testTag("canvas_probe"),selected=probe)
                         CanvasActionButton(Icons.Outlined.Grid4x4,stringResource(R.string.canvas_snaps),{snapsOpen=true},Modifier.testTag("canvas_snaps"))
                         CanvasActionButton(Icons.Outlined.Clear,stringResource(R.string.canvas_clear_reference),{anchorX=null;anchorY=null},Modifier.testTag("canvas_clear_reference"),enabled=anchor!=null)
                     }
                     if(editor!=null) CanvasActionButton(Icons.Outlined.LibraryAdd,stringResource(R.string.canvas_add_selection),{addSelection=!addSelection},Modifier.testTag("canvas_add_selection"),selected=addSelection)
                     CanvasActionButton(Icons.Outlined.GridOn,stringResource(R.string.canvas_grid),{grid=!grid},selected=grid)
-                    CanvasActionButton(Icons.Outlined.Image,stringResource(R.string.canvas_export_png),{onExportView(ViewExportRequest(document,frame,size.width,size.height),ViewExportFormat.PNG)},Modifier.testTag("canvas_export_png"),enabled=geometryMatches && size.width>0)
-                    CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(document,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0)
+                    CanvasActionButton(Icons.Outlined.Image,stringResource(R.string.canvas_export_png),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PNG)},Modifier.testTag("canvas_export_png"),enabled=geometryMatches && size.width>0 && !placementActive)
+                    CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0 && !placementActive)
                 }
-                if(measurementMode!=MeasurementMode.NONE || tool!=DrawingTool.SELECT || zoomWindow || probe) Text(
-                    if(measurementMode!=MeasurementMode.NONE) stringResource(when {
-                        measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->R.string.canvas_measure_pick_first
-                        measurementMode==MeasurementMode.DISTANCE->R.string.canvas_measure_pick_second
-                        measurementPicks.isEmpty()->R.string.canvas_reference_pick_object
-                        measurementPicks.size==1->R.string.canvas_reference_pick_reference
-                        else->R.string.canvas_reference_place_label
-                    }) else if(editor!=null && tool!=DrawingTool.SELECT) {
-                        if(options.useDefaultDimensions && supportsDefaultPlacement(tool)) stringResource(R.string.canvas_place_default,stringResource(drawingToolLabel(tool)))
-                        else stringResource(R.string.canvas_tool_points,stringResource(drawingToolLabel(tool)),points.size,tool.autoFinishPoints ?: tool.minimumPoints)
-                    } else stringResource(if(zoomWindow)R.string.canvas_window_hint else R.string.canvas_probe_hint),
-                    style=MaterialTheme.typography.labelSmall,modifier=Modifier.padding(horizontal=12.dp,vertical=4.dp))
+                if(placementActive) PlacementBanner(activeLabel,
+                    when {
+                        pendingLibrary!=null || options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
+                        measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_measure_pick_first)
+                        measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.canvas_measure_pick_second)
+                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_reference_pick_object)
+                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==1->stringResource(R.string.canvas_reference_pick_reference)
+                        measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.canvas_reference_place_label)
+                        points.isEmpty()->stringResource(R.string.placement_tap_to_start,activeLabel)
+                        else->stringResource(R.string.placement_add_points)
+                    },canDone=true,onCancel={cancelConstruction()},onDone={finishTool()})
+                if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
             }
             Box(
                 Modifier.fillMaxWidth().weight(1f).onSizeChanged { size = it }
@@ -502,7 +563,7 @@ fun DrawingCanvasScreen(
                             val bodyReady=latestReady.value
                             val bodySelection=latestEditor.value?.selectedIds.orEmpty()
                             val bodyHit=if(latestSettings.value.bodyDragMovesSelection && latestTool.value==DrawingTool.SELECT &&
-                                latestMeasurementMode.value==MeasurementMode.NONE && latestSceneMatches.value && !latestLocked.value && !latestBusy.value && !zoomWindow && !probe) {
+                                latestMeasurementMode.value==MeasurementMode.NONE && !latestPlacementActive.value && gizmoMode==GizmoMode.MOVE && latestSceneMatches.value && !latestLocked.value && !latestBusy.value && !zoomWindow && !probe) {
                                 if(is3D)bodyReady?.picker?.pick3D(orbit,first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,latestLevel.value)
                                 else bodyReady?.picker?.pickPlan(viewport.screenToWorld(first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble()),14.0*density/viewport.pixelsPerMetre,latestLevel.value)
                             } else null
@@ -513,7 +574,7 @@ fun DrawingCanvasScreen(
                             updatePointer.value(first)
                             if (zoomWindow) window.value = first to first
                             down.consume()
-                            while (true) {
+                            try { while (true) {
                                 val event = awaitPointerEvent()
                                 val pressed = event.changes.count { it.pressed }
                                 val position = event.changes.first().position
@@ -540,6 +601,7 @@ fun DrawingCanvasScreen(
                                         updatePointer.value(position)
                                         onCanvasTap.value(position)
                                     }
+                                    cameraOrbiting=false
                                     event.changes.forEach { it.consume() }
                                     break
                                 }
@@ -548,6 +610,7 @@ fun DrawingCanvasScreen(
                                 val sensitivity = latestSettings.value.gestureSensitivity
                                 if (pressed >= 2) {
                                     multi = true
+                                    cameraOrbiting=is3D
                                     if(bodyMove) {bodyCancelled=true;preview=null}
                                     val zoom = event.calculateZoom().toDouble().pow(sensitivity)
                                     val centroid = event.calculateCentroid()
@@ -559,12 +622,16 @@ fun DrawingCanvasScreen(
                                         Point2(first.x.toDouble(),first.y.toDouble()),Point2(position.x.toDouble(),position.y.toDouble()),null,
                                         viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),latestSnaps.value,14.0*density,latestLevel.value)
                                 } else if (zoomWindow) window.value = first to position
-                                else if (is3D) orbit = if (orbitPan) orbit.pan(pan.x*sensitivity, pan.y*sensitivity, size.width.toDouble(), size.height.toDouble())
+                                else if(latestPlacementActive.value) { /* Only the ghost follows a placement drag. */ }
+                                else if (is3D) {
+                                    if(moved>=viewConfiguration.touchSlop)cameraOrbiting=true
+                                    orbit = if (orbitPan) orbit.pan(pan.x*sensitivity, pan.y*sensitivity, size.width.toDouble(), size.height.toDouble())
                                     else orbit.orbit(-pan.x*.006*sensitivity, pan.y*.006*sensitivity)
+                                }
                                 else if (!probing) viewport = viewport.pan(pan.x*sensitivity, pan.y*sensitivity)
                                 updatePointer.value(position)
                                 event.changes.forEach { it.consume() }
-                            }
+                            } } finally {cameraOrbiting=false}
                         }
                     }
                     .pointerInput(document.project.id) {
@@ -588,22 +655,14 @@ fun DrawingCanvasScreen(
                             drawRect(accent, Offset(min(a.x,b.x), min(a.y,b.y)), Size(abs(a.x-b.x),abs(a.y-b.y)), style = Stroke(2f*density))
                         }
                     }
-                    if (!zoomWindow && !panelsHidden) ViewCube(orbit, onFace = { normal ->
-                        orbit = orbit.copy(yaw = if (normal.z != 0.0) -PI/2 else atan2(normal.y, normal.x),
-                            pitch = if (normal.z > 0) PI/2 else if (normal.z < 0) -PI/2 else 0.0)
-                    }, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(100.dp))
                 }
-                if (editor != null && !is3D && tool != DrawingTool.SELECT) {
-                    ConstructionPreview(document, tool, options, points, cursor.value?.point, floorZ, viewport)
+                if (editor != null && tool != DrawingTool.SELECT) {
+                    ConstructionPreview(document,tool,options,points,cursor.value?.point,floorZ,viewport,
+                        orbit=orbit,is3D=is3D,cursorWorld=pointerWorld)
                 }
-                if(measurementPicks.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {
-                    fun screen(p:Point3):Offset?=if(is3D)orbit.project(p,size.width.toDouble(),size.height.toDouble())?.let {Offset(it.x.toFloat(),it.y.toFloat())}
-                        else viewport.worldToScreen(Point2(p.x,p.y),size.width.toDouble(),size.height.toDouble()).let {Offset(it.x.toFloat(),it.y.toFloat())}
-                    val projected=measurementPicks.mapNotNull {screen(it.point)}
-                    projected.zipWithNext().forEach {(a,b)->drawLine(accent,a,b,2*density)}
-                    projected.forEach {drawCircle(accent,5*density,it)}
-                }
-                if (editor != null && selectedBounds != null && tool == DrawingTool.SELECT && measurementMode==MeasurementMode.NONE && !zoomWindow) {
+                if(measurementMode!=MeasurementMode.NONE) MeasurementGhostPreview(measurementPicks.map {it.point},pointerWorld,viewport,orbit=orbit,is3D=is3D)
+                pendingLibrary?.let { LibraryGhostPreview(document,LibraryItemId(it),pointerWorld,viewport,orbit,is3D) }
+                if (editor != null && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
                     SelectionGizmo(selectedBounds, viewport, orbit, is3D, preview,
                         onStart = { _, _ -> dragPivot = selectedBounds.center(); dragResizeFrame = selectionResizeFrame
                             waitingForCommit = null; preview = EditDelta(pivot = dragPivot) },
@@ -621,8 +680,12 @@ fun DrawingCanvasScreen(
                                             Point2(start.x.toDouble(),start.y.toDouble()), Point2(current.x.toDouble(),current.y.toDouble()),
                                             axis,viewport, orbit, is3D, size.width.toDouble(), size.height.toDouble(),snapSettings,14.0*density,selectedLevel)
                                     }
-                                    GizmoHandle.ROTATE_Z -> EditDelta(pivot = dragPivot, rotationZ = gizmoRotationZ(dragPivot,
-                                        start,current,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble()))
+                                    GizmoHandle.ROTATE_X,GizmoHandle.ROTATE_Y,GizmoHandle.ROTATE_Z -> {
+                                        val axis=when(handle) {GizmoHandle.ROTATE_X->RotationAxis.X;GizmoHandle.ROTATE_Y->RotationAxis.Y;else->RotationAxis.Z}
+                                        val a=Point2(start.x.toDouble(),start.y.toDouble());val b=Point2(current.x.toDouble(),current.y.toDouble())
+                                        rotationAngle=rotationGestureAngle(dragPivot,axis,a,b,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),document.project.settings.rotationSnapDegrees)*180/PI
+                                        rotationGestureDelta(dragPivot,axis,a,b,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),document.project.settings.rotationSnapDegrees)
+                                    }
                                     GizmoHandle.SCALE -> {
                                         val projected = if (is3D) orbit.project(dragPivot,size.width.toDouble(),size.height.toDouble())?.let { Point2(it.x,it.y) }
                                             else viewport.worldToScreen(Point2(dragPivot.x,dragPivot.y),size.width.toDouble(),size.height.toDouble())
@@ -640,6 +703,7 @@ fun DrawingCanvasScreen(
                         },
                         onEnd = { cancelled ->
                             val delta = preview
+                            rotationAngle=null
                             if (!cancelled && delta != null) {
                                 waitingForCommit = document
                                 val applied = editor.onTransform(delta)
@@ -649,15 +713,36 @@ fun DrawingCanvasScreen(
                                 }
                             } else { preview = null; waitingForCommit = null }
                         }, enabled = !busy && !lockedSelection && waitingForCommit == null && sceneMatches,
-                        resizeFrame = selectionResizeFrame,allowResize=!selectionHasMeasurements)
+                        resizeFrame = selectionResizeFrame,allowResize=!selectionHasMeasurements,mode=gizmoMode,rotationAngleDegrees=rotationAngle)
+                }
+                if(editor!=null && selectedIds.isNotEmpty() && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
+                    val pivot=selectedBounds?.center() ?: if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
+                    val at=if(is3D)orbit.project(pivot,size.width.toDouble(),size.height.toDouble())?.let {Point2(it.x,it.y)}
+                        else viewport.worldToScreen(Point2(pivot.x,pivot.y),size.width.toDouble(),size.height.toDouble())
+                    val toolbarWidth=240*density
+                    val toolbarOffset=IntOffset(((at?.x ?: size.width/2.0)-toolbarWidth/2).toInt().coerceIn(0,max(0,size.width-toolbarWidth.toInt())),
+                        ((at?.y ?: size.height/2.0)+120*density).toInt().coerceIn(0,max(0,size.height-(56*density).toInt())))
+                    val selectedElements=document.elements.filter {it.id in selectedIds}
+                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
+                    SelectionToolbar(gizmoMode,!busy && !lockedSelection,editor.canUndo,editor.canRedo,editor.canPaste,
+                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
+                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
+                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
+                        onProperties={propertiesSession++;if(selectionHasMeasurements){measurementsOpen=true;propertiesOpen=false}
+                            else {propertiesOpen=true;measurementsOpen=false};libraryOpen=false},
+                        onMirrorX={editor.onMirror(MirrorAxis.X,elementWorldBounds(document,selectedIds).center())},
+                        onMirrorY={editor.onMirror(MirrorAxis.Y,elementWorldBounds(document,selectedIds).center())},
+                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
+                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
+                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.offset {toolbarOffset},
+                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked)
                 }
                 if(!panelsHidden) editor?.let { actions ->
-                    panelStates.SaveableStateProvider("tools") {
+                    if(selectedIds.isEmpty() || placementActive) panelStates.SaveableStateProvider("tools") {
                     ToolsPanel(tool,options,document.project.settings.lengthUnit,selectedIds.size,
                         actions.canUndo,actions.canRedo,actions.canPaste,points.size >= tool.minimumPoints && points.isNotEmpty(),
-                        onTool = { next -> cancelConstruction(); tool = next; probe = false; zoomWindow = false
-                            if (next != DrawingTool.SELECT) { is3D = false; actions.onSelect(emptySet()) } },
-                        onOptions = { if (it.useDefaultDimensions != options.useDefaultDimensions) cancelConstruction(); options = it },
+                        onTool = { beginTool(it) },
+                        onOptions = { if (it.useDefaultDimensions != options.useDefaultDimensions) {points=emptyList();anchorX=null;anchorY=null}; options = it },
                         onFinish = { finishConstruction() },onCancel = { cancelConstruction(); tool = DrawingTool.SELECT },
                         onUndo = { cancelConstruction(); actions.onUndo() },onRedo = { cancelConstruction(); actions.onRedo() },
                         onCopy = actions.onCopy,onPaste = { cancelConstruction(); tool = DrawingTool.SELECT; actions.onPaste() },
@@ -665,7 +750,7 @@ fun DrawingCanvasScreen(
                         onMirrorY = { if (selectedIds.isNotEmpty()) actions.onMirror(MirrorAxis.Y,elementWorldBounds(document,selectedIds).center()) },
                         onArray = { arrayOpen = true },onDelete = { cancelConstruction(); actions.onDelete() },
                         onProperties = { propertiesSession++;if(selectionHasMeasurements){measurementsOpen=true;propertiesOpen=false} else {propertiesOpen=true;measurementsOpen=false}
-                            libraryOpen=false },modifier = Modifier.align(Alignment.TopStart).padding(start = 30.dp,top = 30.dp),
+                            libraryOpen=false },modifier = Modifier.align(Alignment.TopStart).padding(start = 30.dp,top = 132.dp),
                         expandedOverride=toolsExpanded,onExpandedChange={toolsExpanded=it;focusedTools=null},focusGroup=focusedTools)
                     }
                     if(propertiesOpen && selectedProperties!=null) panelStates.SaveableStateProvider("properties:$propertiesSession:${selectedElement?.id?.value}") {
@@ -673,12 +758,26 @@ fun DrawingCanvasScreen(
                         document.project.settings.decimalPlaces,onApply={actions.onProperties(it);propertiesOpen=false},
                         onDismiss={propertiesOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
                     }
-                    if(measurementsOpen) MeasurementsPanel(document,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,
+                    if(measurementsOpen) MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,
                         actions.onDeleteElements,onDismiss={measurementsOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
                     if(libraryOpen) LibraryPanel(document.libraryItems,onInsert={id->
-                        val at=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
-                        actions.onInsertLibrary(id,at,selectedLevel);libraryOpen=false
+                        cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet())
+                        pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
+                        libraryOpen=false;propertiesOpen=false;toolsExpanded=false
                     },onDismiss={libraryOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
+                }
+                if(!zoomWindow && !panelsHidden) Row(Modifier.align(Alignment.TopStart).padding(8.dp),verticalAlignment=Alignment.Top) {
+                    ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),
+                        onCorner={cubeDirection(it)},onOrbit={dx,dy->
+                            if(!is3D) {is3D=true;orbitLevel=level}
+                            orbit=orbit.orbit(-dx*.006*settings.gestureSensitivity,dy*.006*settings.gestureSensitivity)
+                        },onGestureActive={cameraOrbiting=it},
+                        onPlan={is3D=false;zoomWindow=false;window.value=null},
+                        onProjection={projection->
+                            if(!is3D) {is3D=true;orbitLevel=level}
+                            orbit=orbit.withProjection(projection);orbitShown=true
+                        })
+                    CanvasActionButton(Icons.Outlined.Home,stringResource(R.string.canvas_home),{homeView()},Modifier.testTag("canvas_home"))
                 }
                 if(panelsHidden) CanvasToolbars({},{},{},{},{},{},{},{panelsHidden=false},true,
                     Modifier.align(Alignment.TopEnd).padding(8.dp))
@@ -711,9 +810,9 @@ private fun CanvasStatus(
             Text(stringResource(if (is3D) R.string.canvas_target else R.string.canvas_coordinates) + ": " +
                 "X ${coordinate(p.x,unit,precision)}  Y ${coordinate(p.y,unit,precision)}  Z ${coordinate(p.z,unit,precision)}",
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp))
-            TextButton(onSnaps, enabled = !is3D) { Text(
-                if (is3D) stringResource(R.string.canvas_snap_plan_only)
-                else if (!document.project.settings.snap.enabled) stringResource(R.string.canvas_snap_off)
+            TextButton(onSnaps) { Text(
+                if (!document.project.settings.snap.enabled) stringResource(R.string.canvas_snap_off)
+                else if(is3D)stringResource(R.string.canvas_snaps)
                 else cursor.value?.mode?.let { stringResource(snapLabel(it)) } ?: stringResource(R.string.canvas_snaps),
             ) }
             Box {

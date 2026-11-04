@@ -118,27 +118,33 @@ data = (C.c_float * 14)(*local_a, 1, 0, 0, 1, *local_b, 1, 0, 0, 1)
 proc('glBufferData', None, C.c_uint, C.c_ssize_t, C.c_void_p, C.c_uint)(0x8892, C.sizeof(data), data, 0x88E4)
 chunk_origin = (1e9, -2e9, 7.)
 pivot = (chunk_origin[0] + .125, chunk_origin[1] + .125, chunk_origin[2] + .25)
-def linear_model(angle, scale, dimensions, axes):
-    cx, sx, cy, sy, cz, sz = (math.cos(axes[0]), math.sin(axes[0]),
-                              math.cos(axes[1]), math.sin(axes[1]),
-                              math.cos(axes[2]), math.sin(axes[2]))
-    basis = [[cy*cz,-cy*sz,sy], [cx*sz+sx*sy*cz,cx*cz-sx*sy*sz,-sx*cy],
-             [sx*sz-cx*sy*cz,sx*cz+cx*sy*sz,cx*cy]]
+def rotation_matrix(angles):
+    cx, sx, cy, sy, cz, sz = (math.cos(angles[0]), math.sin(angles[0]),
+                              math.cos(angles[1]), math.sin(angles[1]),
+                              math.cos(angles[2]), math.sin(angles[2]))
+    return [[cy*cz,-cy*sz,sy], [cx*sz+sx*sy*cz,cx*cz-sx*sy*sz,-sx*cy],
+            [sx*sz-cx*sy*cz,sx*cz+cx*sy*sz,cx*cy]]
+
+def linear_model(angle, scale, dimensions, axes, rotation=(0,0,0)):
+    basis = rotation_matrix(axes)
     oriented = [[sum(basis[r][k]*dimensions[k]*scale*basis[c][k] for k in range(3))
                  for c in range(3)] for r in range(3)]
-    co, si = math.cos(angle), math.sin(angle)
-    return [[co*oriented[0][c]-si*oriented[1][c] for c in range(3)],
-            [si*oriented[0][c]+co*oriented[1][c] for c in range(3)], oriented[2]]
+    # A global XYZ gesture follows local oriented scaling, including legacy Z rotation.
+    turn = rotation_matrix((rotation[0], rotation[1], rotation[2] + angle))
+    return [[sum(turn[r][k]*oriented[k][c] for k in range(3)) for c in range(3)] for r in range(3)]
+
+def gl_model(linear):
+    return [linear[0][0],linear[1][0],linear[2][0],0,
+            linear[0][1],linear[1][1],linear[2][1],0,
+            linear[0][2],linear[1][2],linear[2][2],0, 0,0,0,1]
 
 def transformed(point, translation, linear):
     relative = [point[i] - pivot[i] for i in range(3)]
     return tuple(pivot[i]+translation[i]+sum(linear[i][j]*relative[j] for j in range(3)) for i in range(3))
 
-def selected_preview(label, translation=(0,0,0), angle=0, scale=1, dimensions=(1,1,1), axes=(0,0,0)):
-    linear = linear_model(angle,scale,dimensions,axes)
-    model = [linear[0][0],linear[1][0],linear[2][0],0,
-             linear[0][1],linear[1][1],linear[2][1],0,
-             linear[0][2],linear[1][2],linear[2][2],0, 0,0,0,1]
+def selected_preview(label, translation=(0,0,0), angle=0, scale=1, dimensions=(1,1,1), axes=(0,0,0), rotation=(0,0,0)):
+    linear = linear_model(angle,scale,dimensions,axes,rotation)
+    model = gl_model(linear)
     matrix_uniform(uniform(program, b'uModel'), 1, 0, (C.c_float * 16)(*model))
     transformed_origin = transformed(chunk_origin, translation, linear)
     offset = [transformed_origin[i] - chunk_origin[i] for i in range(3)]
@@ -175,6 +181,10 @@ preview_samples = [
     selected_preview('height only', dimensions=(1,1,1.5)),
     selected_preview('local XY corner resize', dimensions=(1.5,1.25,1), axes=(.2,.15,.4)),
     selected_preview('rotated local height', dimensions=(1,1,1.5), axes=(.4,.25,.2)),
+    selected_preview('X tilt about distant pivot', rotation=(math.pi/3,0,0)),
+    selected_preview('Y tilt about distant pivot', rotation=(0,-math.pi/3,0)),
+    selected_preview('XYZ tilt and oriented resize', translation=(.125,.125,0),
+                     rotation=(.3,-.4,.2), dimensions=(1.25,.8,1.2), axes=(.2,.15,-.3)),
 ]
 # Exercise the actual production filled-surface shader and its packed xyz/normal/rgba VBO.
 surface_program = create_program()
@@ -238,6 +248,23 @@ normal_length = math.sqrt(.5**2+2**2)
 key_length = math.sqrt(.45**2+.40**2+.80**2)
 illumination = .36 + .64 * ((.5*.45+2*.80)/(normal_length*key_length))
 assert abs(normal_pixel[0]-204*illumination) <= 3, (normal_pixel,illumination)
+# Tilting a selected surface must rotate its normal as well as its positions. Work
+# in chunk-local coordinates around the same billion-metre project origin as the lines.
+tilted_surface_samples = []
+for label, rotation in [('X tilt', (.6,0,0)), ('Y tilt', (0,-.5,0)), ('XYZ tilt', (.3,-.4,.2))]:
+    linear = rotation_matrix(rotation)
+    # For a pure rotation, the inverse transpose equals the rotation itself.
+    normals = [linear[r][c] for c in range(3) for r in range(3)]
+    surface_inputs(lighting=1, model=gl_model(linear), normals=normals)
+    origin = transformed(chunk_origin, (0,0,0), linear)
+    set_offset(uniform(surface_program, b'uOffset'),
+               *(origin[i]-chunk_origin[i] for i in range(3)))
+    reset(); square(); tilted = pixel()
+    normal = [linear[i][2] for i in range(3)]
+    diffuse = max(0, (normal[0]*.45 - normal[1]*.40 + normal[2]*.80)/key_length)
+    expected = 204*(.36+.64*diffuse)
+    assert abs(tilted[0]-expected) <= 3, (label, tilted, expected)
+    tilted_surface_samples.append((label, tilted))
 surface_inputs(opacity=.28)
 proc('glEnable', None, C.c_uint)(0x0BE2)
 proc('glBlendFunc', None, C.c_uint, C.c_uint)(0x0302,0x0303)
@@ -269,8 +296,10 @@ line((0,1,0),z=-.5); front_pixel=pixel()
 assert front_pixel[1] > 240, front_pixel
 error=proc('glGetError', C.c_uint)()
 assert error == 0, hex(error)
-print('Mesa EGL/GLES2 smoke passed: production line/surface shaders, VBO layouts, dark contrast, material colours, plan elevation projection, hidden-line depth, lighting, transparency, inverse-transpose normals and selected local resizing at distant origin, no GL errors.')
+print('Mesa EGL/GLES2 smoke passed: production line/surface shaders, VBO layouts, dark contrast, material colours, plan elevation projection, hidden-line depth, lighting, transparency, inverse-transpose normals, XYZ tilt lighting and selected local resizing/XYZ rotation at distant origin, no GL errors.')
 print('Samples:', dark_pixel,color_pixel,plan_pixel,depth_pixel)
 
 print('Selected preview samples:', preview_samples)
 print('Surface samples:',material_pixel,lit_surface_pixel,unlit_surface_pixel,realistic_pixel,normal_pixel,transparent_pixel,hidden_pixel,front_pixel)
+
+print('Tilted surface samples:', tilted_surface_samples)

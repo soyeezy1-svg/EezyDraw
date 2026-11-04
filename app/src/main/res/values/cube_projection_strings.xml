@@ -1,0 +1,5 @@
+<resources>
+    <string name="cube_plan_2d">2D plan</string>
+    <string name="cube_perspective">Perspective</string>
+    <string name="cube_orthographic">Orthographic</string>
+</resources>

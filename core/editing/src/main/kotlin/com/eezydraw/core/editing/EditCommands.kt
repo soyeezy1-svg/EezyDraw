@@ -10,6 +10,7 @@ import com.eezydraw.core.model.LayerId
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.Shape
+import com.eezydraw.core.model.ParameterValue
 import com.eezydraw.core.model.measurementShape
 import java.util.UUID
 
@@ -17,12 +18,13 @@ import java.util.UUID
 object EditCommands {
     /**
      * Diff a prepared transaction, including a newly created drawing layer. Only changed records
-     * are retained; project/settings and all other document metadata stay outside drawing history.
+     * are retained. Settings and visibility are reversible without retaining a whole document.
      */
     fun between(before: ProjectDocument, after: ProjectDocument, label: String = "Edit drawing"): EditCommand {
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
-        require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues) == after) {
-            "Drawing edits can change only elements, layers, groups and issues"
+        require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues,
+            systems=after.systems,project=before.project.copy(settings=after.project.settings)) == after) {
+            "Drawing edits can change only elements, layers, systems, settings, groups and issues"
         }
         val old = before.elements.withIndex().associateBy { it.value.id }
         val next = after.elements.withIndex().associateBy { it.value.id }
@@ -34,7 +36,7 @@ object EditCommands {
         for ((index, element) in before.elements.withIndex()) {
             val target = next[element.id]
             if (target?.value != element) {
-                requireEditable(before, element)
+                if(isUnlockOnly(element,target?.value))requireLayerEditable(before,element) else requireEditable(before, element)
                 patches.add(ElementPatch(element.id, index, element, target?.index, target?.value))
             }
         }
@@ -47,7 +49,10 @@ object EditCommands {
         val layerIds = after.layers.mapTo(HashSet()) { it.id }
         require(after.elements.all { it.layerId in layerIds }) { "An object layer no longer exists" }
         val candidates = patches.mapNotNull { it.after }
-        candidates.forEach { requireEditable(after, it) }
+        candidates.forEach { requireLayerEditable(after, it) }
+        require(after.systems.map {it.id}.toSet().size==after.systems.size && after.systems.all {it.projectId==after.project.id}) {"Invalid drawing systems"}
+        val systemIds=after.systems.mapTo(HashSet()){it.id}
+        require(after.elements.all {it.systemId==null || it.systemId in systemIds}) {"An object system no longer exists"}
         require(candidates.none { element -> after.underlays.any { it.id == element.id } }) { "Object ID is used by an underlay" }
         val deleted = old.keys - next.keys
         validateReferences(after, after.elements, if (deleted.isEmpty()) candidates else after.elements)
@@ -70,6 +75,8 @@ object EditCommands {
             layers = if (before.layers == after.layers) null else LinkPatch(before.layers, after.layers),
             groups = if (before.groups == after.groups) null else LinkPatch(before.groups, after.groups),
             issues = if (before.issues == after.issues) null else LinkPatch(before.issues, after.issues),
+            systems = if(before.systems==after.systems)null else LinkPatch(before.systems,after.systems),
+            settings = if(before.project.settings==after.project.settings)null else ValuePatch(before.project.settings,after.project.settings),
         )
     }
 
@@ -84,7 +91,7 @@ object EditCommands {
         val existing = document.elements.associateBy { it.id }
         for (element in elements) {
             val old = requireNotNull(existing[element.id]) { "The selected object no longer exists" }
-            requireEditable(document, old)
+            if(isUnlockOnly(old,element))requireLayerEditable(document,old) else requireEditable(document, old)
         }
         return command(document, label, replacements = elements.associateBy { it.id })
     }
@@ -233,10 +240,25 @@ object EditCommands {
     }
 
     private fun requireEditable(document: ProjectDocument, element: Element) {
+        requireLayerEditable(document,element)
+        require(!elementLocked(element)) {"The object is locked. Unlock it before editing."}
+    }
+
+    private fun requireLayerEditable(document: ProjectDocument, element: Element) {
         require(element.projectId == document.project.id) { "Object belongs to another project" }
         val layer = requireNotNull(document.layers.find { it.id == element.layerId }) { "Object layer no longer exists" }
         require(!layer.locked) { "The ${layer.name} layer is locked" }
     }
+
+    private fun elementLocked(element:Element)=(element.properties[ELEMENT_LOCK] as? ParameterValue.Flag)?.value==true
+    private fun isUnlockOnly(before:Element,after:Element?):Boolean {
+        if(after==null || !elementLocked(before))return false
+        val next=after.properties[ELEMENT_LOCK]
+        if(next!=null && next!=ParameterValue.Flag(false))return false
+        return before.copy(properties=before.properties-ELEMENT_LOCK)==after.copy(properties=after.properties-ELEMENT_LOCK)
+    }
+
+    private const val ELEMENT_LOCK="eezydraw.locked"
 
     private fun command(
         document: ProjectDocument,

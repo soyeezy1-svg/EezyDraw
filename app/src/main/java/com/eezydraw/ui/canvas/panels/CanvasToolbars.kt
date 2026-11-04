@@ -87,6 +87,9 @@ fun CanvasToolbars(
     onTogglePanels: () -> Unit,
     panelsHidden: Boolean,
     modifier: Modifier = Modifier,
+    activeTool: String? = null,
+    measureActive: Boolean = false,
+    libraryActive: Boolean = false,
 ) {
     var measuresOpen by rememberSaveable { mutableStateOf(false) }
     Surface(modifier.pointerInput(Unit) { detectTapGestures(onTap = {}) },
@@ -94,11 +97,11 @@ fun CanvasToolbars(
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!panelsHidden) {
-                ToolbarGroup(Icons.Outlined.Draw, R.string.panel_draw, "toolbar_draw", onDraw)
+                ToolbarGroup(Icons.Outlined.Draw, R.string.panel_draw, "toolbar_draw", onDraw,activeTool!=null && !measureActive && !libraryActive)
                 ToolbarGroup(Icons.Outlined.Tune, R.string.panel_edit, "toolbar_edit", onEdit)
                 ToolbarGroup(Icons.Outlined.Visibility, R.string.panel_view, "toolbar_view", onView)
                 Box {
-                    ToolbarGroup(Icons.Outlined.Straighten, R.string.panel_measure, "toolbar_measure", { measuresOpen = !measuresOpen })
+                    ToolbarGroup(Icons.Outlined.Straighten, R.string.panel_measure, "toolbar_measure", { measuresOpen = !measuresOpen },measureActive)
                     DropdownMenu(measuresOpen, { measuresOpen = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.panel_measure_distance)) },
                             leadingIcon = { Icon(Icons.Outlined.Straighten, null) },
@@ -114,7 +117,7 @@ fun CanvasToolbars(
                             onClick = { measuresOpen = false; onMeasurements() })
                     }
                 }
-                ToolbarGroup(Icons.Outlined.Inventory2, R.string.panel_library, "toolbar_library", onLibrary)
+                ToolbarGroup(Icons.Outlined.Inventory2, R.string.panel_library, "toolbar_library", onLibrary,libraryActive)
             }
             CanvasActionButton(if (panelsHidden) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
                 stringResource(if (panelsHidden) R.string.panel_show_panels else R.string.panel_hide_panels),
@@ -124,9 +127,9 @@ fun CanvasToolbars(
 }
 
 @Composable
-private fun ToolbarGroup(icon: ImageVector, label: Int, tag: String, onClick: () -> Unit) {
+private fun ToolbarGroup(icon: ImageVector, label: Int, tag: String, onClick: () -> Unit, selected:Boolean=false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        CanvasActionButton(icon, stringResource(label), onClick, Modifier.testTag(tag))
+        CanvasActionButton(icon, stringResource(label), onClick, Modifier.testTag(tag),selected=selected)
         Text(stringResource(label), style = MaterialTheme.typography.labelSmall)
     }
 }

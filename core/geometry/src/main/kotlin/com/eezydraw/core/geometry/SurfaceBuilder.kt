@@ -37,7 +37,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val component = element.body as? ElementBody.Component
         val definition = component?.let { library[it.libraryItemId] }
         val material = (element.materialId ?: definition?.materialId)?.let(materials::get)
-        val colour = system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb ?: 0xFF6688AA
+        val colour = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb ?: 0xFF6688AA
         val transform = SurfaceTransform(element.transform)
         val emitter = SurfaceEmitter(transform) { a, b, c, na, nb, nc ->
             collector.triangle(a, b, c, na, nb, nc, element.id.value, element.levelId?.value, colour)

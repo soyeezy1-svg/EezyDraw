@@ -46,7 +46,7 @@ fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val transform = SceneTransform(element.transform)
         val levelId = element.levelId?.value
         val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
-        val color = system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
+        val color = element.colourOverride ?: system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
             ?: layer?.colourArgb ?: 0xFF334455
         val emitWorld: (Point3, Point3) -> Unit = { a, b ->
             if (a != b) {

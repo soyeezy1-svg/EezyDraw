@@ -163,6 +163,9 @@ fun EezyDrawApp(
                                             onSystemVisibility=viewModel::setSystemVisibility,onMeasurementsVisibility=viewModel::showMeasurements,
                                             onUpdateMeasurement=viewModel::updateSavedMeasurement,onDeleteElements=viewModel::deleteElements,
                                             onInsertLibrary=viewModel::insertLibraryItem,
+                                            onSelectionLayer=viewModel::setSelectionLayer,onSelectionColour=viewModel::setSelectionColour,
+                                            onSelectionLocked=viewModel::setSelectionLocked,onRotate90=viewModel::rotateSelection90,
+                                            onRotationSnap=viewModel::changeRotationSnap,
                                         ),
                                         onExportView={request,format->
                                             viewModel.prepareViewExport(request,format)

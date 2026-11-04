@@ -1,0 +1,188 @@
+package com.eezydraw.ui.canvas.editing
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.OpenWith
+import androidx.compose.material.icons.automirrored.outlined.RotateRight
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.eezydraw.R
+import com.eezydraw.core.model.Layer
+import com.eezydraw.core.model.LayerId
+import com.eezydraw.ui.canvas.panels.CanvasActionButton
+
+private enum class SelectionMenuPage { MAIN, LAYER, COLOUR, ROTATION_SNAP }
+
+/** The five primary actions stay visible; all other selection operations live in More. */
+@Composable
+fun SelectionToolbar(
+    mode: GizmoMode,
+    canEdit: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    canPaste: Boolean,
+    layers: List<Layer>,
+    selectedLayer: LayerId?,
+    selectionLocked: Boolean,
+    rotationSnapDegrees: Int,
+    onMode: (GizmoMode) -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    onProperties: () -> Unit,
+    onMirrorX: () -> Unit,
+    onMirrorY: () -> Unit,
+    onArray: () -> Unit,
+    onRotate90: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onPaste: () -> Unit,
+    onLayer: (LayerId) -> Unit,
+    onColour: (Long) -> Unit,
+    onLock: (Boolean) -> Unit,
+    onRotationSnap: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    keepProportions: Boolean = false,
+    onKeepProportions: (Boolean) -> Unit = {},
+    layerLocked: Boolean = false,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(SelectionMenuPage.MAIN) }
+    fun close() { expanded = false; page = SelectionMenuPage.MAIN }
+    fun act(action: () -> Unit) { close(); action() }
+
+    Surface(
+        modifier.testTag("selection_toolbar").pointerInput(Unit) { detectTapGestures(onTap = {}) },
+        shape = RoundedCornerShape(12.dp), tonalElevation = 5.dp, shadowElevation = 4.dp,
+    ) {
+        Row {
+            CanvasActionButton(
+                if (mode == GizmoMode.ROTATE) Icons.AutoMirrored.Outlined.RotateRight else Icons.Outlined.OpenWith,
+                stringResource(if (mode == GizmoMode.MOVE) R.string.selection_switch_rotate else R.string.selection_switch_move),
+                { onMode(if (mode == GizmoMode.MOVE) GizmoMode.ROTATE else GizmoMode.MOVE) },
+                Modifier.testTag("selection_mode"), selected = mode == GizmoMode.ROTATE,
+            )
+            CanvasActionButton(Icons.Outlined.ContentCopy, stringResource(R.string.selection_copy),
+                onCopy, Modifier.testTag("selection_copy"))
+            CanvasActionButton(Icons.Outlined.Delete, stringResource(R.string.selection_delete),
+                onDelete, Modifier.testTag("selection_delete"), enabled = canEdit)
+            CanvasActionButton(Icons.Outlined.Tune, stringResource(R.string.selection_properties),
+                onProperties, Modifier.testTag("selection_properties"))
+            Box {
+                CanvasActionButton(Icons.Outlined.MoreHoriz, stringResource(R.string.selection_more),
+                    { page = SelectionMenuPage.MAIN; expanded = !expanded }, Modifier.testTag("selection_more"))
+                DropdownMenu(expanded, { close() }) {
+                    if (page != SelectionMenuPage.MAIN) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.selection_menu_back)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Outlined.ArrowBack, null) },
+                            modifier = Modifier.testTag("selection_more_back"),
+                            onClick = { page = SelectionMenuPage.MAIN },
+                        )
+                        HorizontalDivider()
+                    }
+                    when (page) {
+                        SelectionMenuPage.MAIN -> {
+                            SelectionMenuItem(R.string.selection_scale, "selection_scale", canEdit,
+                                checked = mode == GizmoMode.SCALE) { act { onMode(GizmoMode.SCALE) } }
+                            SelectionMenuItem(R.string.selection_keep_proportions,"selection_keep_proportions",canEdit,
+                                checked=keepProportions) {act {onKeepProportions(!keepProportions)}}
+                            SelectionMenuItem(R.string.selection_mirror_x, "selection_mirror_x", canEdit) { act(onMirrorX) }
+                            SelectionMenuItem(R.string.selection_mirror_y, "selection_mirror_y", canEdit) { act(onMirrorY) }
+                            SelectionMenuItem(R.string.selection_array, "selection_array", canEdit) { act(onArray) }
+                            SelectionMenuItem(R.string.selection_layer, "selection_layer", canEdit && layers.isNotEmpty()) { page = SelectionMenuPage.LAYER }
+                            SelectionMenuItem(R.string.selection_colour, "selection_colour", canEdit) { page = SelectionMenuPage.COLOUR }
+                            SelectionMenuItem(when {layerLocked->R.string.selection_unlock_layer;selectionLocked->R.string.selection_unlock;else->R.string.selection_lock},
+                                "selection_lock", true, checked = selectionLocked || layerLocked) { act { onLock(if(layerLocked)false else !selectionLocked) } }
+                            SelectionMenuItem(R.string.selection_rotate_90, "selection_rotate_90", canEdit) { act(onRotate90) }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.selection_rotation_snap, rotationSnapDegrees)) },
+                                modifier = Modifier.testTag("selection_rotation_snap"),
+                                onClick = { page = SelectionMenuPage.ROTATION_SNAP },
+                            )
+                            HorizontalDivider()
+                            SelectionMenuItem(R.string.selection_paste, "selection_paste", canPaste) { act(onPaste) }
+                            SelectionMenuItem(R.string.selection_undo, "selection_undo", canUndo) { act(onUndo) }
+                            SelectionMenuItem(R.string.selection_redo, "selection_redo", canRedo) { act(onRedo) }
+                        }
+                        SelectionMenuPage.LAYER -> layers.forEach { layer ->
+                            DropdownMenuItem(
+                                text = { Text(layer.name) },
+                                leadingIcon = if (layer.id == selectedLayer) ({ Icon(Icons.Outlined.Check, null) }) else null,
+                                modifier = Modifier.testTag("selection_layer_${layer.id.value}"),
+                                onClick = { act { onLayer(layer.id) } },
+                            )
+                        }
+                        SelectionMenuPage.COLOUR -> selectionColours.forEach { (name, colour) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(name)) },
+                                leadingIcon = {
+                                    Box(Modifier.size(20.dp).background(Color(colour), CircleShape)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                                },
+                                modifier = Modifier.testTag("selection_colour_${colour.toString(16)}"),
+                                onClick = { act { onColour(colour) } },
+                            )
+                        }
+                        SelectionMenuPage.ROTATION_SNAP -> listOf(1, 5, 15, 45, 90).forEach { degrees ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.selection_degrees, degrees)) },
+                                leadingIcon = if (degrees == rotationSnapDegrees) ({ Icon(Icons.Outlined.Check, null) }) else null,
+                                modifier = Modifier.testTag("selection_snap_$degrees"),
+                                onClick = { act { onRotationSnap(degrees) } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectionMenuItem(label: Int, tag: String, enabled: Boolean, checked: Boolean = false, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(stringResource(label)) },
+        leadingIcon = if (checked) ({ Icon(Icons.Outlined.Check, null) }) else null,
+        modifier = Modifier.testTag(tag), enabled = enabled, onClick = onClick,
+    )
+}
+
+private val selectionColours = listOf(
+    R.string.selection_red to 0xFFD64747L,
+    R.string.selection_green to 0xFF23965CL,
+    R.string.selection_blue to 0xFF3976D2L,
+    R.string.selection_amber to 0xFFF2A900L,
+    R.string.selection_purple to 0xFF9252BDL,
+    R.string.selection_cyan to 0xFF0097A7L,
+    R.string.selection_black to 0xFF20252AL,
+    R.string.selection_white to 0xFFF5F5F5L,
+)

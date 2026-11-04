@@ -92,3 +92,13 @@ private fun viewRay(camera: OrbitCamera,x: Double,y: Double,width: Double,height
     val norm = sqrt(direction.dot(direction))
     return (if (camera.projection == Projection.PERSPECTIVE) eye else eye+offset) to direction*(1.0/norm)
 }
+
+/** A cheap cursor projection for previews; committed picks still test actual geometry. */
+internal fun viewPlanePoint(camera:OrbitCamera,x:Double,y:Double,width:Double,height:Double):Point3 {
+    val ray=viewRay(camera,x,y,width,height)
+    val normal=PickVector(cos(camera.pitch)*cos(camera.yaw),cos(camera.pitch)*sin(camera.yaw),sin(camera.pitch))
+    val target=PickVector(camera.target.x,camera.target.y,camera.target.z)
+    val denominator=ray.second.dot(normal)
+    val distance=if(abs(denominator)<1e-12)0.0 else (target-ray.first).dot(normal)/denominator
+    return (ray.first+ray.second*distance).point()
+}

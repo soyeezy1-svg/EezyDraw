@@ -13,6 +13,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.editing.ResizeFrame
 import com.eezydraw.core.editing.ResizeHandle
@@ -49,7 +52,7 @@ class SelectionGizmoTest {
     private val viewport = Viewport2D(pixelsPerMetre = 20.0)
 
     @Test
-    fun freeMoveHandleStaysSeparateFromRotationAndResizingInPlanAndOrbit() {
+    fun defaultMoveModeHasOnlyCenterSquareAndThreeSeparateAxesInPlanAndOrbit() {
         val box = Bounds3(Point3(), Point3(1.0, 1.0, 1.0))
         val resize = ResizeFrame(box, Transform3())
         for (density in listOf(1.0, 2.0)) for (is3D in listOf(false, true)) {
@@ -60,9 +63,8 @@ class SelectionGizmoTest {
                 assertTrue("The 52dp grab control must not overlap ${it.handle}",
                     hypot(free.center.x - it.center.x, free.center.y - it.center.y) >= 52.0 * density - 1e-7)
             }
-            assertTrue(controls.any { it.handle == GizmoHandle.ROTATE_Z })
-            assertTrue(controls.any { it.handle == GizmoHandle.MOVE_X })
-            assertTrue(controls.any { it.handle.resizeHandle() != null })
+            assertEquals(setOf(GizmoHandle.MOVE_FREE, GizmoHandle.MOVE_X, GizmoHandle.MOVE_Y, GizmoHandle.MOVE_Z), controls.map { it.handle }.toSet())
+            assertFalse(controls.any { it.handle.name.startsWith("ROTATE") || it.handle.resizeHandle() != null })
         }
     }
 
@@ -97,12 +99,16 @@ class SelectionGizmoTest {
     }
 
     @Test
-    fun attachedAnnotationsCanKeepMoveAndRotationWithoutResizeControls() {
+    fun attachedAnnotationsExposeOnlyTheChosenMoveOrRotateModeWithoutResizeControls() {
         val controls = gizmoHandles(bounds, viewport, OrbitCamera(), false, 1000.0, 800.0, 1.0,
             resizeFrame = ResizeFrame(bounds, Transform3()), allowResize = false)
         assertTrue(controls.any { it.handle == GizmoHandle.MOVE_FREE })
-        assertTrue(controls.any { it.handle == GizmoHandle.ROTATE_Z })
-        assertFalse(controls.any { it.handle == GizmoHandle.SCALE || it.handle.resizeHandle() != null })
+        assertFalse(controls.any { it.handle.name.startsWith("ROTATE") || it.handle == GizmoHandle.SCALE || it.handle.resizeHandle() != null })
+        val rotations = gizmoHandles(bounds, viewport, OrbitCamera(), false, 1000.0, 800.0, 1.0,
+            allowResize = false, mode = GizmoMode.ROTATE)
+        assertEquals(setOf(GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z), rotations.map { it.handle }.toSet())
+        assertTrue(gizmoHandles(bounds, viewport, OrbitCamera(), false, 1000.0, 800.0, 1.0,
+            allowResize = false, mode = GizmoMode.SCALE).isEmpty())
     }
 
     @Test
@@ -136,15 +142,93 @@ class SelectionGizmoTest {
     }
 
     @Test
-    fun edgeOnViewsHideOnlyUnusableMovementAxesAndKeepTheRotationDial() {
-        fun handles(view: ViewPreset) = gizmoHandles(bounds, viewport,
-            OrbitCamera(target = Point3(z = 1.5)).preset(view), true, 1000.0, 800.0, 1.0).map { it.handle }
-        assertTrue(GizmoHandle.ROTATE_Z in handles(ViewPreset.FRONT))
-        assertTrue(GizmoHandle.MOVE_X in handles(ViewPreset.FRONT))
-        assertTrue(GizmoHandle.MOVE_Z in handles(ViewPreset.FRONT))
-        assertFalse(GizmoHandle.MOVE_Y in handles(ViewPreset.FRONT))
-        assertFalse(GizmoHandle.MOVE_X in handles(ViewPreset.SIDE))
-        assertFalse(GizmoHandle.MOVE_Z in handles(ViewPreset.TOP))
+    fun allMovementAxesRemainAvailableInTopFrontSideAndIsometricViews() {
+        for (view in ViewPreset.entries) for (projection in Projection.entries) {
+            val camera = OrbitCamera(target = Point3(z = 1.5), projection = projection).preset(view)
+            val handles = gizmoHandles(bounds, viewport, camera, true, 1000.0, 800.0, 1.0)
+            assertEquals("$view $projection", setOf(GizmoHandle.MOVE_FREE, GizmoHandle.MOVE_X,
+                GizmoHandle.MOVE_Y, GizmoHandle.MOVE_Z), handles.map { it.handle }.toSet())
+            handles.forEachIndexed { index, a -> handles.drop(index + 1).forEach { b ->
+                assertTrue(hypot(a.center.x - b.center.x, a.center.y - b.center.y) >= 52.0 - 1e-7)
+            } }
+        }
+    }
+
+    @Test
+    fun rotateModeHasThreeSeparatedColouredBandsInEveryPlanAndOrbitView() {
+        for (is3D in listOf(false, true)) for (view in ViewPreset.entries) for (projection in Projection.entries) {
+            val camera = OrbitCamera(target = Point3(z = 1.5), projection = projection).preset(view)
+            val controls = gizmoHandles(bounds, viewport, camera, is3D, 1200.0, 1000.0, 1.0,
+                mode = GizmoMode.ROTATE)
+            assertEquals(setOf(GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z), controls.map { it.handle }.toSet())
+            controls.forEachIndexed { index, control ->
+                assertEquals("A closed band supports grabbing along the ring", 65, control.rotationRing.size)
+                assertEquals(control.rotationRing.first(), control.rotationRing.last())
+                assertTrue(control.rotationRing.all { it.x.isFinite() && it.y.isFinite() })
+                assertTrue(checkNotNull(control.accessibleStep).let { hypot(it.x, it.y) } > 0.0)
+                controls.drop(index + 1).forEach { other ->
+                    assertTrue("$view $projection $is3D bands overlap", hypot(control.center.x - other.center.x,
+                        control.center.y - other.center.y) >= 52.0 - 1e-7)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun eachRotationBandCanBeGrabbedWithAFingerAndTheAngleIsAnnounced() {
+        var density = 1.0
+        var current: GizmoHandle? = null
+        val commits = mutableListOf<GizmoHandle>()
+        compose.setContent {
+            val measuredDensity = LocalDensity.current.density
+            SideEffect { density = measuredDensity.toDouble() }
+            EezyDrawTheme { Surface { Box(Modifier.fillMaxSize()) {
+                SelectionGizmo(bounds, viewport, OrbitCamera(), false, null,
+                    onStart = { handle, _ -> current = handle }, onDrag = { _, _, _ -> },
+                    onEnd = { cancelled -> if (!cancelled) commits.add(checkNotNull(current)) },
+                    mode = GizmoMode.ROTATE, rotationAngleDegrees = 45.0)
+            } } }
+        }
+        val node = compose.onNodeWithTag("selection_gizmo")
+        node.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "+45°"))
+        val area = node.fetchSemanticsNode().boundsInRoot
+        val controls = gizmoHandles(bounds, viewport, OrbitCamera(), false,
+            area.width.toDouble(), area.height.toDouble(), density, mode = GizmoMode.ROTATE)
+        for (control in controls) {
+            val start = Offset(control.center.x.toFloat(), control.center.y.toFloat())
+            val shift = checkNotNull(control.accessibleStep).let { Offset(it.x.toFloat(), it.y.toFloat()) }
+            node.performTouchInput { down(start); moveTo(start + shift, delayMillis = 32); up() }
+            compose.runOnIdle { assertEquals(control.handle, commits.last()) }
+        }
+        assertEquals(listOf(GizmoHandle.ROTATE_X, GizmoHandle.ROTATE_Y, GizmoHandle.ROTATE_Z), commits)
+    }
+
+    @Test
+    fun changingGizmoModeCancelsThePreviousDragInsteadOfCommittingIt() {
+        var mode by mutableStateOf(GizmoMode.MOVE)
+        var preview by mutableStateOf<EditDelta?>(null)
+        var density = 1.0
+        val ended = mutableListOf<Boolean>()
+        compose.setContent {
+            val measuredDensity = LocalDensity.current.density
+            SideEffect { density = measuredDensity.toDouble() }
+            EezyDrawTheme { Surface { Box(Modifier.fillMaxSize()) {
+                SelectionGizmo(bounds, viewport, OrbitCamera(), false, preview,
+                    onStart = { _, _ -> },
+                    onDrag = { _, _, _ -> preview = EditDelta(translation = Point3(.5, .25)) },
+                    onEnd = { cancelled -> ended.add(cancelled); preview = null }, mode = mode)
+            } } }
+        }
+        val node = compose.onNodeWithTag("selection_gizmo")
+        val area = node.fetchSemanticsNode().boundsInRoot
+        val control = gizmoHandles(bounds, viewport, OrbitCamera(), false,
+            area.width.toDouble(), area.height.toDouble(), density).single { it.handle == GizmoHandle.MOVE_X }
+        val start = Offset(control.center.x.toFloat(), control.center.y.toFloat())
+        node.performTouchInput { down(start); moveTo(start + Offset(30f, 0f), delayMillis = 32) }
+        compose.runOnIdle { assertTrue(preview != null); mode = GizmoMode.ROTATE }
+        compose.waitForIdle()
+        node.performTouchInput { up() }
+        compose.runOnIdle { assertEquals(listOf(true), ended); assertNull(preview) }
     }
 
     @Test
@@ -153,19 +237,19 @@ class SelectionGizmoTest {
         val frame = ResizeFrame(box, Transform3())
         for (scale in listOf(.0001, 20.0, 250.0)) for (density in listOf(1.0, 2.0)) {
             val controls = gizmoHandles(box, Viewport2D(Point2(.5, .5), scale), OrbitCamera(), false,
-                1200.0, 1000.0, density, frame)
+                1200.0, 1000.0, density, frame, mode = GizmoMode.SCALE)
             val resize = controls.filter { it.handle.resizeHandle() != null }
             assertEquals("All four sides and four base corners must be available", 8, resize.size)
             assertFalse(controls.any { it.handle == GizmoHandle.SCALE })
             assertFalse(controls.any { it.handle == GizmoHandle.RESIZE_HEIGHT })
             controls.forEachIndexed { index, a -> controls.drop(index + 1).forEach { b ->
                 assertTrue("Overlapping targets ${a.handle} and ${b.handle} at $scale/$density",
-                    hypot(a.center.x - b.center.x, a.center.y - b.center.y) >= 44.0 * density - 1e-7)
+                    hypot(a.center.x - b.center.x, a.center.y - b.center.y) >= 52.0 * density - 1e-7)
             } }
         }
         val controls3D = gizmoHandles(box, viewport,
             OrbitCamera(target = Point3(.5, .5, .5)).preset(ViewPreset.ISOMETRIC), true,
-            1000.0, 800.0, 1.0, frame)
+            1000.0, 800.0, 1.0, frame, mode = GizmoMode.SCALE)
         assertEquals(9, controls3D.count { it.handle.resizeHandle() != null })
         assertTrue(controls3D.any { it.handle == GizmoHandle.RESIZE_HEIGHT })
     }
@@ -176,7 +260,7 @@ class SelectionGizmoTest {
         val flat = Bounds3(Point3(), Point3(1.0, 1.0))
         val camera = OrbitCamera(target = Point3(.5, .5, .5), projection = Projection.ORTHOGRAPHIC)
         fun handles(bounds: Bounds3, view: ViewPreset) = gizmoHandles(bounds, viewport,
-            camera.preset(view), true, 1000.0, 800.0, 1.0, ResizeFrame(bounds, Transform3())).map { it.handle }
+            camera.preset(view), true, 1000.0, 800.0, 1.0, ResizeFrame(bounds, Transform3()), mode = GizmoMode.SCALE).map { it.handle }
         assertFalse(GizmoHandle.RESIZE_HEIGHT in handles(flat, ViewPreset.ISOMETRIC))
         assertFalse(GizmoHandle.RESIZE_HEIGHT in handles(solid, ViewPreset.TOP))
         assertTrue(GizmoHandle.RESIZE_HEIGHT in handles(solid, ViewPreset.FRONT))
@@ -192,7 +276,7 @@ class SelectionGizmoTest {
         val frame = ResizeFrame(box, Transform3())
         val camera = Viewport2D(Point2(.5, .5), 100.0)
         val preview = EditDelta(axisScale = Point3(2.0, 1.0, 1.0))
-        val controls = gizmoHandles(box, camera, OrbitCamera(), false, 1000.0, 800.0, 1.0, frame, preview)
+        val controls = gizmoHandles(box, camera, OrbitCamera(), false, 1000.0, 800.0, 1.0, frame, preview, mode = GizmoMode.SCALE)
         val width = controls.single { it.handle == GizmoHandle.RESIZE_WIDTH_POSITIVE }
         val expected = camera.worldToScreen(Point2(2.0, .5), 1000.0, 800.0)
         assertEquals(expected, width.anchor)
@@ -231,13 +315,13 @@ class SelectionGizmoTest {
                     onEnd = { cancelled ->
                         if (!cancelled) committed.add(checkNotNull(active) to checkNotNull(preview))
                         preview = null
-                    }, resizeFrame = frame)
+                    }, resizeFrame = frame, mode = GizmoMode.SCALE)
             } } }
         }
         val node = compose.onNodeWithTag("selection_gizmo")
         val area = node.fetchSemanticsNode().boundsInRoot
         measuredWidth = area.width.toDouble(); measuredHeight = area.height.toDouble()
-        val controls = gizmoHandles(box, viewport, camera, true, measuredWidth, measuredHeight, density, frame)
+        val controls = gizmoHandles(box, viewport, camera, true, measuredWidth, measuredHeight, density, frame, mode = GizmoMode.SCALE)
             .filter { it.handle.resizeHandle() != null }
         assertEquals(9, controls.size)
         controls.forEach { control ->

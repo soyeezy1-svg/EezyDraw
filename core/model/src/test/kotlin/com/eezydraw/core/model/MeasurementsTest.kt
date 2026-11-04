@@ -42,7 +42,7 @@ class MeasurementsTest {
         assertEquals(.3, summary.horizontalDistance, 1e-12)
         assertEquals(1.236931687685298, summary.distance, 1e-12)
         assertEquals(1.2, requireNotNull(summary.heightAboveFloorMetres), 1e-12)
-        val text = measurementText(summary, ProjectSettings())
+        val text = measurementText(summary, ProjectSettings(showDetailedMeasurements = true))
         assertTrue(text[0].contains("DIST 1236.93 MM"))
         assertTrue(text[1].contains("PLAN 300.00 MM"))
         assertTrue(text.any { it == "AFFL 1200.00 MM" })
@@ -57,7 +57,8 @@ class MeasurementsTest {
         assertEquals(PI / 4, summary.azimuthRadians, 1e-12)
         assertEquals(.6154797086703874, summary.elevationRadians, 1e-12)
         for (unit in LengthUnit.entries) {
-            val text = measurementText(summary, ProjectSettings(lengthUnit = unit, angleFormat = AngleFormat.RADIANS))
+            val text = measurementText(summary, ProjectSettings(lengthUnit = unit, angleFormat = AngleFormat.RADIANS,
+                showDetailedMeasurements = true))
             assertTrue(text[1].contains("AZ 0.79 RAD"))
             assertEquals(Point3(.3, 0.0, 1.2), summary.start)
         }
@@ -81,5 +82,35 @@ class MeasurementsTest {
         assertEquals(first.end.x + 1, after.end.x, 1e-12)
         assertEquals(first.labelPoint.x + 1, after.labelPoint.x, 1e-12)
         assertEquals(first.labelPoint.y + 1, after.labelPoint.y, 1e-12)
+    }
+
+    @Test fun distanceIsTheOnlyDefaultReadoutEvenForOlderDetailedAnnotations() {
+        val shape = measurementShape(dimension)!!
+        val legacy = dimension.copy(body = ElementBody.DrawingShape(shape.copy(
+            measurement = shape.measurement!!.copy(showCoordinates = true, showHeightAboveFloor = true),
+        )))
+        val summary = requireNotNull(resolveMeasurement(document(), legacy))
+        for (unit in LengthUnit.entries) {
+            val text = measurementText(summary, ProjectSettings(lengthUnit = unit))
+            assertEquals(1, text.size)
+            assertTrue(text.single().contains("DIST"))
+            assertFalse(text.single().contains("AZ"))
+            assertFalse(text.single().contains("PLAN"))
+            assertFalse(text.single().contains("AFFL"))
+            assertFalse(text.single().contains("A X"))
+        }
+    }
+
+    @Test fun enablingDetailsRetroactivelyShowsAnglesAndCoordinatesWithoutEditingSavedMetadata() {
+        val summary = requireNotNull(resolveMeasurement(document(), dimension))
+        assertFalse(summary.showCoordinates)
+        assertEquals(1, measurementText(summary, ProjectSettings()).size)
+        val text = measurementText(summary, ProjectSettings(showDetailedMeasurements = true))
+        assertTrue(text.any { it.contains("AZ") && it.contains("EL") })
+        assertTrue(text.any { it.startsWith("A X") && it.contains(" Y ") && it.contains(" Z ") })
+        assertTrue(text.any { it.startsWith("B X") })
+        assertTrue(text.any { it.startsWith("AFFL") })
+        assertFalse(measurementShape(dimension)!!.measurement!!.showCoordinates)
+        assertEquals(1, measurementText(summary, ProjectSettings(showDetailedMeasurements = true), detailed = false).size)
     }
 }

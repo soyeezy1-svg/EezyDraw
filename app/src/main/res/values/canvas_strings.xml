@@ -4,13 +4,9 @@
     <string name="canvas_project_details">Project details</string>
     <string name="canvas_save">Save</string>
     <string name="canvas_export">Export</string>
-    <string name="canvas_plan">2D plan</string>
-    <string name="canvas_3d">3D view</string>
     <string name="canvas_extents">Zoom extents</string>
     <string name="canvas_window">Zoom window</string>
     <string name="canvas_probe">Snap probe</string>
-    <string name="canvas_pan">Pan</string>
-    <string name="canvas_orbit">Orbit</string>
     <string name="canvas_snaps">Snaps</string>
     <string name="canvas_snap_off">Snap off</string>
     <string name="canvas_snap_on">Snapping enabled</string>
@@ -26,16 +22,12 @@
     <string name="canvas_front">Front</string>
     <string name="canvas_side">Side</string>
     <string name="canvas_iso">Isometric</string>
-    <string name="canvas_perspective">Perspective</string>
-    <string name="canvas_orthographic">Orthographic</string>
     <string name="canvas_all_levels">All levels</string>
     <string name="canvas_level">Level</string>
     <string name="canvas_units">Units</string>
     <string name="canvas_grid">Grid</string>
     <string name="canvas_coordinates">Coordinates</string>
     <string name="canvas_target">Target</string>
-    <string name="canvas_window_hint">Drag a rectangle to zoom. Tap Zoom window again to cancel.</string>
-    <string name="canvas_probe_hint">Drag the snap probe · tap to set a reference</string>
     <string name="canvas_preparing">Preparing drawing…</string>
     <string name="canvas_prepare_error">This drawing could not be prepared. It may exceed the supported geometry limits.</string>
     <string name="canvas_renderer_error">The graphics renderer could not start on this device.</string>
@@ -43,5 +35,4 @@
     <string name="canvas_cube_back">Back</string>
     <string name="canvas_cube_left">Left</string>
     <string name="canvas_cube_bottom">Bottom</string>
-    <string name="canvas_snap_plan_only">Snaps: 2D only</string>
 </resources>
