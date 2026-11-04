@@ -44,6 +44,13 @@
     <string name="editing_text_error">Enter 1–512 characters.</string>
     <string name="editing_text_height">Text height (%1$s)</string>
     <string name="editing_solid_height">Height (%1$s)</string>
+    <string name="editing_default_width">Width (%1$s)</string>
+    <string name="editing_default_depth">Depth (%1$s)</string>
+    <string name="editing_default_diameter">Diameter (%1$s)</string>
+    <string name="editing_draw_by_points">Draw by points</string>
+    <string name="editing_default_placement_hint">Tap once to place with these dimensions.</string>
+    <string name="editing_point_placement_hint">Tap points to draw a custom footprint.</string>
+    <string name="editing_keep_proportions">Keep width/depth proportions</string>
     <string name="editing_closed_polyline">Closed polyline</string>
     <string name="editing_positive_error">Enter a finite number greater than zero.</string>
     <string name="editing_finite_error">Enter a finite number.</string>

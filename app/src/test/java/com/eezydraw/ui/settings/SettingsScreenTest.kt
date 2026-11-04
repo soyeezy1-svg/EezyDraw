@@ -4,6 +4,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -144,6 +146,24 @@ class SettingsScreenTest {
             assertEquals(1, backRequests)
             assertEquals(0, saveRequests)
         }
+    }
+
+    @Test
+    fun autosaveNotificationIsOffByDefaultAndItsOptInDraftSurvivesRestoration() {
+        var saved: AppSettings? = null
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            EezyDrawTheme {
+                Surface {
+                    SettingsScreen(AppSettings(), { saved = it }, {}, {}, {}, {})
+                }
+            }
+        }
+        visible("settings_show_autosave_notification").assertIsOff().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        visible("settings_show_autosave_notification").assertIsOn()
+        compose.onNodeWithTag("settings_save").performClick()
+        compose.runOnIdle { assertEquals(true, saved?.showAutosaveNotification) }
     }
 
     private fun showSettings(

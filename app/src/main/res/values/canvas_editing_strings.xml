@@ -2,4 +2,5 @@
     <string name="canvas_add_selection">Add selection</string>
     <string name="canvas_tool_points">%1$s · Points: %2$d / %3$d · tap to place; Finish for open-ended tools</string>
     <string name="canvas_tool_error">Check drawing points</string>
+    <string name="canvas_place_default">%1$s · tap once to place at the displayed dimensions</string>
 </resources>

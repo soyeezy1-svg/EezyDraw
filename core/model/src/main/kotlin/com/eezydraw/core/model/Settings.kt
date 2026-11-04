@@ -57,6 +57,7 @@ data class AppSettings(
     val fileNamingPattern: String = "{name}-{date}",
     val exportFormat: ExportFormat = ExportFormat.EEZYDRAW,
     val exportIncludeUnderlays: Boolean = true,
+    val showAutosaveNotification: Boolean = false,
 ) {
     init {
         require(languageTag.isNotBlank())

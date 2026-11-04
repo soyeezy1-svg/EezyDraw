@@ -23,6 +23,7 @@ import androidx.compose.ui.test.swipe
 import androidx.test.core.app.ApplicationProvider
 import com.eezydraw.R
 import com.eezydraw.core.editing.readProperties
+import com.eezydraw.core.editing.resizeFrame
 import com.eezydraw.core.model.Element
 import com.eezydraw.core.model.ElementBody
 import com.eezydraw.core.model.Point2
@@ -105,10 +106,11 @@ class CanvasEditingFlowTest {
 
         awaitSelectedScene(created)
         val frame = currentFrame()
+        val resize = compose.runOnIdle { resizeFrame(checkNotNull(model.state.value.document),created) }
         val control = gizmoHandles(
             checkNotNull(frame.selectionScene).bounds, frame.viewport, frame.orbit, frame.is3D,
             bounds.width.toDouble(), bounds.height.toDouble(),
-            context.resources.displayMetrics.density.toDouble(),
+            context.resources.displayMetrics.density.toDouble(),resizeFrame = resize,
         ).single { it.handle == GizmoHandle.MOVE_X }
         val handle = Offset(control.center.x.toFloat(), control.center.y.toFloat())
         compose.onNodeWithTag("canvas_surface").performTouchInput {
@@ -193,7 +195,6 @@ class CanvasEditingFlowTest {
         chooseTool("box")
         compose.onNodeWithTag("canvas_surface").performTouchInput {
             click(Offset(width * .43f, height * .60f))
-            click(Offset(width * .58f, height * .42f))
         }
         awaitElements(1)
         val original = element()

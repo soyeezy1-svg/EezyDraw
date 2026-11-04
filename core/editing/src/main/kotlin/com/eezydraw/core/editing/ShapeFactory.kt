@@ -18,6 +18,43 @@ private const val TWO_PI = PI * 2
 data class SketchGeometry(val shape: Shape, val transform: Transform3)
 
 /**
+ * Inserts a closed shape without interpreting a screen gesture as its physical dimensions.
+ * [anchor] is already in canonical project metres. Round tools use width as diameter; a
+ * sphere always remains round, while ellipse and rectangular tools use independent depth.
+ * Local construction avoids adding/subtracting survey coordinates when measuring a shape.
+ */
+fun createDefaultSketch(
+    tool: DrawingTool,
+    anchor: Point3,
+    options: ToolOptions = ToolOptions(),
+): SketchGeometry {
+    require(supportsDefaultPlacement(tool)) { "This tool needs drawing points." }
+    val width = options.width.also { requireLength(it, "Width") }
+    val depth = if (tool in setOf(DrawingTool.ELLIPSE, DrawingTool.RECTANGLE, DrawingTool.POLYGON,
+            DrawingTool.TRIANGLE, DrawingTool.BOX, DrawingTool.PYRAMID)) {
+        options.depth.also { requireLength(it, "Depth") }
+    } else width
+    val zero = Point3()
+    val points = when (tool) {
+        DrawingTool.CIRCLE, DrawingTool.SPHERE, DrawingTool.CYLINDER, DrawingTool.CONE ->
+            listOf(zero, Point3(width / 2))
+        DrawingTool.ELLIPSE -> listOf(zero, Point3(width / 2, depth / 2))
+        DrawingTool.RECTANGLE, DrawingTool.BOX, DrawingTool.PYRAMID -> listOf(zero, Point3(width, depth))
+        DrawingTool.TRIANGLE -> listOf(zero, Point3(width), Point3(width / 2, depth))
+        DrawingTool.POLYGON -> listOf(
+            Point3(0.0, depth / 2), Point3(width / 4, 0.0), Point3(width * .75, 0.0),
+            Point3(width, depth / 2), Point3(width * .75, depth), Point3(width / 4, depth),
+        )
+        else -> error("Default placement is unavailable for this tool.")
+    }
+    val local = createSketch(tool, points, options)
+    val offset = local.transform.translation
+    return local.copy(transform = local.transform.copy(translation = Point3(
+        anchor.x + offset.x, anchor.y + offset.y, anchor.z + offset.z,
+    )))
+}
+
+/**
  * Converts picked project points on one XY level into small local Double coordinates.
  * Construction either returns a complete shape or throws without modifying a document.
  */

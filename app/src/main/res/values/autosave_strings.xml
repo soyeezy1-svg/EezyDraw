@@ -1,0 +1,4 @@
+<resources>
+    <string name="settings_show_autosave_notification">Show autosave notification</string>
+    <string name="project_autosaved_notice">Project autosaved</string>
+</resources>

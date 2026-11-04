@@ -47,6 +47,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 enum class AppScreen { MENU, CREATE, PROJECT, PROJECT_DETAILS, SETTINGS, HELP }
@@ -66,6 +68,7 @@ data class AppUiState(
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val canPaste: Boolean = false,
+    val autosaving: Boolean = false,
 )
 
 class AppViewModel(
@@ -88,6 +91,7 @@ class AppViewModel(
     private var savedDocument: ProjectDocument? = null
     private var clipboard = emptyList<Element>()
     private var pasteSequence = 0L
+    private val storageMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -315,7 +319,24 @@ class AppViewModel(
     }
 
     fun saveIfDirty() {
-        if (state.value.dirty && !state.value.busy) save()
+        val current = state.value
+        if (!current.dirty || current.busy || current.autosaving || current.document == null) return
+        mutableState.update { it.copy(autosaving = true) }
+        viewModelScope.launch {
+            try {
+                storageMutex.withLock {
+                    if (state.value.dirty && persistCurrent() && state.value.settings.showAutosaveNotification) {
+                        mutableState.update { it.copy(notice = application.getString(R.string.project_autosaved_notice)) }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                mutableState.update { it.copy(error = userMessage(error)) }
+            } finally {
+                mutableState.update { it.copy(autosaving = false) }
+            }
+        }
     }
 
     fun save() = operation {
@@ -387,10 +408,18 @@ class AppViewModel(
     private suspend fun persistCurrent(): Boolean {
         val snapshot = state.value.document ?: return false
         val saved = projects.save(snapshot, state.value.settings.backupEnabled)
-        savedDocument = saved
+        if (state.value.document?.project?.id == snapshot.project.id) savedDocument = saved
         mutableState.update { current ->
-            if (current.document == snapshot) current.copy(document = saved, dirty = false)
-            else current.copy(dirty = true)
+            val draft = current.document ?: return@update current
+            if (draft.project.id != snapshot.project.id) current
+            else {
+                // Keep edits made while the snapshot was being written, while accepting its
+                // repository timestamp so undo back to the saved contents becomes clean.
+                val reconciled = if (draft == snapshot) saved else draft.copy(
+                    project = draft.project.copy(updatedAtEpochMillis = saved.project.updatedAtEpochMillis),
+                )
+                current.copy(document = reconciled, dirty = reconciled != saved)
+            }
         }
         return mirror(saved)
     }
@@ -428,7 +457,7 @@ class AppViewModel(
         mutableState.update { it.copy(busy = true, error = null, notice = null) }
         viewModelScope.launch {
             try {
-                action()
+                storageMutex.withLock { action() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
