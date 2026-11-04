@@ -189,6 +189,25 @@ class SettingsScreenTest {
         assertEquals(settings, Json.decodeFromString<AppSettings>(Json.encodeToString(settings)))
     }
 
+    @Test
+    fun detailedMeasurementAndRepeatPlacementAreOffByDefaultAndRestoreTheirDrafts() {
+        var saved: AppSettings? = null
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            EezyDrawTheme { Surface { SettingsScreen(AppSettings(), { saved = it }, {}, {}, {}, {}) } }
+        }
+        visible("settings_show_detailed_measurement").assertIsOff().performClick()
+        visible("settings_keep_tool_active_after_placing").assertIsOff().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        visible("settings_show_detailed_measurement").assertIsOn()
+        visible("settings_keep_tool_active_after_placing").assertIsOn()
+        compose.onNodeWithTag("settings_save").performClick()
+        compose.runOnIdle {
+            assertEquals(true, saved?.showDetailedMeasurement)
+            assertEquals(true, saved?.keepToolActiveAfterPlacing)
+        }
+    }
+
     private fun showSettings(
         settings: AppSettings = AppSettings(),
         onSave: (AppSettings) -> Unit = {},

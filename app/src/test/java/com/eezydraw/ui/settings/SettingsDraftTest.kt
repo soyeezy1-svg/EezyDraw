@@ -86,4 +86,17 @@ class SettingsDraftTest {
         }
         assertNotNull(draft.input("file_naming", "{name}-{date}-{id}").toSettings())
     }
+
+    @Test
+    fun interactionOptInsSurviveUnitConversionAndDraftSerialization() {
+        val original = AppSettings(showDetailedMeasurement = true, keepToolActiveAfterPlacing = true,
+            projectDefaults = ProjectSettings(rotationSnapDegrees = 90))
+        val draft = SettingsDraft.from(original).input("precision", "-").changeUnits(LengthUnit.METRES)
+        assertNull(draft.toSettings())
+        val restored = draft.input("precision", "3").toSettings()!!
+        assertTrue(restored.showDetailedMeasurement)
+        assertTrue(restored.keepToolActiveAfterPlacing)
+        assertEquals(90, restored.projectDefaults.rotationSnapDegrees)
+        assertEquals(.1, restored.projectDefaults.snap.gridSpacing, 1e-12)
+    }
 }

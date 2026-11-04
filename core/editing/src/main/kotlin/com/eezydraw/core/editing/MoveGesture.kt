@@ -38,7 +38,7 @@ class MoveContext(document: ProjectDocument, selectedIds: Set<ElementId>, scene:
     private val index = SpatialIndex(scene.segments.filterNot { it.elementId in selected })
     private val planSnaps = SnapEngine(index)
 
-    /** Null [axis] moves freely in plan XY or the camera-facing plane through [pivot]. */
+    /** Null [axis] moves on the horizontal XY plane through [pivot], preserving elevation. */
     fun delta(
         pivot: Point3,
         start: Point2,
@@ -56,96 +56,143 @@ class MoveContext(document: ProjectDocument, selectedIds: Set<ElementId>, scene:
         if (start == current || width <= 0.0 || height <= 0.0 || !width.isFinite() || !height.isFinite()) return EditDelta(pivot)
         val unitAxis = axis?.let(::normalized)
         val displacement = if (unitAxis != null) {
-            screenAxisDrag(unitAxis, pivot, start, current, viewport, orbit, is3D, width, height)
+            axisDisplacement(unitAxis, pivot, start, current, viewport, orbit, is3D, width, height)
         } else if (!is3D) {
             val first = viewport.screenToWorld(start.x, start.y, width, height)
             val last = viewport.screenToWorld(current.x, current.y, width, height)
             Point3(last.x - first.x, last.y - first.y)
         } else {
-            val normal = facingNormal(orbit)
-            val first = planePick(orbit, start, width, height, pivot, normal) ?: return EditDelta(pivot)
-            val last = planePick(orbit, current, width, height, pivot, normal) ?: return EditDelta(pivot)
-            last - first
+            groundDisplacement(pivot,start,current,orbit,width,height)
         }
         if (magnitude(displacement) < 1e-12) return EditDelta(pivot)
         val candidate = pivot + displacement
-        val snapped = if (!is3D) {
-            // X/Y controls are always constraints even when Ortho is disabled in project snaps.
-            val constrainedSettings = if (unitAxis != null && abs(unitAxis.z) < 1e-10 &&
-                (abs(unitAxis.x) < 1e-10 || abs(unitAxis.y) < 1e-10))
-                snapSettings.copy(modes = snapSettings.modes + SnapMode.ORTHO) else snapSettings
-            val tolerance = max(snapSettings.tolerance, max(0.0, tolerancePixels) / viewport.pixelsPerMetre)
-            val snap = planSnaps.snap(Point2(candidate.x, candidate.y), constrainedSettings, tolerance,
-                Point2(pivot.x, pivot.y), levelId).point
-            val p = Point3(snap.x, snap.y, pivot.z)
-            if (unitAxis == null) p else pivot + unitAxis * ((p - pivot) dot unitAxis)
-        } else snapOrbit(candidate, pivot, unitAxis, orbit, width, height, snapSettings, tolerancePixels, levelId)
+        val snapped = if (unitAxis == null) {
+            // Ground movement shares the plan's six snap modes while keeping mounting height.
+            val tolerance = max(snapSettings.tolerance, max(0.0,tolerancePixels) *
+                moveMetresPerPixel(pivot,viewport,orbit,is3D,height))
+            val snap = planSnaps.snap(Point2(candidate.x,candidate.y),snapSettings,tolerance,
+                Point2(pivot.x,pivot.y),levelId).point
+            Point3(snap.x,snap.y,pivot.z)
+        } else snapAxis(candidate,pivot,unitAxis,viewport,orbit,is3D,height,snapSettings,tolerancePixels,levelId)
         return EditDelta(pivot = pivot, translation = snapped - pivot)
     }
 
-    private fun snapOrbit(
-        candidate: Point3, pivot: Point3, axis: Point3?, camera: OrbitCamera,
-        width: Double, height: Double, settings: SnapSettings, pixels: Double, levelId: String?,
-    ): Point3 {
-        if (!settings.enabled || settings.modes.isEmpty()) return candidate
-        val normal = facingNormal(camera)
-        val right = Point3(-sin(camera.yaw), cos(camera.yaw), 0.0)
-        val up = Point3(-sin(camera.pitch) * cos(camera.yaw), -sin(camera.pitch) * sin(camera.yaw), cos(camera.pitch))
-        val visibleHeight = if (camera.projection == com.eezydraw.core.model.Projection.PERSPECTIVE)
-            2 * camera.distance * tan(OrbitCamera.FOV_Y / 2) else camera.orthographicHeight
-        val tolerance = max(settings.tolerance, max(0.0, pixels) * visibleHeight / height)
-        val epsilon = max(1e-7, max(Math.ulp(pivot.x), max(Math.ulp(pivot.y), Math.ulp(pivot.z))) * 8)
-        var constraint = axis
-        var cursor = candidate
-        if (axis == null && SnapMode.ORTHO in settings.modes) {
-            val offset = candidate - pivot
-            constraint = if (abs(offset dot right) >= abs(offset dot up)) right else up
-            cursor = pivot + constraint * (offset dot constraint)
-        }
-        fun onConstraint(point: Point3): Boolean = if (constraint != null) {
-            val offset = point - pivot
-            magnitude(offset - constraint * (offset dot constraint)) <= epsilon
-        } else abs((point - pivot) dot normal) <= epsilon
-        var best: Point3? = null
-        var bestDistance = Double.POSITIVE_INFINITY
-        var bestPriority = Int.MAX_VALUE
-        fun consider(point: Point3, priority: Int) {
-            if (!onConstraint(point)) return
-            val distance = magnitude(point - cursor)
-            if (!distance.isFinite() || distance > tolerance) return
-            if (distance < bestDistance - epsilon || abs(distance - bestDistance) <= epsilon && priority < bestPriority) {
-                best = point; bestDistance = distance; bestPriority = priority
+    private fun snapAxis(
+        candidate:Point3,pivot:Point3,axis:Point3,viewport:Viewport2D,camera:OrbitCamera,
+        is3D:Boolean,height:Double,settings:SnapSettings,pixels:Double,levelId:String?,
+    ):Point3 {
+        if(!settings.enabled || settings.modes.isEmpty())return candidate
+        val tolerance=max(settings.tolerance,max(0.0,pixels)*moveMetresPerPixel(pivot,viewport,camera,is3D,height))
+        val epsilon=max(1e-7,max(Math.ulp(pivot.x),max(Math.ulp(pivot.y),Math.ulp(pivot.z)))*8)
+        var best:Point3?=null
+        var bestDistance=Double.POSITIVE_INFINITY
+        var bestPriority=Int.MAX_VALUE
+        fun consider(point:Point3,priority:Int) {
+            val offset=point-pivot
+            if(magnitude(offset-axis*(offset dot axis))>epsilon)return
+            val distance=magnitude(point-candidate)
+            if(!distance.isFinite() || distance>tolerance)return
+            if(distance<bestDistance-epsilon || abs(distance-bestDistance)<=epsilon && priority<bestPriority) {
+                best=point;bestDistance=distance;bestPriority=priority
             }
         }
-        val near = index.queryNear2D(Point2(cursor.x, cursor.y), tolerance, levelId = levelId)
-        for (segment in near) {
-            if (SnapMode.ENDPOINT in settings.modes) { consider(segment.a, 0); consider(segment.b, 0) }
-            if (SnapMode.MIDPOINT in settings.modes) consider(segment.a + (segment.b - segment.a) * .5, 2)
-            if (SnapMode.PERPENDICULAR in settings.modes) {
-                val edge = segment.b - segment.a
-                val length2 = edge dot edge
-                if (length2 > 1e-20) {
-                    val fraction = ((pivot - segment.a) dot edge) / length2
-                    if (fraction in 0.0..1.0) consider(segment.a + edge * fraction, 3)
+        val near=index.queryNear2D(Point2(candidate.x,candidate.y),tolerance,levelId=levelId)
+        for(segment in near) {
+            if(SnapMode.ENDPOINT in settings.modes) {consider(segment.a,0);consider(segment.b,0)}
+            if(SnapMode.MIDPOINT in settings.modes)consider(segment.a+(segment.b-segment.a)*.5,2)
+            if(SnapMode.PERPENDICULAR in settings.modes) {
+                val edge=segment.b-segment.a;val length2=edge dot edge
+                if(length2>1e-20) {
+                    val t=((pivot-segment.a) dot edge)/length2
+                    if(t in 0.0..1.0)consider(segment.a+edge*t,3)
                 }
             }
         }
-        if (SnapMode.INTERSECTION in settings.modes) {
-            val edges = near.take(64)
-            for (i in edges.indices) for (j in i + 1 until edges.size) intersection(edges[i], edges[j], epsilon)?.let { consider(it, 1) }
+        if(SnapMode.INTERSECTION in settings.modes) {
+            val edges=near.take(64)
+            for(i in edges.indices)for(j in i+1 until edges.size)
+                intersection(edges[i],edges[j],epsilon)?.let {consider(it,1)}
         }
-        if (SnapMode.GRID in settings.modes) {
-            fun grid(value: Double) = round(value / settings.gridSpacing) * settings.gridSpacing
-            if (constraint != null) {
-                val change = grid(cursor dot constraint) - (pivot dot constraint)
-                if (change.isFinite()) consider(pivot + constraint * change, 5)
-            } else {
-                val r = grid(cursor dot right); val u = grid(cursor dot up)
-                if (r.isFinite() && u.isFinite()) consider(cursor + right * (r - (cursor dot right)) + up * (u - (cursor dot up)), 5)
-            }
+        if(SnapMode.GRID in settings.modes) {
+            val coordinate=round((candidate dot axis)/settings.gridSpacing)*settings.gridSpacing
+            val amount=coordinate-(pivot dot axis)
+            if(amount.isFinite())consider(pivot+axis*amount,5)
         }
-        return best ?: cursor
+        return best ?: candidate
     }
+
+}
+
+/** Unit screen direction for real or virtual world-axis arrows, shared by input and gizmos. */
+fun moveAxisScreenDirection(axis:Point3,viewport:Viewport2D,orbit:OrbitCamera,is3D:Boolean,
+    width:Double,height:Double,pivot:Point3=orbit.target):Point2 {
+    val unit=normalized(axis)
+    val projected=axisProjection(unit,pivot,viewport,orbit,is3D,width,height)
+    if(projected!=null)return Point2(projected.first.x/projected.second,projected.first.y/projected.second)
+    return virtualAxisDirection(unit)
+}
+
+private fun axisDisplacement(axis:Point3,pivot:Point3,start:Point2,current:Point2,
+    viewport:Viewport2D,orbit:OrbitCamera,is3D:Boolean,width:Double,height:Double):Point3 {
+    val projected=axisProjection(axis,pivot,viewport,orbit,is3D,width,height)
+    if(projected!=null) {
+        if(is3D)return screenAxisDrag(axis,pivot,start,current,viewport,orbit,true,width,height)
+        val pixelsPerMetre=viewport.pixelsPerMetre
+        val dx=axis.x*pixelsPerMetre;val dy=-axis.y*pixelsPerMetre
+        val amount=((current.x-start.x)*dx+(current.y-start.y)*dy)/(dx*dx+dy*dy)
+        return axis*amount
+    }
+    val direction=virtualAxisDirection(axis)
+    val pixels=(current.x-start.x)*direction.x+(current.y-start.y)*direction.y
+    return axis*(pixels*moveMetresPerPixel(pivot,viewport,orbit,is3D,height))
+}
+
+/** A collapsed arrow remains usable: red right, green down/right, blue up. */
+private fun virtualAxisDirection(axis:Point3):Point2 = when {
+    abs(axis.z)>=max(abs(axis.x),abs(axis.y))->Point2(0.0,if(axis.z<0.0)1.0 else -1.0)
+    abs(axis.x)>=abs(axis.y)->Point2(if(axis.x<0.0)-1.0 else 1.0,0.0)
+    else->{val sign=if(axis.y<0.0)-1.0 else 1.0;Point2(sign/kotlin.math.sqrt(2.0),sign/kotlin.math.sqrt(2.0))}
+}
+
+private fun axisProjection(axis:Point3,pivot:Point3,viewport:Viewport2D,orbit:OrbitCamera,
+    is3D:Boolean,width:Double,height:Double):Pair<Point2,Double>? {
+    if(width<=0.0 || height<=0.0)return null
+    val pixels=if(!is3D)Point2(axis.x*viewport.pixelsPerMetre,-axis.y*viewport.pixelsPerMetre) else {
+        val step=max(orbit.distance,orbit.orthographicHeight)*.001
+        val a=orbit.project(pivot,width,height) ?: return null
+        val b=orbit.project(pivot+axis*step,width,height) ?: return null
+        Point2((b.x-a.x)/step,(b.y-a.y)/step)
+    }
+    val length=hypot(pixels.x,pixels.y)
+    val expected=1.0/moveMetresPerPixel(pivot,viewport,orbit,is3D,height)
+    return if(length.isFinite() && length>=max(1e-7,expected*.02))pixels to length else null
+}
+
+private fun moveMetresPerPixel(pivot:Point3,viewport:Viewport2D,camera:OrbitCamera,is3D:Boolean,height:Double):Double {
+    if(!is3D)return 1.0/viewport.pixelsPerMetre
+    val span=if(camera.projection==com.eezydraw.core.model.Projection.PERSPECTIVE) {
+        val normal=facingNormal(camera)
+        val depth=camera.distance-((pivot-camera.target) dot normal)
+        2*max(1e-5,depth)*tan(OrbitCamera.FOV_Y/2)
+    } else camera.orthographicHeight
+    return span/height
+}
+
+private fun groundDisplacement(pivot:Point3,start:Point2,current:Point2,camera:OrbitCamera,width:Double,height:Double):Point3 {
+    val normal=facingNormal(camera)
+    if(abs(normal.z)>=.15) {
+        val first=planePick(camera,start,width,height,pivot,Point3(z=1.0))
+        val last=planePick(camera,current,width,height,pivot,Point3(z=1.0))
+        if(first!=null && last!=null)return Point3(last.x-first.x,last.y-first.y)
+    }
+    // At front/side the ground projects to a line. The free square still offers both
+    // horizontal dimensions: screen horizontal follows camera-right, vertical its depth.
+    val right=Point3(-sin(camera.yaw),cos(camera.yaw),0.0)
+    val sign=if(abs(normal.x)>=abs(normal.y))if(normal.x<0.0)-1.0 else 1.0 else if(normal.y<0.0)-1.0 else 1.0
+    val forward=normalized(Point3(normal.x*sign,normal.y*sign,0.0))
+    val span=if(camera.projection==com.eezydraw.core.model.Projection.PERSPECTIVE)2*camera.distance*tan(OrbitCamera.FOV_Y/2) else camera.orthographicHeight
+    val scale=span/height
+    return right*((current.x-start.x)*scale)+forward*((start.y-current.y)*scale)
 }
 
 private fun facingNormal(camera: OrbitCamera) = Point3(cos(camera.pitch) * cos(camera.yaw),

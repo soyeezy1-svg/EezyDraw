@@ -91,15 +91,16 @@ class CanvasEditingFlowTest {
         val beforePan = currentFrame().viewport
         val bounds = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().boundsInRoot
         val selectedBounds = checkNotNull(currentFrame().selectionScene).bounds
-        val midpoint = currentFrame().viewport.worldToScreen(
+        // Start near the line's end, outside the new centre move square and axis targets.
+        val bodyPoint = currentFrame().viewport.worldToScreen(
             com.eezydraw.core.model.Point2(
-                selectedBounds.min.x / 2 + selectedBounds.max.x / 2,
+                selectedBounds.min.x * .9 + selectedBounds.max.x * .1,
                 selectedBounds.min.y / 2 + selectedBounds.max.y / 2,
             ), bounds.width.toDouble(), bounds.height.toDouble(),
         )
         compose.onNodeWithTag("canvas_surface").performTouchInput {
-            swipe(Offset(midpoint.x.toFloat(), midpoint.y.toFloat()),
-                Offset(midpoint.x.toFloat() + 34f, midpoint.y.toFloat() + 20f), 160)
+            swipe(Offset(bodyPoint.x.toFloat(), bodyPoint.y.toFloat()),
+                Offset(bodyPoint.x.toFloat() + 34f, bodyPoint.y.toFloat() + 20f), 160)
         }
         assertEquals("Dragging the body must not transform the object", created, element())
         assertNotEquals("Body drag still navigates the canvas", beforePan.center, currentFrame().viewport.center)
@@ -130,6 +131,8 @@ class CanvasEditingFlowTest {
         compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
         assertEquals(moved, repositories.projects.documents.values.single().elements.single())
+        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .95f, height * .90f)) }
+        compose.runOnIdle { assertTrue(model.state.value.selectedIds.isEmpty()) }
         compose.onNodeWithContentDescription(context.getString(R.string.canvas_back)).performClick()
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.continue_project)).performScrollTo().performClick()
@@ -160,7 +163,7 @@ class CanvasEditingFlowTest {
         assertEquals(3, polyline.points.size)
 
         toolsAction("copy")
-        compose.onNodeWithTag("tools_paste").performScrollTo().assertIsEnabled().performClick()
+        toolsAction("paste")
         awaitElements(2)
         val pasted = compose.runOnIdle {
             val state = model.state.value
@@ -186,7 +189,9 @@ class CanvasEditingFlowTest {
             assertFalse(model.state.value.canUndo)
             assertTrue(model.state.value.canRedo)
         }
-        compose.onNodeWithTag("tools_undo").assertIsNotEnabled()
+        collapseTools()
+        compose.onNodeWithTag("toolbar_edit").performClick()
+        compose.onNodeWithTag("tools_undo").performScrollTo().assertIsNotEnabled()
     }
 
     @Test
@@ -278,6 +283,7 @@ class CanvasEditingFlowTest {
 
     @Test
     fun consecutiveLinesSnapToTheCompletedShapeWhileItRemainsSelected() {
+        repositories.settings.settings.value = repositories.settings.settings.value.copy(keepToolActiveAfterPlacing = true)
         createEmptyProject("Connected lines")
         compose.runOnIdle {
             val settings = checkNotNull(model.state.value.document).project.settings.snap
@@ -350,14 +356,29 @@ class CanvasEditingFlowTest {
     }
 
     private fun chooseTool(tool: String) {
-        expandTools()
+        if (tool == "select") { collapseTools(); return }
+        compose.runOnIdle { model.select(emptySet()) }
+        compose.onNodeWithTag("toolbar_draw").performClick()
         compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
         collapseTools()
     }
 
     private fun toolsAction(action: String) {
-        expandTools()
-        compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
+        if (compose.onAllNodesWithTag("selection_toolbar").fetchSemanticsNodes().isNotEmpty()) {
+            if (action in setOf("copy", "delete", "properties")) {
+                compose.onNodeWithTag("selection_$action").assertIsEnabled().performClick()
+            } else {
+                compose.onNodeWithTag("selection_more").performClick()
+                compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
+            }
+        } else {
+            if (action in setOf("undo", "redo", "paste")) {
+                collapseTools()
+                compose.onNodeWithTag("toolbar_edit").performClick()
+            }
+            else expandTools()
+            compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
+        }
         compose.waitForIdle()
     }
 

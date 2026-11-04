@@ -175,20 +175,18 @@ class AppViewModel(
 
     fun describe(description: String) = edit { it.copy(project = it.project.copy(description = description)) }
 
-    fun changeUnits(unit: LengthUnit) = edit {
-        it.copy(project = it.project.copy(settings = it.project.settings.copy(lengthUnit = unit)))
-    }
+    fun changeUnits(unit: LengthUnit) = updateProjectSettings("Change units") {it.copy(lengthUnit=unit)}
 
-    fun changeSnaps(settings: SnapSettings) = edit {
-        it.copy(project = it.project.copy(settings = it.project.settings.copy(snap = settings)))
-    }
+    fun changeSnaps(settings: SnapSettings) = updateProjectSettings("Change snaps") {it.copy(snap=settings)}
 
-    fun changeViewMode(mode: ViewMode) = edit {
-        it.copy(project = it.project.copy(settings = it.project.settings.copy(viewMode = mode)))
-    }
+    fun changeViewMode(mode: ViewMode) = updateProjectSettings("Change view mode") {it.copy(viewMode=mode)}
 
-    fun showMeasurements(show: Boolean) = edit {
-        it.copy(project = it.project.copy(settings = it.project.settings.copy(showMeasurements = show)))
+    fun showMeasurements(show: Boolean) = updateProjectSettings("Measurement visibility") {it.copy(showMeasurements=show)}
+
+    fun changeRotationSnap(degrees:Int)=updateProjectSettings("Rotation snapping") {it.copy(rotationSnapDegrees=degrees)}
+
+    private fun updateProjectSettings(label:String,change:(ProjectSettings)->ProjectSettings) {
+        drawingEdit {_,document->EditCommands.between(document,document.copy(project=document.project.copy(settings=change(document.project.settings))),label)}
     }
 
     fun setLayerVisibility(id: LayerId, visible: Boolean) {
@@ -196,8 +194,43 @@ class AppViewModel(
             document.copy(layers = document.layers.map { if (it.id == id) it.copy(visible = visible) else it }), "Layer visibility") }
     }
 
-    fun setSystemVisibility(id: SystemId, visible: Boolean) = edit { document ->
-        document.copy(systems = document.systems.map { if (it.id == id) it.copy(visible = visible) else it })
+    fun setSystemVisibility(id: SystemId, visible: Boolean) {
+        drawingEdit {_,document->EditCommands.between(document,document.copy(systems=document.systems.map {if(it.id==id)it.copy(visible=visible)else it}),"System visibility")}
+    }
+
+    fun setSelectionLayer(id:LayerId) {
+        drawingEdit {current,document->
+            val layer=requireNotNull(document.layers.find {it.id==id}) {"The layer no longer exists."}
+            require(layer.visible && !layer.locked) {"Choose a visible, unlocked layer."}
+            EditCommands.replace(document,document.elements.filter {it.id in current.selectedIds}.map {it.copy(layerId=id)},"Change layer")
+        }
+    }
+
+    fun setSelectionColour(argb:Long) {
+        drawingEdit {current,document->EditCommands.replace(document,document.elements.filter {it.id in current.selectedIds}
+            .map {it.copy(properties=it.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(argb)))},"Change colour")}
+    }
+
+    fun setSelectionLocked(locked:Boolean) {
+        drawingEdit {current,document->
+            val selected=document.elements.filter {it.id in current.selectedIds}
+            val selectedLayers=selected.mapTo(HashSet()){it.layerId}
+            val lockedLayers=document.layers.filter {it.id in selectedLayers && it.locked}.mapTo(HashSet()){it.id}
+            if(!locked && lockedLayers.isNotEmpty()) {
+                EditCommands.between(document,document.copy(layers=document.layers.map {if(it.id in lockedLayers)it.copy(locked=false)else it}),"Unlock layer")
+            } else EditCommands.replace(document,selected.map {it.copy(properties=if(locked)it.properties+(ELEMENT_LOCKED_KEY to ParameterValue.Flag(true)) else it.properties-ELEMENT_LOCKED_KEY)},
+                if(locked)"Lock objects"else"Unlock objects")
+        }
+    }
+
+    fun rotateSelection90() {
+        val current=state.value;val document=current.document ?: return
+        if(current.selectedIds.isEmpty())return
+        try {
+            val bounds=com.eezydraw.core.editing.elementWorldBounds(document,current.selectedIds)
+            val pivot=Point3(bounds.min.x+(bounds.max.x-bounds.min.x)/2,bounds.min.y+(bounds.max.y-bounds.min.y)/2,bounds.min.z+(bounds.max.z-bounds.min.z)/2)
+            transformSelection(EditDelta(pivot=pivot,rotation=Rotation3(z=Math.PI/2)))
+        } catch(error:IllegalArgumentException) {reportError(error.message ?: "The object could not be rotated.")}
     }
 
     private fun edit(change: (ProjectDocument) -> ProjectDocument) {
@@ -258,8 +291,8 @@ class AppViewModel(
         drawingEdit { _, document -> EditCommands.delete(document,ids) }
     }
 
-    fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?) {
-        drawingEdit(selectAdded = true) { current, document ->
+    fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?):Boolean {
+        return drawingEdit(selectAdded = true) { current, document ->
             val item = requireNotNull(document.libraryItems.find { it.id == id }) { "The library item is no longer available." }
             val (prepared, layer) = drawingLayer(document,current.settings.defaultLineWeightMm)
             val element = Element(ElementId(UUID.randomUUID().toString()),document.project.id,layer.id,

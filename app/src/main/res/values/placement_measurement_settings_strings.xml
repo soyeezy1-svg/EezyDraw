@@ -1,0 +1,4 @@
+<resources>
+    <string name="settings_show_detailed_measurement">Show detailed measurement (angle and coordinates)</string>
+    <string name="settings_keep_tool_active_after_placing">Keep tool active after placing</string>
+</resources>

@@ -1,0 +1,5 @@
+<resources>
+    <string name="placement_cancel">Cancel</string>
+    <string name="placement_done">Done</string>
+    <string name="placement_placed">Placed</string>
+</resources>

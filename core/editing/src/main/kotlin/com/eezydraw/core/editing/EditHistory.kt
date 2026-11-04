@@ -7,6 +7,8 @@ import com.eezydraw.core.model.Issue
 import com.eezydraw.core.model.Layer
 import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.ProjectId
+import com.eezydraw.core.model.ProjectSettings
+import com.eezydraw.core.model.BuildingSystem
 import java.util.ArrayDeque
 
 internal data class ElementPatch(
@@ -18,6 +20,7 @@ internal data class ElementPatch(
 )
 
 internal data class LinkPatch<T>(val before: List<T>, val after: List<T>)
+internal data class ValuePatch<T>(val before: T, val after: T)
 
 /** A sparse reversible edit. It never retains a ProjectDocument or its complete element list. */
 class EditCommand internal constructor(
@@ -31,12 +34,14 @@ class EditCommand internal constructor(
     private val layers: LinkPatch<Layer>? = null,
     private val groups: LinkPatch<ElementGroup>? = null,
     private val issues: LinkPatch<Issue>? = null,
+    private val systems: LinkPatch<BuildingSystem>? = null,
+    private val settings: ValuePatch<ProjectSettings>? = null,
 ) {
     val changedElementCount: Int get() = patches.size
     val affectedElementIds: Set<ElementId> get() = patches.mapTo(linkedSetOf()) { it.id }
     val addedElementIds: Set<ElementId>
         get() = patches.filter { it.before == null && it.after != null }.mapTo(linkedSetOf()) { it.id }
-    val isEmpty: Boolean get() = patches.isEmpty() && layers == null && groups == null && issues == null
+    val isEmpty: Boolean get() = patches.isEmpty() && layers == null && groups == null && issues == null && systems == null && settings == null
 
     /** Apply without adding history, for composing a validated multi-part transaction. */
     fun preview(document: ProjectDocument): ProjectDocument = apply(document, forward = true)
@@ -45,7 +50,8 @@ class EditCommand internal constructor(
     internal val retainedChangeCount: Int
         get() = patches.size + (layers?.let { it.before.size + it.after.size } ?: 0) +
             (groups?.let { it.before.size + it.after.size } ?: 0) +
-            (issues?.let { it.before.size + it.after.size } ?: 0)
+            (issues?.let { it.before.size + it.after.size } ?: 0) +
+            (systems?.let { it.before.size + it.after.size } ?: 0) + (if(settings==null)0 else 2)
 
     internal fun apply(document: ProjectDocument, forward: Boolean): ProjectDocument {
         require(document.project.id == projectId) { "This edit belongs to another project" }
@@ -70,6 +76,12 @@ class EditCommand internal constructor(
         require(issues == null || document.issues == (if (forward) issues.before else issues.after)) {
             "The drawing issues changed; this edit is stale"
         }
+        require(systems == null || document.systems == (if(forward)systems.before else systems.after)) {
+            "The drawing systems changed; this edit is stale"
+        }
+        require(settings == null || document.project.settings == (if(forward)settings.before else settings.after)) {
+            "The project settings changed; this edit is stale"
+        }
         if (isEmpty) return document
 
         val targetCount = if (forward) afterCount else beforeCount
@@ -80,9 +92,9 @@ class EditCommand internal constructor(
             val element = if (forward) patch.after else patch.before
             if (index != null && element != null) targetByIndex[index] = element
         }
-        val elements = ArrayList<Element>(targetCount)
+        val elements = ArrayList<Element>(if(patches.isEmpty())0 else targetCount)
         val current = document.elements.iterator()
-        for (index in 0 until targetCount) {
+        for (index in 0 until (if(patches.isEmpty())0 else targetCount)) {
             val changed = targetByIndex[index]
             if (changed != null) {
                 elements.add(changed)
@@ -96,10 +108,12 @@ class EditCommand internal constructor(
             }
         }
         return document.copy(
-            elements = elements,
+            elements = if(patches.isEmpty())document.elements else elements,
             layers = layers?.let { if (forward) it.after else it.before } ?: document.layers,
             groups = groups?.let { if (forward) it.after else it.before } ?: document.groups,
             issues = issues?.let { if (forward) it.after else it.before } ?: document.issues,
+            systems = systems?.let {if(forward)it.after else it.before} ?: document.systems,
+            project = settings?.let {document.project.copy(settings=if(forward)it.after else it.before)} ?: document.project,
         )
     }
 }

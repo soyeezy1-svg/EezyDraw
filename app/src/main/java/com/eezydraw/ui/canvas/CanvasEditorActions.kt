@@ -26,7 +26,12 @@ data class CanvasEditorActions(
     val onMeasurementsVisibility: (Boolean) -> Unit = {},
     val onUpdateMeasurement: (ElementId,Point3,Point3,Point3,String,Boolean,Boolean) -> Unit = { _,_,_,_,_,_,_ -> },
     val onDeleteElements: (Set<ElementId>) -> Unit = {},
-    val onInsertLibrary: (LibraryItemId,Point3,String?) -> Unit = { _,_,_ -> },
+    val onInsertLibrary: (LibraryItemId,Point3,String?) -> Boolean = { _,_,_ -> false },
+    val onSelectionLayer:(LayerId)->Unit={},
+    val onSelectionColour:(Long)->Unit={},
+    val onSelectionLocked:(Boolean)->Unit={},
+    val onRotate90:()->Unit={},
+    val onRotationSnap:(Int)->Unit={},
 )
 
 internal fun Bounds3.center() = Point3(

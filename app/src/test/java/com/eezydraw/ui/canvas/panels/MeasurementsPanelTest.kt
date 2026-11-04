@@ -47,7 +47,7 @@ class MeasurementsPanelTest {
 
     @Test
     fun listSeparatesPlanDistanceAndHeightAboveFloorAndVisibilityDeleteUseTheMeasurementId() {
-        val initial = fixture()
+        val initial = fixture(detailed = true)
         var document by mutableStateOf(initial)
         var theme by mutableStateOf(ThemeMode.LIGHT)
         val visibility = mutableListOf<Boolean>()
@@ -109,7 +109,7 @@ class MeasurementsPanelTest {
     @Test
     fun invalidOrZeroLengthDraftCannotApplyAndCancelLeavesTheSavedMeasurementAlone() {
         val edits = mutableListOf<ElementId>()
-        val document = fixture()
+        val document = fixture(detailed = true)
         compose.setContent { EezyDrawTheme { Box(Modifier.size(700.dp, 700.dp)) {
             MeasurementsPanel(document, {}, onEdit = { id, _, _, _, _, _, _ -> edits += id }, onDelete = {}, onDismiss = {})
         } } }
@@ -131,14 +131,34 @@ class MeasurementsPanelTest {
         compose.onNodeWithText("AFFL 1200.00 MM").performScrollTo().assertExists()
     }
 
-    private fun fixture(): ProjectDocument {
+    @Test
+    fun defaultListingShowsOnlyDistanceAndTheDetailPreferenceCanBeEnabledRetroactively() {
+        var document by mutableStateOf(fixture())
+        compose.setContent { EezyDrawTheme { Box(Modifier.size(700.dp, 700.dp)) {
+            MeasurementsPanel(document, {}, { _, _, _, _, _, _, _ -> }, {}, {})
+        } } }
+        compose.onNodeWithText("Socket to wall: DIST 1236.93 MM").performScrollTo().assertExists()
+        compose.onNodeWithText("PLAN 300.00 MM  AZ 0.00 DEG  EL -75.96 DEG").assertDoesNotExist()
+        compose.onNodeWithText("AFFL 1200.00 MM").assertDoesNotExist()
+        compose.onNodeWithText("A X 0.00 MM Y 0.00 MM Z 11200.00 MM").assertDoesNotExist()
+        compose.runOnIdle {
+            document = document.copy(project = document.project.copy(
+                settings = document.project.settings.copy(showDetailedMeasurements = true),
+            ))
+        }
+        compose.onNodeWithText("PLAN 300.00 MM  AZ 0.00 DEG  EL -75.96 DEG").performScrollTo().assertExists()
+        compose.onNodeWithText("A X 0.00 MM Y 0.00 MM Z 11200.00 MM").performScrollTo().assertExists()
+    }
+
+    private fun fixture(detailed: Boolean = false): ProjectDocument {
         val socket = Element(ElementId("socket"), projectId, layerId,
             ElementBody.Component(LibraryItemId("socket-definition"), Size3(.08, .04, .08)),
             levelId = levelId, transform = Transform3(translation = Point3(0.0, 0.0, 11.2)))
         val wall = Element(ElementId("wall"), projectId, layerId,
             ElementBody.Wall(Point2(0.0, 0.0), Point2(2.0, 0.0), .2, 3.0),
             levelId = levelId, transform = Transform3(translation = Point3(.3, 0.0, 10.0)))
-        val document = ProjectDocument(Project(projectId, "Reference positions", 0, 0),
+        val document = ProjectDocument(Project(projectId, "Reference positions", 0, 0,
+            settings = ProjectSettings(showDetailedMeasurements = detailed)),
             levels = listOf(Level(levelId, projectId, "Level 2", 10.0, .2, 3.0)),
             layers = listOf(Layer(layerId, projectId, "Electrical")), elements = listOf(socket, wall),
             libraryItems = listOf(LibraryItem(LibraryItemId("socket-definition"), "Socket", Discipline.ELECTRICAL,

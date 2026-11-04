@@ -24,7 +24,7 @@ data class MeasurementAnchor(
 data class MeasurementData(
     val name: String = "Measurement",
     val anchors: List<MeasurementAnchor>,
-    val showCoordinates: Boolean = true,
+    val showCoordinates: Boolean = false,
     val showHeightAboveFloor: Boolean = false,
     /** Null follows the source object's current level, then the nearest floor below it. */
     val floorLevelId: LevelId? = null,
@@ -93,7 +93,11 @@ fun resolveMeasurement(
 }
 
 /** Geometry, editing and exports use the same metre/radian values and display conversion. */
-fun measurementText(summary: MeasurementSummary, settings: ProjectSettings): List<String> {
+fun measurementText(
+    summary: MeasurementSummary,
+    settings: ProjectSettings,
+    detailed: Boolean = settings.showDetailedMeasurements,
+): List<String> {
     val (factor, suffix) = when (settings.lengthUnit) {
         LengthUnit.MILLIMETRES -> 1000.0 to "MM"
         LengthUnit.CENTIMETRES -> 100.0 to "CM"
@@ -107,12 +111,13 @@ fun measurementText(summary: MeasurementSummary, settings: ProjectSettings): Lis
         else "${number(value * 180.0 / PI)} DEG"
     return buildList {
         add("${summary.name}: DIST ${length(summary.distance)}")
+        if (!detailed) return@buildList
         add("PLAN ${length(summary.horizontalDistance)}  AZ ${angle(summary.azimuthRadians)}  EL ${angle(summary.elevationRadians)}")
         summary.heightAboveFloorMetres?.let { add("AFFL ${length(it)}") }
-        if (summary.showCoordinates) {
-            add("A X ${length(summary.start.x)} Y ${length(summary.start.y)} Z ${length(summary.start.z)}")
-            add("B X ${length(summary.end.x)} Y ${length(summary.end.y)} Z ${length(summary.end.z)}")
-        }
+        // The global detail switch also applies to measurements saved while it was off.
+        // Keep the legacy metadata flag readable, without requiring every annotation to be edited.
+        add("A X ${length(summary.start.x)} Y ${length(summary.start.y)} Z ${length(summary.start.z)}")
+        add("B X ${length(summary.end.x)} Y ${length(summary.end.y)} Z ${length(summary.end.z)}")
     }
 }
 

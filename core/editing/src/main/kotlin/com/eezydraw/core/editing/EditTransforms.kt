@@ -16,12 +16,15 @@ data class EditDelta(
     val translation: Point3 = Point3(),
     val rotationZ: Double = 0.0,
     val scale: Double = 1.0,
-    /** Positive dimension ratios along the orthonormal [axes] frame, before global Z rotation. */
+    /** Positive dimension ratios along the orthonormal [axes] frame, before global rotation. */
     val axisScale: Point3 = Point3(1.0, 1.0, 1.0),
     val axes: Rotation3 = Rotation3(),
+    /** Project-axis rotation. [rotationZ] remains the backward-compatible Z component. */
+    val rotation: Rotation3 = Rotation3(),
 ) {
     init {
         require(rotationZ.isFinite()) { "Rotation must be finite" }
+        require((rotation.z + rotationZ).isFinite()) { "Combined rotation must be finite" }
         require(scale.isFinite() && scale > 0.0) { "Scale must be positive and finite" }
         require(axisScale.x > 0.0 && axisScale.y > 0.0 && axisScale.z > 0.0) {
             "Dimension scales must be positive and finite"
@@ -32,7 +35,7 @@ data class EditDelta(
     }
 
     fun apply(point: Point3): Point3 {
-        if (axisScale.x != axisScale.y || axisScale.y != axisScale.z) {
+        if (axisScale.x != axisScale.y || axisScale.y != axisScale.z || rotation.x != 0.0 || rotation.y != 0.0) {
             val x = point.x - pivot.x
             val y = point.y - pivot.y
             val z = point.z - pivot.z
@@ -45,8 +48,8 @@ data class EditDelta(
         val factor = scale * axisScale.x
         val x = (point.x - pivot.x) * factor
         val y = (point.y - pivot.y) * factor
-        val c = cos(rotationZ)
-        val s = sin(rotationZ)
+        val c = cos(rotationZ + rotation.z)
+        val s = sin(rotationZ + rotation.z)
         return Point3(
             pivot.x + translation.x + c * x - s * y,
             pivot.y + translation.y + s * x + c * y,
@@ -67,13 +70,7 @@ data class EditDelta(
                 }
             }
         }
-        val c = cos(rotationZ); val s = sin(rotationZ)
-        scaled.copyOf().also { result ->
-            for (column in 0..2) {
-                result[column] = c * scaled[column] - s * scaled[3 + column]
-                result[3 + column] = s * scaled[column] + c * scaled[3 + column]
-            }
-        }
+        multiply(editRotationMatrix(effectiveRotation), scaled)
     }
 
     /** Column-major coefficients, copied once for Double-precision CPU bounds/chunk work. */
@@ -95,14 +92,18 @@ data class EditDelta(
     }
 
     val isIdentity: Boolean
-        get() = translation == Point3() && rotationZ == 0.0 && scale == 1.0 && axisScale == Point3(1.0, 1.0, 1.0)
+        get() = translation == Point3() && rotationZ == 0.0 && rotation == Rotation3() &&
+            scale == 1.0 && axisScale == Point3(1.0, 1.0, 1.0)
+
+    internal val effectiveRotation: Rotation3
+        get() = Rotation3(rotation.x, rotation.y, rotation.z + rotationZ)
 }
 
 /** X mirrors across the project YZ plane through the pivot; Y across its XZ plane. */
 enum class MirrorAxis { X, Y }
 
 object EditTransforms {
-    /** Compose a global Z rotation with the model's intrinsic local XYZ Euler convention. */
+    /** Compose project-axis rotation with the model's intrinsic local XYZ Euler convention. */
     fun apply(transform: Transform3, delta: EditDelta): Transform3 {
         if (delta.isIdentity) return transform
         if (delta.axisScale.x != delta.axisScale.y || delta.axisScale.y != delta.axisScale.z) {
@@ -112,16 +113,9 @@ object EditTransforms {
                 "Resize one object along its own dimension axes."
             }
         }
-        val rotation = if (delta.rotationZ == 0.0) transform.rotation else {
+        val rotation = if (delta.effectiveRotation == Rotation3()) transform.rotation else {
             val old = editRotationMatrix(transform.rotation)
-            val c = cos(delta.rotationZ)
-            val s = sin(delta.rotationZ)
-            val composed = old.copyOf()
-            for (column in 0..2) {
-                composed[column] = c * old[column] - s * old[3 + column]
-                composed[3 + column] = s * old[column] + c * old[3 + column]
-            }
-            rotationFromMatrix(composed)
+            rotationFromMatrix(multiply(editRotationMatrix(delta.effectiveRotation), old))
         }
         return Transform3(
             translation = delta.apply(transform.translation),
@@ -164,6 +158,11 @@ object EditTransforms {
             Rotation3(atan2(if (sy >= 0.0) m[3] else -m[3], m[4]), y, 0.0)
         }
     }
+}
+
+private fun multiply(a: DoubleArray, b: DoubleArray) = DoubleArray(9) { index ->
+    val row = index / 3; val column = index % 3
+    a[row * 3] * b[column] + a[row * 3 + 1] * b[3 + column] + a[row * 3 + 2] * b[6 + column]
 }
 
 /** Row-major intrinsic XYZ orientation, shared by dimension frames and edit previews. */

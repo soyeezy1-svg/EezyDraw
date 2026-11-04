@@ -6,16 +6,16 @@ Validated on 2026-11-04 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned 
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 11 passed |
-| `:core:geometry:test` | 66 passed |
-| `:core:editing:test` | 103 passed |
+| `:core:model:test` | 16 passed |
+| `:core:geometry:test` | 67 passed |
+| `:core:editing:test` | 115 passed |
 | `:core:data:testDebugUnitTest` | 12 passed |
-| `:app:testDebugUnitTest` | 108 passed |
+| `:app:testDebugUnitTest` | 142 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **300 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **352 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -26,9 +26,13 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Coverage and corrected issues
 
+- Selected objects expose five primary actions only: Move/Rotate, Copy, Delete, Properties and More. Tests check explicit Properties opening, More-only Scale, layer/colour/object locks, Rotate 90°, rotation-snap choices, exact undo/redo and persistence-compatible preference defaults.
+- Axis gesture tests cover X/Y/Z movement in plan/top/front/side/isometric views and both projection types, including collapsed-axis fallbacks, absolute grid capture, geometry snaps and preservation of untouched coordinates. Rotation tests cover all three axes, each snap interval, pre-existing tilted/mirrored objects, preview/commit agreement, cancellation and history.
+- Every drawing tool builds a disposable ghost before the first pick. Integration tests check no immediate creation, drag-only preview tracking, explicit cancellation, default Select reset, Keep tool active, library placement, floor-consistent front/side previews and one-step placement undo. Screenshot checks draw the actual Compose view and verify ghost opacity without requiring a Robolectric Window compositor callback.
+- Cube tests cover six faces, eight isometric corners, drag orbit, cancellation, Home and the long-press plan/projection menu. Integration review corrected the full-screen gizmo intercepting cube/Home touches, toolbar actions waiting unnecessarily for scene compilation, stale mirror pivots, elevated ghost/floor placement disagreement and panels remaining open on selection. Snap configuration remains available in 3D.
 - Twelve surface-builder regressions check actual primitive/body/route/library faces, concave polygons and holes, material/system colours, hidden layers/systems, signed XYZ normals, survey coordinates and bounded tessellation. Render-plan tests exercise all six mode passes, depth projection and inverse-transpose preview normals.
-- Movement tests cover the 52dp four-arrow control, separate axis handles, grid/geometry/ortho constraints, excluded selection/attached dimensions, 3D camera-plane depth, body-drag opt-in and one-step undo. Real-app workflows verify default navigation versus enabled object-body movement.
-- Persistent measurements separate 3D distance, PLAN offset, angles, XYZ and AFFL. Tests cover the 300mm/1200mm reference example, host-local/project-fixed anchors, copy/array/removal cleanup, label editing and undo, native archives, and per-project view/visibility restoration. The UI suite edits/hides/deletes saved measurements and checks each new panel.
+- Movement tests cover the 52dp four-arrow control, separate axis handles, grid/geometry/ortho constraints, excluded selection/attached dimensions, ground XY movement and view-parallel XYZ fallbacks, body-drag opt-in and one-step undo. Real-app workflows verify default navigation versus enabled object-body movement.
+- Persistent measurements show only a named distance by default. The default-off detailed-measurement preference reveals PLAN offset, angles, XYZ and requested AFFL consistently in the canvas, panel and exports. Tests cover the 300mm/1200mm reference example, host-local/project-fixed anchors, copy/array/removal cleanup, label editing and undo, native archives, and per-project view/visibility restoration. The UI suite edits/hides/deletes saved measurements and checks each new panel.
 - PNG/PDF regressions decode real image bytes, check every display mode, camera framing, material colours, hidden-line occlusion, near-plane clipping, dimensions over fills, output limits, caller-owned streams and write failures. PDF output uses a real one-page PDF 1.4 object/xref structure with the same Flate-compressed RGB snapshot.
 - Integration checks repaired stale level selection after same-project reload and made Help navigation use lazy-list scrolling for newly added guide sections. Properties drafts survive collapse/full-screen restoration, while a new editing session starts from the current object values.
 
@@ -42,7 +46,7 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 - Real Room/files/ZIP tests retain all shape variants and mirrored XYZ transforms across save/reload, new-owner import and backup restoration.
 - Handle tests verify front/side rotation and cancellation when a second pointer joins after preview recomposition. Panel blank areas consume touch input while child controls and outside canvas gestures continue to work.
 - Integration review corrected stale selection previews/pivots, rejected/no-op preview cleanup, hidden selections after level/view changes, per-frame document scans, and keyboard focus handling. The consecutive-line regression catches omission of the selected object from snapping.
-- Shader tests verify packed VBO attributes, light/dark colours, plan elevation flattening, 3D depth, selected translation/90-degree rotation/scaling, width-only/depth-only/height-only changes, rotated local corner/height resizing, and a combined transform about a nonzero pivot near billion-metre coordinates without re-uploading the selected VBO. CPU culling uses the same full oriented linear transform in Double.
+- Shader tests verify packed VBO attributes, light/dark colours, plan elevation flattening, 3D depth, selected translation/90-degree rotation/scaling, width-only/depth-only/height-only changes, rotated local corner/height resizing, X/Y/XYZ tilt positions and lighting normals, and a combined transform about a nonzero pivot near billion-metre coordinates without re-uploading the selected VBO. CPU culling uses the same full oriented linear transform in Double.
 
 ## Device QA still required
 

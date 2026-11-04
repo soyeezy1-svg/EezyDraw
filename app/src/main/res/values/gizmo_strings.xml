@@ -4,6 +4,8 @@
     <string name="gizmo_move_x">Move along X</string>
     <string name="gizmo_move_y">Move along Y</string>
     <string name="gizmo_move_z">Move along Z</string>
+    <string name="gizmo_rotate_x">Rotate around X</string>
+    <string name="gizmo_rotate_y">Rotate around Y</string>
     <string name="gizmo_rotate_z">Rotate around Z</string>
     <string name="gizmo_scale">Scale uniformly</string>
     <string name="gizmo_resize_width_negative">Resize width from the negative side</string>

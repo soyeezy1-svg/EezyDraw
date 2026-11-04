@@ -17,4 +17,8 @@
     <string name="canvas_reference_pick_object">Dimension from reference: tap the object</string>
     <string name="canvas_reference_pick_reference">Tap a wall corner, object, or grid line</string>
     <string name="canvas_reference_place_label">Tap to place the dimension label</string>
+    <string name="placement_tap_to_place">Tap to place %1$s</string>
+    <string name="placement_tap_to_start">Tap to start %1$s</string>
+    <string name="placement_add_points">Tap points, then Done</string>
+    <string name="canvas_home">Home view</string>
 </resources>

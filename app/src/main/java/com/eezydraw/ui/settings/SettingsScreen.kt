@@ -251,6 +251,18 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_body_drag_moves_selection_help), style = MaterialTheme.typography.bodySmall)
             }
             item {
+                SettingSwitch(
+                    stringResource(R.string.settings_show_detailed_measurement), current.showDetailedMeasurement,
+                    { update(current.copy(showDetailedMeasurement = it)) }, "settings_show_detailed_measurement",
+                )
+            }
+            item {
+                SettingSwitch(
+                    stringResource(R.string.settings_keep_tool_active_after_placing), current.keepToolActiveAfterPlacing,
+                    { update(current.copy(keepToolActiveAfterPlacing = it)) }, "settings_keep_tool_active_after_placing",
+                )
+            }
+            item {
                 ChoiceField(
                     stringResource(R.string.settings_quality), current.renderQuality,
                     RenderQuality.entries.map { it to stringResource(when (it) {

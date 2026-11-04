@@ -94,7 +94,7 @@ class CanvasWorkflowImprovementsTest {
         compose.onNodeWithTag("toolbar_draw").assertDoesNotExist()
         compose.onNodeWithTag("tools_expand").assertDoesNotExist()
         compose.onNodeWithTag("canvas_show_panels").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("toolbar_draw").assertIsDisplayed()
+        compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("canvas_status").assertIsDisplayed()
     }
 
@@ -164,8 +164,9 @@ class CanvasWorkflowImprovementsTest {
         val annotation = singleElement()
         val summary = compose.runOnIdle { checkNotNull(resolveMeasurement(checkNotNull(model.state.value.document), annotation)) }
         assertTrue(summary.distance > 0.0)
-        assertTrue(summary.showCoordinates)
+        assertFalse("Measurements show distance only unless detailed measurements are enabled", summary.showCoordinates)
         assertEquals("Measurement", summary.name)
+        compose.onNodeWithTag("selection_properties").performClick()
         compose.onNodeWithTag("measurements_panel").assertIsDisplayed()
         compose.onNodeWithTag("measurement_edit_${annotation.id.value}").performScrollTo().performClick()
         compose.onNodeWithTag("measurement_name").performScrollTo().performTextReplacement("Shared position")
@@ -243,6 +244,8 @@ class CanvasWorkflowImprovementsTest {
     }
 
     private fun chooseTool(tool: String) {
+        if (tool == "select") { collapseTools(); return }
+        compose.runOnIdle { model.select(emptySet()) }
         collapseTools()
         compose.onNodeWithTag("toolbar_draw").performClick()
         compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
@@ -251,8 +254,8 @@ class CanvasWorkflowImprovementsTest {
 
     private fun editAction(action: String) {
         collapseTools()
-        compose.onNodeWithTag("toolbar_edit").performClick()
-        compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("selection_more").performClick()
+        compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
     }
 
     private fun collapseTools() {
@@ -263,9 +266,10 @@ class CanvasWorkflowImprovementsTest {
         val before = singleElement()
         awaitRendered(before)
         val scene = checkNotNull(frame().selectionScene)
-        val center = scene.bounds.center()
+        // The left edge belongs to the object, away from the centre move square.
+        val bodyPoint = Point2(scene.bounds.min.x, scene.bounds.min.y * .75 + scene.bounds.max.y * .25)
         val area = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().boundsInRoot
-        val p = frame().viewport.worldToScreen(Point2(center.x, center.y), area.width.toDouble(), area.height.toDouble())
+        val p = frame().viewport.worldToScreen(bodyPoint, area.width.toDouble(), area.height.toDouble())
         val point = Offset(p.x.toFloat(), p.y.toFloat())
         compose.onNodeWithTag("canvas_surface").performTouchInput { swipe(point, point + change, 240) }
         compose.waitForIdle()

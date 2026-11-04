@@ -34,6 +34,7 @@ import com.eezydraw.ui.AppViewModel
 import com.eezydraw.ui.EezyDrawApp
 import com.eezydraw.ui.TestAppRepositories
 import com.eezydraw.ui.canvas.editing.GizmoHandle
+import com.eezydraw.ui.canvas.editing.GizmoMode
 import com.eezydraw.ui.canvas.editing.gizmoHandles
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
@@ -97,14 +98,13 @@ class ShapeDimensionsFlowTest {
                 1.0, 1.0, if (tool in solids) 1.0 else 0.0)
         }
         val before = compose.runOnIdle { checkNotNull(model.state.value.document).elements }
-        compose.onNodeWithTag("canvas_3d").performClick()
-        compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
+        compose.cubeHome()
         assertTrue(frame().is3D)
         compose.runOnIdle {
             assertEquals("Changing the camera must not rescale metres", before, checkNotNull(model.state.value.document).elements)
         }
-        compose.onNodeWithTag("canvas_3d").performClick()
-        assertFalse(frame().is3D)
+        compose.cubeFace(context, R.string.canvas_top)
+        assertTrue(frame().is3D)
         compose.runOnIdle {
             assertEquals(before, checkNotNull(model.state.value.document).elements)
         }
@@ -150,8 +150,7 @@ class ShapeDimensionsFlowTest {
         createEmptyProject("Top height and Properties")
         placeSingle("box")
         chooseTool("select")
-        compose.onNodeWithTag("canvas_3d").performClick()
-        compose.onNodeWithTag("canvas_front").performClick()
+        compose.cubeFace(context, R.string.canvas_front)
         compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
         val original = singleElement()
         val originalBounds = compose.runOnIdle {
@@ -194,17 +193,16 @@ class ShapeDimensionsFlowTest {
         placeSingle("rectangle")
         chooseTool("select")
         compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
-        expandTools()
-        compose.onNodeWithTag("tool_keep_proportions").performScrollTo().performClick()
-        collapseTools()
+        compose.onNodeWithTag("selection_more").performClick()
+        compose.onNodeWithTag("selection_keep_proportions").performScrollTo().performClick()
         dragHandle(GizmoHandle.RESIZE_CORNER_MAX_MAX, Offset(-50f, 25f))
         val rectangle = singleElement()
         val size = properties(rectangle).size
         assertChanged("Corner scales the flat outline", 1.0, size.x)
         assertEquals("Proportion lock preserves width/depth ratio", size.x, size.y, 1e-10)
         assertEquals(0.0, size.z, 0.0)
-        compose.onNodeWithTag("canvas_3d").performClick()
-        compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
+        compose.cubeHome()
+        toolsAction("scale")
         awaitRendered(rectangle)
         assertFalse("Flat geometry cannot gain thickness from a top handle", controls().any { it.handle == GizmoHandle.RESIZE_HEIGHT })
         toolsAction("properties")
@@ -235,19 +233,21 @@ class ShapeDimensionsFlowTest {
     }
 
     private fun chooseTool(tool: String) {
-        expandTools()
+        if (tool == "select") { collapseTools(); return }
+        compose.runOnIdle { model.select(emptySet()) }
+        compose.onNodeWithTag("toolbar_draw").performClick()
         compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
         collapseTools()
     }
 
     private fun toolsAction(action: String) {
-        expandTools()
-        compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
+        if (action in setOf("copy", "delete", "properties")) {
+            compose.onNodeWithTag("selection_$action").assertIsEnabled().performClick()
+        } else {
+            compose.onNodeWithTag("selection_more").performClick()
+            compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
+        }
         compose.waitForIdle()
-    }
-
-    private fun expandTools() {
-        if (compose.onAllNodesWithTag("tools_expand").fetchSemanticsNodes().isNotEmpty()) compose.onNodeWithTag("tools_expand").performClick()
     }
 
     private fun collapseTools() {
@@ -255,6 +255,7 @@ class ShapeDimensionsFlowTest {
     }
 
     private fun dragHandle(handle: GizmoHandle, change: Offset) {
+        toolsAction("scale")
         val before = singleElement()
         awaitRendered(before)
         val control = controls().single { it.handle == handle }
@@ -272,7 +273,8 @@ class ShapeDimensionsFlowTest {
             resizeFrame(document, document.elements.single())
         }
         return gizmoHandles(checkNotNull(current.selectionScene).bounds, current.viewport, current.orbit, current.is3D,
-            bounds.width.toDouble(), bounds.height.toDouble(), context.resources.displayMetrics.density.toDouble(), resizeFrame = localFrame)
+            bounds.width.toDouble(), bounds.height.toDouble(), context.resources.displayMetrics.density.toDouble(),
+            resizeFrame = localFrame, mode = GizmoMode.SCALE)
     }
 
     private fun awaitElements(count: Int) {

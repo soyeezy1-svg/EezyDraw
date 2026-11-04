@@ -8,7 +8,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -22,7 +21,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -130,12 +128,13 @@ class DrawingCanvasScreenTest {
     }
 
     @Test
-    @OptIn(ExperimentalTestApi::class)
-    fun orbitGesturesPresetsAndProjectionReachTheRenderer() {
+    fun cubeNavigationOrbitAndHomeReachTheRendererWithoutPresetButtons() {
         showCanvas()
-        toolbarClick("canvas_3d")
+        compose.onNodeWithTag("canvas_view_cube").assertIsDisplayed()
+        compose.cubeHome()
         val first3D = currentFrame()
         assertTrue(first3D.is3D)
+        assertEquals(Projection.ORTHOGRAPHIC, first3D.orbit.projection)
         assertEquals(1.5, first3D.orbit.target.z, 1e-8)
         val surfaceBounds = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().boundsInRoot
         for (x in listOf(0.0, 12.0)) for (y in listOf(0.0, 8.0)) for (z in listOf(0.0, 3.0)) {
@@ -154,28 +153,31 @@ class DrawingCanvasScreenTest {
         }
         val changedYaw = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().config[OrbitYaw]
         assertTrue("A one-finger 3D drag must orbit", abs(changedYaw - initialYaw) > .1)
-        compose.onNodeWithTag("canvas_view_cube").performCustomAccessibilityActionWithLabel(
-            context.getString(R.string.canvas_cube_back),
-        )
+        compose.cubeFace(context,R.string.canvas_cube_back)
         assertEquals(PI / 2, currentFrame().orbit.yaw, 1e-8)
         assertEquals(0.0, currentFrame().orbit.pitch, 1e-8)
 
-        toolbarClick("canvas_top")
+        compose.cubeFace(context,R.string.canvas_top)
+        assertTrue("A cube face is a real 3D view",currentFrame().is3D)
         assertEquals(PI / 2, currentFrame().orbit.pitch, 1e-8)
-        toolbarClick("canvas_front")
+        compose.cubeFace(context,R.string.canvas_front)
         assertEquals(-PI / 2, currentFrame().orbit.yaw, 1e-8)
         assertEquals(0.0, currentFrame().orbit.pitch, 1e-8)
-        toolbarClick("canvas_side")
+        compose.cubeFace(context,R.string.canvas_side)
         assertEquals(0.0, currentFrame().orbit.yaw, 1e-8)
-        toolbarClick("canvas_iso")
+        compose.cubeIsometric()
+        assertEquals(-3*PI / 4, currentFrame().orbit.yaw, 1e-8)
+        assertTrue(currentFrame().orbit.pitch < -.5)
+        compose.cubeHome()
         assertEquals(PI / 4, currentFrame().orbit.yaw, 1e-8)
         assertTrue(currentFrame().orbit.pitch > .5)
-        toolbarClick("canvas_perspective")
-        assertEquals(Projection.PERSPECTIVE, currentFrame().orbit.projection)
-        toolbarClick("canvas_orthographic")
         assertEquals(Projection.ORTHOGRAPHIC, currentFrame().orbit.projection)
-        toolbarClick("canvas_3d")
-        assertFalse(currentFrame().is3D)
+        assertEquals(1.5,currentFrame().orbit.target.z,1e-8)
+        listOf("canvas_top","canvas_front","canvas_side","canvas_iso","canvas_3d",
+            "canvas_perspective","canvas_orthographic").forEach { tag ->
+            assertTrue("Cube-only navigation must not leave a preset button $tag",
+                compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty())
+        }
     }
 
     @Test

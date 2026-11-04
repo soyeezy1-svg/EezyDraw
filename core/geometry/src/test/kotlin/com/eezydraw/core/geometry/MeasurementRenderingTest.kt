@@ -41,7 +41,7 @@ class MeasurementRenderingTest {
             listOf(Point3(), Point3(0.0, 0.0, 1.2)), Point3(.3, .3),
             MeasurementData(anchors = listOf(MeasurementAnchor(Point3()), MeasurementAnchor(Point3(0.0, 0.0, 1.2)))))))
         val scene = buildDrawingScene(document().copy(elements = listOf(vertical)))
-        assertTrue(scene.segments.size > 100)
+        assertTrue(scene.segments.size > 20)
         assertTrue(scene.segments.any { it.a.z != it.b.z })
         assertTrue(scene.bounds.max.x - scene.bounds.min.x > .3)
         assertTrue(scene.chunks.all { it.vertices.all(Float::isFinite) })
@@ -55,5 +55,19 @@ class MeasurementRenderingTest {
         assertEquals(material.colourArgb, buildDrawingScene(document).segments.first().colorArgb)
         assertEquals(system.colourArgb, buildDrawingScene(document.copy(elements = listOf(materialObject.copy(systemId = system.id))))
             .segments.first().colorArgb)
+    }
+
+    @Test fun defaultDistanceOnlyRenderingKeepsItsAnchorsWhileDetailedReadoutsAreOptional() {
+        val document = document()
+        val plain = buildDrawingScene(document, setOf(measurement.id))
+        val detailedDocument = document.copy(project = document.project.copy(
+            settings = document.project.settings.copy(showDetailedMeasurements = true),
+        ))
+        val detailed = buildDrawingScene(detailedDocument, setOf(measurement.id))
+        assertTrue(plain.segments.isNotEmpty())
+        assertTrue("Angles and coordinates must add strokes only when explicitly enabled", detailed.segments.size > plain.segments.size)
+        assertEquals(resolveMeasurement(document, measurement), resolveMeasurement(detailedDocument, measurement))
+        assertTrue(plain.segments.any { it.a == source.transform.translation })
+        assertEquals(document.elements, detailedDocument.elements)
     }
 }
