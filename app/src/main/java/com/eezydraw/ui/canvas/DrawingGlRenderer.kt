@@ -9,6 +9,7 @@ import com.eezydraw.core.geometry.SceneChunk
 import com.eezydraw.core.geometry.SurfaceChunk
 import com.eezydraw.core.geometry.SurfaceScene
 import com.eezydraw.core.geometry.Viewport2D
+import com.eezydraw.core.model.ObjectDisplay
 import com.eezydraw.core.model.Bounds3
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.Projection
@@ -49,6 +50,10 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     private var offsetUniform = -1
     private var darkUniform = -1
     private var selectionUniform = -1
+    private var lineOpacityUniform = -1
+    private var surfacePassActive = false
+    private var roomWallSources: List<Any?> = emptyList()
+    private var roomWalls = RoomWallIndex(emptyList())
     private var width = 1
     private var height = 1
     private var drawingLineWidth = 1f
@@ -120,8 +125,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             offsetUniform = GLES20.glGetUniformLocation(program, "uOffset")
             darkUniform = GLES20.glGetUniformLocation(program, "uDark")
             selectionUniform = GLES20.glGetUniformLocation(program, "uSelection")
+            lineOpacityUniform = GLES20.glGetUniformLocation(program, "uOpacity")
             check(positionAttribute >= 0 && colorAttribute >= 0 && matrixUniform >= 0 &&
-                modelUniform >= 0 && offsetUniform >= 0 && darkUniform >= 0 && selectionUniform >= 0) {
+                modelUniform >= 0 && offsetUniform >= 0 && darkUniform >= 0 && selectionUniform >= 0 && lineOpacityUniform >= 0) {
                 "Required drawing shader inputs are unavailable"
             }
             val ids = IntArray(1)
@@ -168,7 +174,10 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         if (current.selectionScene !== uploadedSelectionScene &&
             !uploadScene(current.selectionScene, selection = true)) return
         val passes = viewRenderPlan(current.viewMode)
-        if (passes.surfaces) {
+        surfacePassActive = passes.surfaces || current.autoXrayFrontWalls && current.is3D ||
+            current.surfaceScene?.chunks?.any { it.display == ObjectDisplay.XRAY } == true ||
+            current.selectionSurfaceScene?.chunks?.any { it.display == ObjectDisplay.XRAY } == true
+        if (surfacePassActive) {
             if (current.surfaceScene !== uploadedSurfaceScene && !uploadSurface(current.surfaceScene)) return
             if (current.selectionSurfaceScene !== uploadedSelectionSurfaceScene &&
                 !uploadSurface(current.selectionSurfaceScene, selection = true)) return
@@ -182,6 +191,16 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
                 deleteSurfaceBuffers(selection = true); uploadedSelectionSurfaceScene = null
             }
         }
+        val sideSources = listOf(pendingScene, current.selectionScene, current.surfaceScene, current.selectionSurfaceScene)
+        if (sideSources.indices.any { sideSources[it] !== roomWallSources.getOrNull(it) }) {
+            roomWallSources = sideSources
+            val parts = ArrayList<RoomWallPart>()
+            for (scene in listOfNotNull(pendingScene, current.selectionScene)) for (chunk in scene.chunks)
+                if (chunk.roomSide != null) parts.add(RoomWallPart(chunk.roomSide, chunk.bounds, chunk.roomCenter))
+            for (scene in listOfNotNull(current.surfaceScene, current.selectionSurfaceScene)) for (chunk in scene.chunks)
+                if (chunk.roomSide != null) parts.add(RoomWallPart(chunk.roomSide, chunk.bounds, chunk.roomCenter))
+            roomWalls = RoomWallIndex(parts)
+        }
         val annotations = current.annotationScene
         if ((annotations == null || annotations === pendingScene || passes.fullEdges) &&
             annotationCache.scene !== annotations) deleteExtraBuffers(annotationCache)
@@ -191,13 +210,13 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         if (current.selectionMeasurementScene !== selectionMeasurementCache.scene &&
             !uploadExtraLines(current.selectionMeasurementScene, selectionMeasurementCache)) return
 
-        val planDepth = if (!current.is3D && passes.surfaces) planDepthRange(pendingScene, current, 0.0) else null
+        val planDepth = if (!current.is3D && surfacePassActive) planDepthRange(pendingScene, current, 0.0) else null
         val planOriginZ = planDepth?.let { it.first / 2 + it.second / 2 } ?: current.floorElevation
         val origin = if (current.is3D) current.orbit.target else
             Point3(current.viewport.center.x, current.viewport.center.y, planOriginZ)
         val aspect = width.toDouble() / height
         val matrix = if (current.is3D) current.orbit.viewProjectionMatrix(aspect) else {
-            if (passes.surfaces) {
+            if (surfacePassActive) {
                 val depth = requireNotNull(planDepth)
                 filledPlanMatrix(current.viewport, width, height, depth.first - origin.z, depth.second - origin.z)
             } else planMatrix(current)
@@ -222,34 +241,39 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         }
         disableLineAttributes()
 
-        if (passes.surfaces) {
-            if (passes.transparent) {
-                // X-ray intentionally exposes rear surfaces; sorting batches improves ordinary
-                // transparency without pretending intersecting surfaces are fully order independent.
-                GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-                GLES20.glDepthMask(false)
-            } else {
-                GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-                GLES20.glDepthMask(true)
-                GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
-                GLES20.glPolygonOffset(1f, 1f)
+        if (surfacePassActive) {
+            // Opaque depth first, then all object/global transparent faces. The second pass
+            // deliberately leaves depth untouched, exposing geometry behind a front wall.
+            for (transparent in listOf(false, true)) {
+                if (transparent) {
+                    GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+                    GLES20.glDepthMask(false)
+                    GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                } else {
+                    GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+                    GLES20.glDepthMask(true)
+                    GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+                    GLES20.glPolygonOffset(1f, 1f)
+                }
+                drawSurfaces(surfaceChunks, current, matrix, origin, halfWidth, halfHeight, transparent)
+                drawSurfaces(selectionSurfaceChunks, current, matrix, origin, halfWidth, halfHeight, transparent,
+                    current.selectionDelta, selected = true)
             }
-            if (passes.depthOnly) GLES20.glColorMask(false, false, false, false)
-            drawSurfaces(surfaceChunks, current, matrix, origin, halfWidth, halfHeight, passes)
-            drawSurfaces(selectionSurfaceChunks, current, matrix, origin, halfWidth, halfHeight, passes,
-                current.selectionDelta, selected = true)
             GLES20.glColorMask(true, true, true, true)
             GLES20.glDepthMask(true)
             GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
         }
 
         useLineShader(matrix, current.dark)
-        if ((current.is3D || passes.surfaces) && !passes.transparent) GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-        else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         GLES20.glLineWidth(drawingLineWidth)
-        val visibleLines = if (passes.fullEdges || annotations == null || annotations === pendingScene) chunks
-            else annotationCache.chunks
-        drawChunks(visibleLines, current, origin, halfWidth, halfHeight)
+        if (passes.fullEdges || annotations == null || annotations === pendingScene) {
+            drawChunks(chunks, current, origin, halfWidth, halfHeight)
+        } else {
+            // Normal annotation batches stay separate from filled edges. Overrides retain
+            // their own edge policy even when the project is shaded without edges.
+            drawChunks(annotationCache.chunks, current, origin, halfWidth, halfHeight, lineFilter = LineFilter.NORMAL)
+            drawChunks(chunks, current, origin, halfWidth, halfHeight, lineFilter = LineFilter.OVERRIDES)
+        }
 
         if (selectionChunks.isNotEmpty()) {
             val delta = current.selectionDelta
@@ -258,21 +282,20 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
                 GLES20.glUniformMatrix4fv(modelUniform, 1, false, model, 0)
                 GLES20.glUniform1f(selectionUniform, 1f)
                 // The selected outline remains discoverable in filled modes and during a drag.
-                if (passes.surfaces) GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-                drawChunks(selectionChunks, current, origin, halfWidth, halfHeight, delta)
+                drawChunks(selectionChunks, current, origin, halfWidth, halfHeight, delta, forceOverlay = true)
             }
         }
         if (measurementCache.chunks.isNotEmpty() || selectionMeasurementCache.chunks.isNotEmpty()) {
             useLineShader(matrix, current.dark)
             GLES20.glDisable(GLES20.GL_DEPTH_TEST)
             GLES20.glDepthMask(false)
-            drawChunks(measurementCache.chunks, current, origin, halfWidth, halfHeight)
+            drawChunks(measurementCache.chunks, current, origin, halfWidth, halfHeight, forceOverlay = true)
             val delta = current.selectionDelta
             val model = delta?.linearMatrix() ?: IDENTITY_MATRIX
             if (model.all(Float::isFinite)) {
                 GLES20.glUniformMatrix4fv(modelUniform, 1, false, model, 0)
                 GLES20.glUniform1f(selectionUniform, 1f)
-                drawChunks(selectionMeasurementCache.chunks, current, origin, halfWidth, halfHeight, delta)
+                drawChunks(selectionMeasurementCache.chunks, current, origin, halfWidth, halfHeight, delta, forceOverlay = true)
             }
             GLES20.glDepthMask(true)
         }
@@ -286,6 +309,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glUniformMatrix4fv(modelUniform, 1, false, IDENTITY_MATRIX, 0)
         GLES20.glUniform1f(darkUniform, if (dark) 1f else 0f)
         GLES20.glUniform1f(selectionUniform, 0f)
+        GLES20.glUniform1f(lineOpacityUniform, 1f)
         GLES20.glEnableVertexAttribArray(positionAttribute)
         GLES20.glEnableVertexAttribArray(colorAttribute)
     }
@@ -312,6 +336,8 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     }
 
     /** The small selected batch changes uniforms during handle drags, never its vertex buffers. */
+    private enum class LineFilter { ALL, NORMAL, OVERRIDES }
+
     private fun drawChunks(
         batches: List<GpuChunk>,
         current: CanvasFrame,
@@ -319,10 +345,20 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         halfWidth: Double,
         halfHeight: Double,
         delta: EditDelta? = null,
+        lineFilter: LineFilter = LineFilter.ALL,
+        forceOverlay: Boolean = false,
     ) {
         val linear = delta?.linearMatrixDouble()
         for (gpu in batches) {
             val chunk = gpu.source
+            val front = roomWalls.isFront(chunk.roomSide, current.orbit, current.autoXrayFrontWalls, current.is3D)
+            val overridden = chunk.display != ObjectDisplay.NORMAL || front
+            if (lineFilter == LineFilter.NORMAL && overridden || lineFilter == LineFilter.OVERRIDES && !overridden) continue
+            val plan = objectRenderPlan(current.viewMode, chunk.display, front)
+            val depth = !forceOverlay && chunk.display != ObjectDisplay.WIREFRAME && chunk.display != ObjectDisplay.HIDDEN &&
+                !plan.transparent && (current.is3D || surfacePassActive)
+            if (depth) GLES20.glEnable(GLES20.GL_DEPTH_TEST) else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+            GLES20.glUniform1f(lineOpacityUniform, objectEdgeOpacity(chunk.display, front))
             if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
             boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
             if (current.is3D) {
@@ -339,7 +375,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             }
             val x = (transformedOrigin.x - origin.x).toFloat()
             val y = (transformedOrigin.y - origin.y).toFloat()
-            val z = if (current.is3D || current.viewMode != com.eezydraw.core.model.ViewMode.WIREFRAME)
+            val z = if (current.is3D || surfacePassActive)
                 (transformedOrigin.z - origin.z).toFloat() else 0f
             if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
             GLES20.glUniform3f(offsetUniform, x, y, z)
@@ -349,7 +385,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
 
     private fun drawSurfaces(
         batches: List<GpuSurfaceChunk>, current: CanvasFrame, matrix: FloatArray,
-        origin: Point3, halfWidth: Double, halfHeight: Double, passes: ViewRenderPlan,
+        origin: Point3, halfWidth: Double, halfHeight: Double, transparentPass: Boolean,
         delta: EditDelta? = null, selected: Boolean = false,
     ) {
         if (batches.isEmpty()) return
@@ -362,8 +398,6 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glUniformMatrix4fv(shader.matrix, 1, false, matrix, 0)
         GLES20.glUniformMatrix4fv(shader.model, 1, false, model, 0)
         GLES20.glUniformMatrix3fv(shader.normalMatrix, 1, false, normal, 0)
-        GLES20.glUniform1f(shader.lighting, passes.lighting.toFloat())
-        GLES20.glUniform1f(shader.opacity, if (passes.transparent) .28f else 1f)
         GLES20.glUniform1f(shader.selection, if (selected) .22f else 0f)
         GLES20.glUniform1f(shader.dark, if (current.dark) 1f else 0f)
         val outward = if (current.is3D) Point3(cos(current.orbit.pitch) * cos(current.orbit.yaw),
@@ -372,7 +406,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glEnableVertexAttribArray(shader.position)
         GLES20.glEnableVertexAttribArray(shader.normal)
         GLES20.glEnableVertexAttribArray(shader.color)
-        val ordered = if (passes.transparent) batches.sortedBy { gpu ->
+        val ordered = if (transparentPass) batches.sortedBy { gpu ->
             val bounds = gpu.source.bounds
             val center = Point3(bounds.min.x / 2 + bounds.max.x / 2,
                 bounds.min.y / 2 + bounds.max.y / 2, bounds.min.z / 2 + bounds.max.z / 2)
@@ -381,6 +415,12 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         } else batches
         for (gpu in ordered) {
             val chunk = gpu.source
+            val front = roomWalls.isFront(chunk.roomSide, current.orbit, current.autoXrayFrontWalls, current.is3D)
+            val passes = objectRenderPlan(current.viewMode, chunk.display, front)
+            if (!passes.surfaces || passes.transparent != transparentPass) continue
+            GLES20.glColorMask(!passes.depthOnly, !passes.depthOnly, !passes.depthOnly, !passes.depthOnly)
+            GLES20.glUniform1f(shader.lighting, passes.lighting.toFloat())
+            GLES20.glUniform1f(shader.opacity, if (passes.transparent) .28f else 1f)
             if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
             boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
             if (current.is3D) {
@@ -427,6 +467,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         offsetUniform = -1
         darkUniform = -1
         selectionUniform = -1
+        lineOpacityUniform = -1
+        roomWallSources = emptyList()
+        roomWalls = RoomWallIndex(emptyList())
         uploadedScene = null
         uploadedSelectionScene = null
         annotationCache.scene = null
@@ -840,6 +883,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
             uniform vec3 uOffset;
             uniform float uDark;
             uniform float uSelection;
+            uniform float uOpacity;
             attribute vec3 aPosition;
             attribute vec4 aColor;
             varying lowp vec4 vColor;
@@ -852,7 +896,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
                     color = clamp(color + vec3(0.74 - luminance), 0.0, 1.0);
                 }
                 color = mix(color, vec3(0.11, 0.48, 1.0), uSelection);
-                vColor = vec4(color, aColor.a);
+                vColor = vec4(color, aColor.a * uOpacity);
             }
         """
         const val FRAGMENT_SHADER = """

@@ -177,6 +177,8 @@ class ShapeDimensionsFlowTest {
             .assertTextContains(String.format(Locale.ROOT, "%.2f", physical.size.z * 1000.0))
         compose.onNodeWithTag("property_width").performScrollTo().performTextReplacement("2500")
         compose.onNodeWithTag("properties_apply").performClick()
+        compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
+        compose.onNodeWithTag("panel_properties_hide").performClick()
         val edited = singleElement()
         val editedSize = properties(edited).size
         assertEquals(2.5, editedSize.x, 1e-10)

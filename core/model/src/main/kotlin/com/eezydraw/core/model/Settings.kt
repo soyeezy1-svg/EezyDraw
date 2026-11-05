@@ -36,6 +36,10 @@ data class ProjectSettings(
     /** Render/readout option; the app's detailed-measurement preference overrides this at display time. */
     val showDetailedMeasurements: Boolean = false,
     val rotationSnapDegrees: Int = 15,
+    val hiddenLevelIds: Set<LevelId> = emptySet(),
+    val showHiddenObjects: Boolean = false,
+    val autoXrayFrontWalls: Boolean = false,
+    val canvasLayout: CanvasLayout = CanvasLayout(),
 ) {
     init {
         require(decimalPlaces in 0..8)
@@ -89,6 +93,10 @@ data class AppSettings(
     val showDetailedMeasurement: Boolean = false,
     val keepToolActiveAfterPlacing: Boolean = false,
     val precisionPointer: PrecisionPointerSettings = PrecisionPointerSettings(),
+    val autoHidePanelsWhileDrawing: Boolean = false,
+    val lockWallsByDefault: Boolean = false,
+    /** Immediate device recovery for project panel layouts; portable documents also retain layout. */
+    val canvasLayouts: Map<String,CanvasLayout> = emptyMap(),
 ) {
     init {
         require(languageTag.isNotBlank())

@@ -32,6 +32,17 @@ data class CanvasEditorActions(
     val onSelectionLocked:(Boolean)->Unit={},
     val onRotate90:()->Unit={},
     val onRotationSnap:(Int)->Unit={},
+    val onCanvasLayout:(CanvasLayout)->Unit={},
+    val onSelectionLockMode:(LockMode)->Unit={},
+    val onLevelLock:(String?,LockMode)->Unit={_,_->},
+    val onSelectionDisplay:(ObjectDisplay)->Unit={},
+    val onElementsDisplay:(Set<ElementId>,ObjectDisplay)->Unit={_,_->},
+    val onRoomSideDisplay:(RoomSideRef,ObjectDisplay)->Unit={_,_->},
+    val onShowRoomWalls:(ElementId)->Unit={},
+    val onLevelVisibility:(LevelId,Boolean)->Unit={_,_->},
+    val onShowAll:()->Unit={},
+    val onShowHidden:(Boolean)->Unit={},
+    val onAutoXray:(Boolean)->Unit={},
 )
 
 internal fun Bounds3.center() = Point3(

@@ -3,6 +3,7 @@ package com.eezydraw.ui.canvas.panels
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -36,17 +37,16 @@ fun LibraryPanel(
     onInsert: (LibraryItemId) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    embedded: Boolean = false,
 ) {
-    Surface(modifier.width(300.dp).heightIn(max = 480.dp).testTag("library_panel")
-        .pointerInput(Unit) { detectTapGestures(onTap = {}) },
-        shape = RoundedCornerShape(16.dp), tonalElevation = 5.dp, shadowElevation = 4.dp) {
-        Column {
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    val content: @Composable () -> Unit = {
+        Column(Modifier.width(300.dp).heightIn(max=480.dp).testTag("library_panel")) {
+            if(!embedded) Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.panel_library), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 CanvasActionButton(Icons.Outlined.Close, stringResource(R.string.close), onDismiss,
                     Modifier.testTag("library_close"))
             }
-            HorizontalDivider()
+            if(!embedded) HorizontalDivider()
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (items.isEmpty()) Text(stringResource(R.string.panel_library_empty))
                 items.groupBy { it.category }.toSortedMap().forEach { (category, definitions) ->
@@ -62,4 +62,8 @@ fun LibraryPanel(
             }
         }
     }
+    if(embedded) Box(modifier) {content()} else Surface(
+        modifier.pointerInput(Unit) {detectTapGestures(onTap={})},
+        shape=RoundedCornerShape(16.dp),tonalElevation=5.dp,shadowElevation=4.dp,
+    ) {content()}
 }

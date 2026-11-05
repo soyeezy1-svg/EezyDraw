@@ -135,7 +135,8 @@ class CanvasEditingFlowTest {
         compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
         assertEquals(moved, repositories.projects.documents.values.single().elements.single())
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .95f, height * .90f)) }
+        // The bottom-right View panel is persistent; deselect on uncovered canvas.
+        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .94f, height * .20f)) }
         compose.runOnIdle { assertTrue(model.state.value.selectedIds.isEmpty()) }
         compose.onNodeWithContentDescription(context.getString(R.string.canvas_back)).performClick()
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
@@ -221,6 +222,8 @@ class CanvasEditingFlowTest {
         }
         assertEquals("Typing a Properties draft must not mutate the document", original, element())
         compose.onNodeWithTag("properties_apply").assertIsEnabled().performClick()
+        compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
+        compose.onNodeWithTag("panel_properties_hide").performClick()
         val edited = element()
         compose.runOnIdle {
             val properties = readProperties(checkNotNull(model.state.value.document), edited)
@@ -378,10 +381,14 @@ class CanvasEditingFlowTest {
         } else {
             if (action in setOf("undo", "redo", "paste")) {
                 collapseTools()
-                compose.onNodeWithTag("toolbar_edit").performClick()
+                if (compose.onAllNodesWithTag("tools_$action").fetchSemanticsNodes().isEmpty())
+                    compose.onNodeWithTag("toolbar_edit").performClick()
             }
             else expandTools()
             compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
+            if (action == "finish") collapseTools()
+            if (action in setOf("undo", "redo", "paste"))
+                compose.onNodeWithTag("panel_edit_collapse").performClick()
         }
         compose.waitForIdle()
     }

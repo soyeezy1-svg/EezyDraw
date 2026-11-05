@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="selection_lock_options">Lock options…</string>
+    <string name="selection_lock_position">Lock position only</string>
+    <string name="selection_lock_everything">Lock everything (default)</string>
+    <string name="selection_lock_all">Lock all on current level</string>
+    <string name="selection_unlock_all">Unlock all on current level</string>
+    <string name="selection_locked_properties">Object is locked. Unlock to edit.</string>
+    <string name="selection_position_locked_properties">Position is locked. Unlock to move this object.</string>
+    <string name="selection_display">Display…</string>
+    <string name="selection_display_normal">Normal</string>
+    <string name="selection_display_hidden">Hide</string>
+    <string name="selection_display_xray">X-ray</string>
+    <string name="selection_display_wireframe">Wireframe</string>
+    <string name="selection_room_wall">Select a room wall…</string>
+    <string name="selection_room_whole">Whole room</string>
+    <string name="selection_room_side">Wall %1$d</string>
+    <string name="selection_room_hole_side">Opening %1$d · wall %2$d</string>
+    <string name="selection_hide_wall">Hide this wall</string>
+    <string name="selection_show_room_walls">Show all walls of this room</string>
+    <string name="selection_visibility">Visibility panel</string>
+    <string name="selection_panels">Panels…</string>
+    <string name="selection_hide_all_panels">Hide all panels</string>
+    <string name="selection_panel_open">Open</string>
+    <string name="selection_panel_collapsed">Collapsed</string>
+    <string name="selection_panel_hidden">Hidden</string>
+    <string name="visibility_show_all">Show all</string>
+    <string name="visibility_show_hidden">Show hidden objects as faint outlines</string>
+    <string name="visibility_show_hidden_help">While shown, hidden objects can be selected and snapped to.</string>
+    <string name="visibility_auto_xray">Auto X-ray front walls in 3D</string>
+    <string name="visibility_levels">Levels</string>
+    <string name="visibility_rooms">Rooms</string>
+    <string name="visibility_walls">Walls</string>
+    <string name="visibility_other_objects">Other objects</string>
+    <string name="visibility_hide_item">Hide %1$s</string>
+    <string name="visibility_show_item">Show %1$s</string>
+    <string name="visibility_named_item">%1$s %2$d</string>
+    <string name="visibility_room">Room</string>
+    <string name="visibility_wall">Wall</string>
+    <string name="visibility_slab">Floor/slab</string>
+    <string name="visibility_route">Route</string>
+    <string name="visibility_component">Library item</string>
+    <string name="visibility_shape">Shape</string>
+</resources>

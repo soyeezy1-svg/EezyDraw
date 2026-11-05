@@ -7,6 +7,7 @@ import com.eezydraw.core.geometry.SurfaceChunk
 import com.eezydraw.core.geometry.adaptiveGridStep
 import com.eezydraw.core.geometry.buildDrawingScene
 import com.eezydraw.core.geometry.buildSurfaceScene
+import com.eezydraw.core.model.ObjectDisplay
 import com.eezydraw.core.model.ElementBody
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.ProjectDocument
@@ -14,6 +15,12 @@ import com.eezydraw.core.model.Projection
 import com.eezydraw.core.model.Shape
 import com.eezydraw.core.model.ViewMode
 import com.eezydraw.ui.canvas.CanvasFrame
+import com.eezydraw.ui.canvas.RoomWallIndex
+import com.eezydraw.ui.canvas.RoomWallPart
+import com.eezydraw.ui.canvas.objectRenderPlan
+import com.eezydraw.ui.canvas.objectViewMode
+import com.eezydraw.ui.canvas.objectEdgeOpacity
+import com.eezydraw.ui.canvas.hasXrayOverrides
 import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.zip.DeflaterOutputStream
@@ -71,8 +78,15 @@ object ViewExport {
         val raster = Raster(request, width, height)
         val scene = buildDrawingScene(request.document)
         val mode = request.frame.viewMode
-        val surfaces = if (mode == ViewMode.WIREFRAME) null else buildSurfaceScene(request.document)
-        val meshIds = surfaces?.chunks?.mapTo(HashSet()) { it.elementId } ?: emptySet()
+        val autoWalls = request.frame.autoXrayFrontWalls || request.document.project.settings.autoXrayFrontWalls
+        val surfaces = if (mode != ViewMode.WIREFRAME || autoWalls && request.frame.is3D || hasXrayOverrides(request.document))
+            buildSurfaceScene(request.document) else null
+        val parts = scene.chunks.map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) } +
+            surfaces?.chunks.orEmpty().map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) }
+        val walls = RoomWallIndex(parts)
+        fun front(side:com.eezydraw.core.model.RoomSideRef?) = walls.isFront(side,request.frame.orbit,autoWalls,request.frame.is3D)
+        val meshIds = surfaces?.chunks?.filter { objectRenderPlan(mode,it.display,front(it.roomSide)).surfaces }
+            ?.mapTo(HashSet()) { it.elementId } ?: emptySet()
         val annotations = request.document.elements.asSequence().filter { element ->
             when ((element.body as? ElementBody.DrawingShape)?.shape) {
                 is Shape.Dimension, is Shape.Text, is Shape.Leader -> true
@@ -82,17 +96,25 @@ object ViewExport {
         raster.grid()
         if (surfaces != null) {
             val chunks = surfaces.chunks.filter { request.frame.levelId == null || it.levelId == null || it.levelId == request.frame.levelId }
-            val ordered = if (mode == ViewMode.XRAY || mode == ViewMode.TRANSPARENT) chunks.sortedByDescending { raster.depth(it) } else chunks
-            ordered.forEach { raster.surface(it, mode) }
+            val opaque = chunks.filter { val plan=objectRenderPlan(mode,it.display,front(it.roomSide));plan.surfaces && !plan.transparent }
+            val transparent = chunks.filter { val plan=objectRenderPlan(mode,it.display,front(it.roomSide));plan.surfaces && plan.transparent }
+                .sortedByDescending { raster.depth(it) }
+            (opaque + transparent).forEach { raster.surface(it, objectViewMode(mode,it.display,front(it.roomSide))) }
         }
-        val allEdges = mode == ViewMode.WIREFRAME || mode == ViewMode.HIDDEN_LINE || mode == ViewMode.SHADED_WITH_EDGES || mode == ViewMode.SECTION
         for (segment in scene.segments) {
             if (segment.elementId in annotations) continue
-            if (allEdges || segment.elementId !in meshIds) raster.segment(segment,
-                depthTest = mode != ViewMode.WIREFRAME && mode != ViewMode.XRAY && mode != ViewMode.TRANSPARENT)
+            val isFront = front(segment.roomSide)
+            val plan = objectRenderPlan(mode,segment.display,isFront)
+            if (plan.fullEdges || segment.elementId !in meshIds) raster.segment(segment,
+                depthTest = mode != ViewMode.WIREFRAME && !plan.transparent &&
+                    segment.display != ObjectDisplay.WIREFRAME && segment.display != ObjectDisplay.HIDDEN,
+                opacity=objectEdgeOpacity(segment.display,isFront).toDouble())
         }
         // Dimensions and annotation strokes remain readable over filled geometry in both outputs.
-        scene.segments.filter { it.elementId in annotations }.forEach { raster.segment(it, depthTest = false, annotation = true) }
+        scene.segments.filter { it.elementId in annotations }.forEach {
+            raster.segment(it,depthTest=false,annotation=true,
+                opacity=objectEdgeOpacity(it.display,front(it.roomSide)).toDouble())
+        }
         return Bitmap.createBitmap(raster.pixels, width, height, Bitmap.Config.ARGB_8888)
     }
 
@@ -140,6 +162,7 @@ object ViewExport {
     }
 
     private class Raster(val request: ViewExportRequest, val width: Int, val height: Int) {
+        private var hiddenCoverage:BooleanArray?=null
         val pixels = IntArray(width * height) { if (request.frame.dark) Color.rgb(14, 18, 26) else Color.rgb(247, 250, 252) }
         private val depths = FloatArray(width * height) { Float.POSITIVE_INFINITY }
         private val frame = request.frame
@@ -184,11 +207,11 @@ object ViewExport {
             }
         }
 
-        fun segment(segment: SceneSegment, depthTest: Boolean, annotation: Boolean = false) {
+        fun segment(segment: SceneSegment, depthTest: Boolean, annotation: Boolean = false, opacity:Double=1.0) {
             if (frame.levelId != null && segment.levelId != null && segment.levelId != frame.levelId) return
             val color = segment.colorArgb.toInt()
             val rgb = contrast(Color.red(color) / 255.0, Color.green(color) / 255.0, Color.blue(color) / 255.0)
-            line(segment.a, segment.b, Color.argb(Color.alpha(color), channel(rgb[0]), channel(rgb[1]), channel(rgb[2])), depthTest, annotation)
+            line(segment.a, segment.b, Color.argb((Color.alpha(color)*opacity).toInt().coerceIn(0,255), channel(rgb[0]), channel(rgb[1]), channel(rgb[2])), depthTest, annotation,segment.display==ObjectDisplay.HIDDEN)
         }
 
         fun grid() {
@@ -219,7 +242,7 @@ object ViewExport {
             }
         }
 
-        private fun line(first: Point3, last: Point3, color: Int, depthTest: Boolean, annotation: Boolean = false) {
+        private fun line(first: Point3, last: Point3, color: Int, depthTest: Boolean, annotation: Boolean = false, hidden:Boolean=false) {
             var a = projector.clip(first); var b = projector.clip(last)
             for (plane in 0..5) {
                 val da = a.distance(plane); val db = b.distance(plane)
@@ -242,7 +265,16 @@ object ViewExport {
                     if (px !in 0 until width || py !in 0 until height) continue
                     val index = py * width + px
                     // This bias matches the surface polygon-offset/edge pass in the GLES view.
-                    if (!depthTest || z <= depths[index] + .000002) pixels[index] = blend(pixels[index], color)
+                    if (!depthTest || z <= depths[index] + .000002) {
+                        // Projected top/bottom edges can coincide; faint outlines are a coverage
+                        // union, so repeated edges never turn a hidden object opaque.
+                        if(hidden) {
+                            val coverage=hiddenCoverage ?: BooleanArray(width*height).also {hiddenCoverage=it}
+                            if(coverage[index])continue
+                            coverage[index]=true
+                        }
+                        pixels[index] = blend(pixels[index], color)
+                    }
                 }
             }
         }

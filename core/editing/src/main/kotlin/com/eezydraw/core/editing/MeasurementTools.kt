@@ -1,6 +1,7 @@
 package com.eezydraw.core.editing
 
 import com.eezydraw.core.geometry.buildDrawingScene
+import com.eezydraw.core.geometry.unfilteredGeometryDocument
 import com.eezydraw.core.model.*
 import kotlin.math.hypot
 
@@ -61,8 +62,7 @@ fun updateMeasurement(
 fun measurementPointForElement(document: ProjectDocument, id: ElementId, pickedPoint: Point3): Point3 {
     val element = requireNotNull(document.elements.find { it.id == id }) { "The reference object no longer exists." }
     if (element.body is ElementBody.Component) return element.transform.translation
-    val scene = buildDrawingScene(document.copy(
-        layers = document.layers.map { it.copy(visible = true) }, systems = document.systems.map { it.copy(visible = true) }), setOf(id))
+    val scene = buildDrawingScene(unfilteredGeometryDocument(document),setOf(id))
     fun distance(point: Point3) = hypot(hypot(point.x - pickedPoint.x, point.y - pickedPoint.y), point.z - pickedPoint.z)
     return scene.segments.asSequence().flatMap { sequenceOf(it.a, it.b) }.minByOrNull(::distance)
         ?: element.transform.translation

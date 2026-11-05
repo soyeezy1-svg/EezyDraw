@@ -1,17 +1,6 @@
 package com.eezydraw.core.editing
 
-import com.eezydraw.core.model.Element
-import com.eezydraw.core.model.ElementBody
-import com.eezydraw.core.model.ElementGroup
-import com.eezydraw.core.model.ElementId
-import com.eezydraw.core.model.HostAttachment
-import com.eezydraw.core.model.Issue
-import com.eezydraw.core.model.LayerId
-import com.eezydraw.core.model.Point3
-import com.eezydraw.core.model.ProjectDocument
-import com.eezydraw.core.model.Shape
-import com.eezydraw.core.model.ParameterValue
-import com.eezydraw.core.model.measurementShape
+import com.eezydraw.core.model.*
 import java.util.UUID
 
 /** Transaction builders. Creating a command does not mutate the document or history. */
@@ -20,7 +9,11 @@ object EditCommands {
      * Diff a prepared transaction, including a newly created drawing layer. Only changed records
      * are retained. Settings and visibility are reversible without retaining a whole document.
      */
-    fun between(before: ProjectDocument, after: ProjectDocument, label: String = "Edit drawing"): EditCommand {
+    fun between(before: ProjectDocument, after: ProjectDocument, label: String = "Edit drawing"): EditCommand =
+        betweenValidated(before,after,label)
+
+    private fun betweenValidated(before: ProjectDocument, after: ProjectDocument, label: String,
+        allowLockedPresentation:Boolean=false): EditCommand {
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
         require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues,
             systems=after.systems,project=before.project.copy(settings=after.project.settings)) == after) {
@@ -36,7 +29,7 @@ object EditCommands {
         for ((index, element) in before.elements.withIndex()) {
             val target = next[element.id]
             if (target?.value != element) {
-                if(isUnlockOnly(element,target?.value))requireLayerEditable(before,element) else requireEditable(before, element)
+                requireReplacement(before,element,target?.value,allowLockedPresentation)
                 patches.add(ElementPatch(element.id, index, element, target?.index, target?.value))
             }
         }
@@ -49,7 +42,10 @@ object EditCommands {
         val layerIds = after.layers.mapTo(HashSet()) { it.id }
         require(after.elements.all { it.layerId in layerIds }) { "An object layer no longer exists" }
         val candidates = patches.mapNotNull { it.after }
-        candidates.forEach { requireLayerEditable(after, it) }
+        candidates.forEach {candidate->
+            val previous=old[candidate.id]?.value
+            if(!(allowLockedPresentation && previous!=null && isPresentationOnly(previous,candidate)))requireLayerEditable(after,candidate)
+        }
         require(after.systems.map {it.id}.toSet().size==after.systems.size && after.systems.all {it.projectId==after.project.id}) {"Invalid drawing systems"}
         val systemIds=after.systems.mapTo(HashSet()){it.id}
         require(after.elements.all {it.systemId==null || it.systemId in systemIds}) {"An object system no longer exists"}
@@ -76,7 +72,9 @@ object EditCommands {
             groups = if (before.groups == after.groups) null else LinkPatch(before.groups, after.groups),
             issues = if (before.issues == after.issues) null else LinkPatch(before.issues, after.issues),
             systems = if(before.systems==after.systems)null else LinkPatch(before.systems,after.systems),
-            settings = if(before.project.settings==after.project.settings)null else ValuePatch(before.project.settings,after.project.settings),
+            settings = after.project.settings.copy(canvasLayout=before.project.settings.canvasLayout).let {nextSettings->
+                if(before.project.settings==nextSettings)null else ValuePatch(before.project.settings,nextSettings)
+            },
         )
     }
 
@@ -91,9 +89,39 @@ object EditCommands {
         val existing = document.elements.associateBy { it.id }
         for (element in elements) {
             val old = requireNotNull(existing[element.id]) { "The selected object no longer exists" }
-            if(isUnlockOnly(old,element))requireLayerEditable(document,old) else requireEditable(document, old)
+            requireReplacement(document,old,element)
         }
         return command(document, label, replacements = elements.associateBy { it.id })
+    }
+
+    /** Only lock/display metadata may bypass an existing object or layer lock. */
+    fun presentation(document:ProjectDocument,elements:List<Element>,label:String="Change display"):EditCommand {
+        require(elements.map {it.id}.toSet().size==elements.size) {"Duplicate replacement object IDs"}
+        val existing=document.elements.associateBy {it.id}
+        elements.forEach {element->
+            val previous=requireNotNull(existing[element.id]) {"The selected object no longer exists"}
+            require(isPresentationOnly(previous,element)) {"A presentation change cannot edit object geometry or properties"}
+        }
+        return command(document,label,replacements=elements.associateBy {it.id},allowLockedPresentation=true)
+    }
+
+    /** Visibility transactions may also restore layer/system and level visibility. */
+    fun presentationBetween(before:ProjectDocument,after:ProjectDocument,label:String="Change display"):EditCommand {
+        val existing=before.elements.associateBy {it.id}
+        require(after.elements.size==before.elements.size && after.elements.all {next->
+            existing[next.id]?.let {previous->isPresentationOnly(previous,next)}==true
+        }) {"A presentation change cannot create, remove or reshape objects"}
+        require(before.layers.size==after.layers.size && before.layers.zip(after.layers).all {(a,b)->a.copy(visible=b.visible)==b} &&
+            before.systems.size==after.systems.size && before.systems.zip(after.systems).all {(a,b)->a.copy(visible=b.visible)==b}) {
+            "A presentation change can only adjust existing layer/system visibility"
+        }
+        val nextSettings=after.project.settings
+        require(before.project.settings.copy(hiddenLevelIds=nextSettings.hiddenLevelIds,
+            showHiddenObjects=nextSettings.showHiddenObjects,showMeasurements=nextSettings.showMeasurements,
+            autoXrayFrontWalls=nextSettings.autoXrayFrontWalls)==nextSettings) {
+            "A presentation change cannot change unrelated project settings"
+        }
+        return betweenValidated(before,after,label,allowLockedPresentation=true)
     }
 
     fun transform(document: ProjectDocument, ids: Set<ElementId>, delta: EditDelta): EditCommand {
@@ -101,7 +129,10 @@ object EditCommands {
         if (delta.isIdentity) return command(document, "Transform objects")
         return replace(
             document,
-            elements.map { it.copy(transform = EditTransforms.apply(it.transform, delta)) },
+            elements.map {element->
+                val transform=EditTransforms.apply(element.transform,delta)
+                element.copy(transform=positionSafeTransform(element,transform))
+            },
             "Transform objects",
         )
     }
@@ -113,7 +144,9 @@ object EditCommands {
         pivot: Point3,
     ): EditCommand = replace(
         document,
-        selected(document, ids).map { it.copy(transform = EditTransforms.mirror(it.transform, axis, pivot)) },
+        selected(document, ids).map {element->
+            element.copy(transform=positionSafeTransform(element,EditTransforms.mirror(element.transform,axis,pivot)))
+        },
         "Mirror objects",
     )
 
@@ -241,7 +274,18 @@ object EditCommands {
 
     private fun requireEditable(document: ProjectDocument, element: Element) {
         requireLayerEditable(document,element)
-        require(!elementLocked(element)) {"The object is locked. Unlock it before editing."}
+        require(element.lockMode!=LockMode.ALL) {"Object is locked. Unlock to edit."}
+    }
+
+    private fun requireReplacement(document:ProjectDocument,before:Element,after:Element?,allowLockedPresentation:Boolean=false) {
+        val presentation=after!=null && isPresentationOnly(before,after)
+        if(presentation) {
+            if(!allowLockedPresentation)requireLayerEditable(document,before)
+            return
+        }
+        requireEditable(document,before)
+        if(before.lockMode==LockMode.POSITION_ONLY && after!=null)
+            require(before.transform.translation==after.transform.translation) {"Object position is locked. Unlock to move."}
     }
 
     private fun requireLayerEditable(document: ProjectDocument, element: Element) {
@@ -250,15 +294,22 @@ object EditCommands {
         require(!layer.locked) { "The ${layer.name} layer is locked" }
     }
 
-    private fun elementLocked(element:Element)=(element.properties[ELEMENT_LOCK] as? ParameterValue.Flag)?.value==true
-    private fun isUnlockOnly(before:Element,after:Element?):Boolean {
-        if(after==null || !elementLocked(before))return false
-        val next=after.properties[ELEMENT_LOCK]
-        if(next!=null && next!=ParameterValue.Flag(false))return false
-        return before.copy(properties=before.properties-ELEMENT_LOCK)==after.copy(properties=after.properties-ELEMENT_LOCK)
-    }
+    private fun presentationKey(key:String)=key==ELEMENT_LOCKED_KEY || key==ELEMENT_LOCK_MODE_KEY ||
+        key==ELEMENT_DISPLAY_KEY || key.startsWith(ROOM_SIDE_DISPLAY_PREFIX)
 
-    private const val ELEMENT_LOCK="eezydraw.locked"
+    private fun isPresentationOnly(before:Element,after:Element):Boolean =
+        before.copy(properties=before.properties.filterKeys { !presentationKey(it) })==
+            after.copy(properties=after.properties.filterKeys { !presentationKey(it) })
+
+    /** Floating point noise is normalized, never retained as an accidental position edit. */
+    private fun positionSafeTransform(element:Element,transform:Transform3):Transform3 {
+        if(element.lockMode!=LockMode.POSITION_ONLY)return transform
+        val previous=element.transform.translation
+        val next=transform.translation
+        require(kotlin.math.abs(previous.x-next.x)<=1e-8 && kotlin.math.abs(previous.y-next.y)<=1e-8 &&
+            kotlin.math.abs(previous.z-next.z)<=1e-8) {"Object position is locked. Unlock to move."}
+        return transform.copy(translation=previous)
+    }
 
     private fun command(
         document: ProjectDocument,
@@ -267,6 +318,7 @@ object EditCommands {
         additions: List<Element> = emptyList(),
         groups: List<ElementGroup> = document.groups,
         issues: List<Issue> = document.issues,
+        allowLockedPresentation:Boolean=false,
     ): EditCommand {
         val originalIds = document.elements.mapTo(HashSet()) { it.id }
         require(replacements.keys.all { it in originalIds }) { "The selected object no longer exists" }
@@ -283,7 +335,7 @@ object EditCommands {
         for (element in additions) {
             after.add(element)
         }
-        return between(document, document.copy(elements = after, groups = groups, issues = issues), label)
+        return betweenValidated(document, document.copy(elements = after, groups = groups, issues = issues), label,allowLockedPresentation)
     }
 
     private fun validateReferences(document: ProjectDocument, all: List<Element>, changed: List<Element>) {

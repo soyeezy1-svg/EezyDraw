@@ -79,7 +79,8 @@ class EditCommand internal constructor(
         require(systems == null || document.systems == (if(forward)systems.before else systems.after)) {
             "The drawing systems changed; this edit is stale"
         }
-        require(settings == null || document.project.settings == (if(forward)settings.before else settings.after)) {
+        require(settings == null || document.project.settings ==
+            (if(forward)settings.before else settings.after).copy(canvasLayout=document.project.settings.canvasLayout)) {
             "The project settings changed; this edit is stale"
         }
         if (isEmpty) return document
@@ -113,7 +114,8 @@ class EditCommand internal constructor(
             groups = groups?.let { if (forward) it.after else it.before } ?: document.groups,
             issues = issues?.let { if (forward) it.after else it.before } ?: document.issues,
             systems = systems?.let {if(forward)it.after else it.before} ?: document.systems,
-            project = settings?.let {document.project.copy(settings=if(forward)it.after else it.before)} ?: document.project,
+            project = settings?.let {document.project.copy(settings=(if(forward)it.after else it.before)
+                .copy(canvasLayout=document.project.settings.canvasLayout))} ?: document.project,
         )
     }
 }

@@ -2,6 +2,8 @@ package com.eezydraw.core.geometry
 
 import com.eezydraw.core.model.Bounds3
 import com.eezydraw.core.model.Point3
+import com.eezydraw.core.model.ObjectDisplay
+import com.eezydraw.core.model.RoomSideRef
 
 /** Project-space doubles are retained for selection, measurements and snapping. */
 data class SceneSegment(
@@ -10,6 +12,9 @@ data class SceneSegment(
     val elementId: String,
     val levelId: String?,
     val colorArgb: Long = 0xFF334455,
+    val display: ObjectDisplay = ObjectDisplay.NORMAL,
+    val roomSide: RoomSideRef? = null,
+    val roomCenter: Point3? = null,
 )
 
 /**
@@ -21,6 +26,10 @@ data class SceneChunk(
     val bounds: Bounds3,
     val levelId: String?,
     val vertices: FloatArray,
+    val display: ObjectDisplay = ObjectDisplay.NORMAL,
+    val roomSide: RoomSideRef? = null,
+    val roomCenter: Point3? = null,
+    val elementId: String? = null,
 )
 
 data class DrawingScene(

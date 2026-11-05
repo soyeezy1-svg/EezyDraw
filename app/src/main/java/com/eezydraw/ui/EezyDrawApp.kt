@@ -24,6 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -97,9 +98,10 @@ fun EezyDrawApp(
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         if (state.settings.autosaveIntervalSeconds > 0) viewModel.saveIfDirty()
     }
-    LaunchedEffect(state.notice) {
+    LaunchedEffect(state.notice,state.noticeUndo) {
         state.notice?.let { message ->
-            snackbar.showSnackbar(message)
+            val result=snackbar.showSnackbar(message,actionLabel=if(state.noticeUndo)context.getString(R.string.editing_undo)else null)
+            if(result==SnackbarResult.ActionPerformed)viewModel.undo()
             viewModel.clearNotice()
         }
     }
@@ -166,6 +168,11 @@ fun EezyDrawApp(
                                             onSelectionLayer=viewModel::setSelectionLayer,onSelectionColour=viewModel::setSelectionColour,
                                             onSelectionLocked=viewModel::setSelectionLocked,onRotate90=viewModel::rotateSelection90,
                                             onRotationSnap=viewModel::changeRotationSnap,
+                                            onCanvasLayout=viewModel::setCanvasLayout,onSelectionLockMode=viewModel::setSelectionLockMode,
+                                            onLevelLock=viewModel::setLevelLock,onSelectionDisplay=viewModel::setSelectionDisplay,
+                                            onElementsDisplay=viewModel::setElementsDisplay,onRoomSideDisplay=viewModel::setRoomSideDisplay,
+                                            onShowRoomWalls=viewModel::showRoomWalls,onLevelVisibility=viewModel::setLevelVisibility,
+                                            onShowAll=viewModel::showAllObjects,onShowHidden=viewModel::showHiddenObjects,onAutoXray=viewModel::autoXrayFrontWalls,
                                         ),
                                         onExportView={request,format->
                                             viewModel.prepareViewExport(request,format)

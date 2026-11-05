@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -100,6 +101,7 @@ private sealed interface SceneLoad {
 private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean =
     a.elements == b.elements && a.layers == b.layers && a.systems == b.systems && a.libraryItems == b.libraryItems &&
         a.materials == b.materials && a.levels == b.levels && a.project.settings.showMeasurements == b.project.settings.showMeasurements &&
+        a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
         a.project.settings.lengthUnit == b.project.settings.lengthUnit &&
         a.project.settings.angleFormat == b.project.settings.angleFormat &&
         a.project.settings.decimalPlaces == b.project.settings.decimalPlaces
@@ -174,16 +176,23 @@ fun DrawingCanvasScreen(
     var placedToken by remember {mutableIntStateOf(0)}
     var placedFeedback by remember {mutableStateOf(false)}
     var addSelection by rememberSaveable { mutableStateOf(false) }
-    var propertiesOpen by rememberSaveable { mutableStateOf(false) }
     var propertiesSession by rememberSaveable { mutableIntStateOf(0) }
+    var canvasLayout by remember(document.project.id) {mutableStateOf(document.project.settings.canvasLayout)}
+    var panelBounds by remember(document.project.id) {mutableStateOf(emptyMap<CanvasPanelId,Rect>())}
+    fun recordPanelBounds(id:CanvasPanelId,bounds:Rect?) {
+        val next=if(bounds==null)panelBounds-id else panelBounds+(id to bounds)
+        if(next!=panelBounds)panelBounds=next
+    }
+    var selectedRoomSide by remember(document.project.id) {mutableStateOf<RoomSideRef?>(null)}
+    LaunchedEffect(document.project.settings.canvasLayout) {canvasLayout=document.project.settings.canvasLayout}
+    val panelsHidden=canvasLayout.hideAll
+    val propertiesOpen=canvasLayout.panel(CanvasPanelId.PROPERTIES).state==PanelVisibility.OPEN
+    fun updateLayout(next:CanvasLayout) {canvasLayout=next;editor?.onCanvasLayout?.invoke(next)}
+    fun setPanel(id:CanvasPanelId,state:PanelVisibility) {updateLayout(canvasLayout.withPanel(id,canvasLayout.panel(id).copy(state=state)))}
+    fun setPanelPlacement(id:CanvasPanelId,placement:PanelPlacement) {updateLayout(canvasLayout.withPanel(id,placement))}
+    fun openProperties() {propertiesSession++;setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.OPEN)}
     var arrayOpen by rememberSaveable { mutableStateOf(false) }
-    var measurementsOpen by rememberSaveable { mutableStateOf(false) }
-    var libraryOpen by rememberSaveable { mutableStateOf(false) }
-    var toolsExpanded by rememberSaveable { mutableStateOf(false) }
-    var focusedTools by rememberSaveable { mutableStateOf<CanvasToolGroup?>(null) }
-    var viewOpen by rememberSaveable { mutableStateOf(true) }
     val panelStates=rememberSaveableStateHolder()
-    var panelsHidden by rememberSaveable { mutableStateOf(false) }
     var measurementMode by rememberSaveable { mutableStateOf(MeasurementMode.NONE) }
     var measurementPicks by remember { mutableStateOf(emptyList<MeasurementPick>()) }
     var toolError by remember { mutableStateOf<String?>(null) }
@@ -225,8 +234,10 @@ fun DrawingCanvasScreen(
     val selectedProperties=remember(document,selectedElement) { selectedElement?.let {readProperties(document,it)} }
     val lockedSelection = remember(document.elements,document.layers,selectedIds) {
         val lockedLayers = document.layers.filter { it.locked }.mapTo(HashSet()) { it.id }
-        document.elements.any { it.id in selectedIds && (it.layerId in lockedLayers || it.objectLocked) }
+        document.elements.any { it.id in selectedIds && (it.layerId in lockedLayers || it.lockMode==LockMode.ALL) }
     }
+    val positionLockedSelection=remember(document.elements,selectedIds) {document.elements.any {it.id in selectedIds && it.lockMode==LockMode.POSITION_ONLY}}
+    val positionLockedPivot=remember(document.elements,selectedIds) {document.elements.singleOrNull {it.id in selectedIds && it.lockMode==LockMode.POSITION_ONLY}?.transform?.translation}
     val geometryMatches = remember(ready?.document,document,ready?.detailedMeasurements,settings.showDetailedMeasurement) {
         ready?.let { sameCanvasGeometry(it.document,document) && it.detailedMeasurements==settings.showDetailedMeasurement } == true }
     val sceneMatches = geometryMatches && ready?.selectedIds == selectedIds
@@ -235,9 +246,13 @@ fun DrawingCanvasScreen(
     val latestSceneMatches = rememberUpdatedState(sceneMatches)
     val latestBounds = rememberUpdatedState(selectedBounds)
     val latestLocked = rememberUpdatedState(lockedSelection)
+    val latestPositionLocked=rememberUpdatedState(positionLockedSelection)
     val latestBusy = rememberUpdatedState(busy)
-    val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE
+    val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
+        document.project.settings.autoXrayFrontWalls || document.elements.any {element->element.objectDisplay==ObjectDisplay.XRAY ||
+            element.properties.any {(key,value)->key.startsWith(ROOM_SIDE_DISPLAY_PREFIX) && (value as? ParameterValue.Text)?.value==ObjectDisplay.XRAY.name}}
     val placementActive=tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
+    val floatingPanelsVisible=!panelsHidden && !(settings.autoHidePanelsWhileDrawing && (placementActive || selectedIds.isNotEmpty()))
     val latestPlacementActive=rememberUpdatedState(placementActive)
     val precisionActive=placementActive && settings.precisionPointer.enabled
     val latestPrecisionActive=rememberUpdatedState(precisionActive)
@@ -245,8 +260,8 @@ fun DrawingCanvasScreen(
     val canPointRedo=pointRedo.isNotEmpty()
 
     LaunchedEffect(selectedIds) {
-        gizmoMode=GizmoMode.MOVE;propertiesOpen=false;rotationAngle=null
-        if(selectedIds.isNotEmpty()) {libraryOpen=false;measurementsOpen=false}
+        gizmoMode=GizmoMode.MOVE;rotationAngle=null
+        if(selectedRoomSide?.roomId !in selectedIds)selectedRoomSide=null
     }
     LaunchedEffect(placedToken) {
         if(placedToken>0) {placedFeedback=true;delay(1200);placedFeedback=false}
@@ -259,7 +274,8 @@ fun DrawingCanvasScreen(
 
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
-        document.project.settings.showMeasurements,settings.showDetailedMeasurement,selectedIds,needsSurfaces) {
+        document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
+        settings.showDetailedMeasurement,selectedIds,needsSurfaces) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
@@ -342,7 +358,7 @@ fun DrawingCanvasScreen(
     fun placed() {
         pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
-        propertiesOpen=false;measurementsOpen=false;libraryOpen=false;toolsExpanded=false;gizmoMode=GizmoMode.MOVE
+        gizmoMode=GizmoMode.MOVE
         placedToken++
         if(!settings.keepToolActiveAfterPlacing) {tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
     }
@@ -552,7 +568,6 @@ fun DrawingCanvasScreen(
     }
     fun beginMeasurement(mode:MeasurementMode) {
         cancelConstruction();measurementMode=mode;editor?.onSelect?.invoke(emptySet());probe=false
-        toolsExpanded=false;measurementsOpen=false;propertiesOpen=false;libraryOpen=false;viewOpen=true
         pointerWorld=if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
     }
     fun cubeDirection(normal:Point3) {
@@ -584,7 +599,30 @@ fun DrawingCanvasScreen(
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=document.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
-        measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene)
+        measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
+        autoXrayFrontWalls=document.project.settings.autoXrayFrontWalls)
+    val viewToolbarContent:@Composable ()->Unit={
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
+                    horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
+                    CanvasActionButton(Icons.Outlined.FitScreen,stringResource(R.string.canvas_extents),{fit()},Modifier.testTag("canvas_extents"),enabled=geometryMatches)
+                    CanvasActionButton(Icons.Outlined.CropFree,stringResource(R.string.canvas_window),{zoomWindow=!zoomWindow;window.value=null},Modifier.testTag("canvas_zoom_window"),selected=zoomWindow)
+                    editor?.let {actions->
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{undoInputOrDocument()},Modifier.testTag("view_undo"),enabled=actions.canUndo || canPointUndo)
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{redoInputOrDocument()},Modifier.testTag("view_redo"),enabled=actions.canRedo || canPointRedo)
+                        ViewControls(renderDocument,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility,onOpenVisibility={setPanel(CanvasPanelId.VISIBILITY,PanelVisibility.OPEN)})
+                    }
+                    CanvasActionButton(Icons.Outlined.Save,stringResource(R.string.canvas_save),onSave,Modifier.testTag("canvas_save"),enabled=dirty && !busy)
+                    if(!is3D) {
+                        CanvasActionButton(Icons.Outlined.MyLocation,stringResource(R.string.canvas_probe),{probe=!probe},Modifier.testTag("canvas_probe"),selected=probe)
+                        CanvasActionButton(Icons.Outlined.Grid4x4,stringResource(R.string.canvas_snaps),{snapsOpen=true},Modifier.testTag("canvas_snaps"))
+                        CanvasActionButton(Icons.Outlined.Clear,stringResource(R.string.canvas_clear_reference),{anchorX=null;anchorY=null},Modifier.testTag("canvas_clear_reference"),enabled=anchor!=null)
+                    }
+                    if(editor!=null) CanvasActionButton(Icons.Outlined.LibraryAdd,stringResource(R.string.canvas_add_selection),{addSelection=!addSelection},Modifier.testTag("canvas_add_selection"),selected=addSelection)
+                    CanvasActionButton(Icons.Outlined.GridOn,stringResource(R.string.canvas_grid),{grid=!grid},selected=grid)
+                    CanvasActionButton(Icons.Outlined.Image,stringResource(R.string.canvas_export_png),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PNG)},Modifier.testTag("canvas_export_png"),enabled=geometryMatches && size.width>0 && !placementActive)
+                    CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0 && !placementActive)
+                }
+    }
     Scaffold(
         modifier = modifier.testTag("drawing_canvas").focusRequester(focus).onPreviewKeyEvent { event ->
             val actions = editor
@@ -596,12 +634,12 @@ fun DrawingCanvasScreen(
                 event.isCtrlPressed && event.key == Key.Z && event.isShiftPressed -> { redoInputOrDocument(); true }
                 event.isCtrlPressed && event.key == Key.Z -> { undoInputOrDocument(); true }
                 event.isCtrlPressed && event.key == Key.Y -> { redoInputOrDocument(); true }
-                event.key == Key.Delete || event.key == Key.Backspace -> { cancelConstruction(); actions.onDelete(); true }
+                event.key == Key.Delete || event.key == Key.Backspace -> { if(selectedRoomSide==null){cancelConstruction();actions.onDelete()}; true }
                 else -> false
             }
         }.onFocusChanged { canvasFocused = it.isFocused }.focusable(),
         topBar = {
-            if(!panelsHidden && selectedIds.isEmpty()) TopAppBar(
+            if(!panelsHidden) TopAppBar(
                 title = { Text(document.project.name, maxLines = 1) },
                 navigationIcon = { IconButton(onBack, enabled = !busy) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
@@ -621,38 +659,14 @@ fun DrawingCanvasScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if(!panelsHidden) {
-                if(editor!=null && (selectedIds.isEmpty() || placementActive)) CanvasToolbars(
-                    onDraw={toolsExpanded=!(toolsExpanded && focusedTools==CanvasToolGroup.DRAW);focusedTools=CanvasToolGroup.DRAW},
-                    onEdit={toolsExpanded=!(toolsExpanded && focusedTools==CanvasToolGroup.EDIT);focusedTools=CanvasToolGroup.EDIT},
-                    onView={viewOpen=!viewOpen},
-                    onMeasure={beginMeasurement(MeasurementMode.DISTANCE)},
+                if(editor!=null) CanvasToolbars(
+                    onDraw={},onEdit={},onView={},onMeasure={beginMeasurement(MeasurementMode.DISTANCE)},
                     onReferenceDimension={beginMeasurement(MeasurementMode.REFERENCE)},
-                    onMeasurements={measurementsOpen=!measurementsOpen;propertiesOpen=false;libraryOpen=false},
-                    onLibrary={libraryOpen=!libraryOpen;propertiesOpen=false;measurementsOpen=false},
-                    onTogglePanels={panelsHidden=true},panelsHidden=false,modifier=Modifier.fillMaxWidth(),
-                    activeTool=if(placementActive)activeLabel else null,
-                    measureActive=measurementMode!=MeasurementMode.NONE,libraryActive=pendingLibrary!=null)
-                if(viewOpen || selectedIds.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
-                    horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
-                    CanvasActionButton(Icons.Outlined.FitScreen,stringResource(R.string.canvas_extents),{fit()},Modifier.testTag("canvas_extents"),enabled=geometryMatches)
-                    CanvasActionButton(Icons.Outlined.CropFree,stringResource(R.string.canvas_window),{zoomWindow=!zoomWindow;window.value=null},Modifier.testTag("canvas_zoom_window"),selected=zoomWindow)
-                    editor?.let {actions->
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{undoInputOrDocument()},Modifier.testTag("view_undo"),enabled=actions.canUndo || canPointUndo)
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{redoInputOrDocument()},Modifier.testTag("view_redo"),enabled=actions.canRedo || canPointRedo)
-                        ViewControls(renderDocument,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility)
-                    }
-                    CanvasActionButton(Icons.Outlined.Save,stringResource(R.string.canvas_save),onSave,Modifier.testTag("canvas_save"),enabled=dirty && !busy)
-                    if(selectedIds.isNotEmpty()) CanvasActionButton(Icons.Outlined.Fullscreen,stringResource(R.string.panel_hide_panels),{panelsHidden=true},Modifier.testTag("canvas_hide_panels"))
-                    if(!is3D) {
-                        CanvasActionButton(Icons.Outlined.MyLocation,stringResource(R.string.canvas_probe),{probe=!probe},Modifier.testTag("canvas_probe"),selected=probe)
-                        CanvasActionButton(Icons.Outlined.Grid4x4,stringResource(R.string.canvas_snaps),{snapsOpen=true},Modifier.testTag("canvas_snaps"))
-                        CanvasActionButton(Icons.Outlined.Clear,stringResource(R.string.canvas_clear_reference),{anchorX=null;anchorY=null},Modifier.testTag("canvas_clear_reference"),enabled=anchor!=null)
-                    }
-                    if(editor!=null) CanvasActionButton(Icons.Outlined.LibraryAdd,stringResource(R.string.canvas_add_selection),{addSelection=!addSelection},Modifier.testTag("canvas_add_selection"),selected=addSelection)
-                    CanvasActionButton(Icons.Outlined.GridOn,stringResource(R.string.canvas_grid),{grid=!grid},selected=grid)
-                    CanvasActionButton(Icons.Outlined.Image,stringResource(R.string.canvas_export_png),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PNG)},Modifier.testTag("canvas_export_png"),enabled=geometryMatches && size.width>0 && !placementActive)
-                    CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0 && !placementActive)
-                }
+                    onMeasurements={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)},onLibrary={},
+                    onTogglePanels={},panelsHidden=false,modifier=Modifier.fillMaxWidth(),
+                    activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
+                    libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
+                    onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
                 if(placementActive) PlacementBanner(activeLabel,
                     when {
                         precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
@@ -684,7 +698,7 @@ fun DrawingCanvasScreen(
                             val bodyReady=latestReady.value
                             val bodySelection=latestEditor.value?.selectedIds.orEmpty()
                             val bodyHit=if(latestSettings.value.bodyDragMovesSelection && latestTool.value==DrawingTool.SELECT &&
-                                latestMeasurementMode.value==MeasurementMode.NONE && !latestPlacementActive.value && gizmoMode==GizmoMode.MOVE && latestSceneMatches.value && !latestLocked.value && !latestBusy.value && !zoomWindow && !probe) {
+                                latestMeasurementMode.value==MeasurementMode.NONE && !latestPositionLocked.value && selectedRoomSide==null && !latestPlacementActive.value && gizmoMode==GizmoMode.MOVE && latestSceneMatches.value && !latestLocked.value && !latestBusy.value && !zoomWindow && !probe) {
                                 if(is3D)bodyReady?.picker?.pick3D(orbit,first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,latestLevel.value)
                                 else bodyReady?.picker?.pickPlan(viewport.screenToWorld(first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble()),14.0*density/viewport.pixelsPerMetre,latestLevel.value)
                             } else null
@@ -789,9 +803,9 @@ fun DrawingCanvasScreen(
                 }
                 if(measurementMode!=MeasurementMode.NONE) MeasurementGhostPreview(measurementPicks.map {it.point},pointerWorld,viewport,orbit=orbit,is3D=is3D)
                 pendingLibrary?.let { LibraryGhostPreview(document,LibraryItemId(it),pointerWorld,viewport,orbit,is3D) }
-                if (editor != null && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
+                if (editor != null && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden && selectedRoomSide==null) {
                     SelectionGizmo(selectedBounds, viewport, orbit, is3D, preview,
-                        onStart = { _, _ -> dragPivot = selectedBounds.center(); dragResizeFrame = selectionResizeFrame
+                        onStart = { _, _ -> dragPivot = positionLockedPivot ?: selectedBounds.center(); dragResizeFrame = if(positionLockedSelection)null else selectionResizeFrame
                             waitingForCommit = null; preview = EditDelta(pivot = dragPivot) },
                         onDrag = { handle, start, current ->
                             try {
@@ -839,59 +853,9 @@ fun DrawingCanvasScreen(
                                     waitingForCommit = null; preview = null
                                 }
                             } else { preview = null; waitingForCommit = null }
-                        }, enabled = !busy && !lockedSelection && waitingForCommit == null && sceneMatches,
-                        resizeFrame = selectionResizeFrame,allowResize=!selectionHasMeasurements,mode=gizmoMode,rotationAngleDegrees=rotationAngle)
-                }
-                if(editor!=null && selectedIds.isNotEmpty() && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
-                    val pivot=selectedBounds?.center() ?: if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
-                    val at=if(is3D)orbit.project(pivot,size.width.toDouble(),size.height.toDouble())?.let {Point2(it.x,it.y)}
-                        else viewport.worldToScreen(Point2(pivot.x,pivot.y),size.width.toDouble(),size.height.toDouble())
-                    val toolbarWidth=240*density
-                    val toolbarOffset=IntOffset(((at?.x ?: size.width/2.0)-toolbarWidth/2).toInt().coerceIn(0,max(0,size.width-toolbarWidth.toInt())),
-                        ((at?.y ?: size.height/2.0)+120*density).toInt().coerceIn(0,max(0,size.height-(56*density).toInt())))
-                    val selectedElements=document.elements.filter {it.id in selectedIds}
-                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
-                    SelectionToolbar(gizmoMode,!busy && !lockedSelection,editor.canUndo,editor.canRedo,editor.canPaste,
-                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
-                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
-                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
-                        onProperties={propertiesSession++;if(selectionHasMeasurements){measurementsOpen=true;propertiesOpen=false}
-                            else {propertiesOpen=true;measurementsOpen=false};libraryOpen=false},
-                        onMirrorX={editor.onMirror(MirrorAxis.X,elementWorldBounds(document,selectedIds).center())},
-                        onMirrorY={editor.onMirror(MirrorAxis.Y,elementWorldBounds(document,selectedIds).center())},
-                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
-                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
-                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.offset {toolbarOffset},
-                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked)
-                }
-                if(!panelsHidden) editor?.let { actions ->
-                    if(selectedIds.isEmpty() || placementActive) panelStates.SaveableStateProvider("tools") {
-                    ToolsPanel(tool,options,document.project.settings.lengthUnit,selectedIds.size,
-                        actions.canUndo || canPointUndo,actions.canRedo || canPointRedo,actions.canPaste,points.size >= tool.minimumPoints && points.isNotEmpty(),
-                        onTool = { beginTool(it) },
-                        onOptions = { if (it.useDefaultDimensions != options.useDefaultDimensions) {points=emptyList();anchorX=null;anchorY=null}; options = it },
-                        onFinish = { finishConstruction() },onCancel = { cancelConstruction(); tool = DrawingTool.SELECT },
-                        onUndo = { undoInputOrDocument() },onRedo = { redoInputOrDocument() },
-                        onCopy = actions.onCopy,onPaste = { cancelConstruction(); tool = DrawingTool.SELECT; actions.onPaste() },
-                        onMirrorX = { if (selectedIds.isNotEmpty()) actions.onMirror(MirrorAxis.X,elementWorldBounds(document,selectedIds).center()) },
-                        onMirrorY = { if (selectedIds.isNotEmpty()) actions.onMirror(MirrorAxis.Y,elementWorldBounds(document,selectedIds).center()) },
-                        onArray = { arrayOpen = true },onDelete = { cancelConstruction(); actions.onDelete() },
-                        onProperties = { propertiesSession++;if(selectionHasMeasurements){measurementsOpen=true;propertiesOpen=false} else {propertiesOpen=true;measurementsOpen=false}
-                            libraryOpen=false },modifier = Modifier.align(Alignment.TopStart).padding(start = 30.dp,top = 132.dp),
-                        expandedOverride=toolsExpanded,onExpandedChange={toolsExpanded=it;focusedTools=null},focusGroup=focusedTools)
-                    }
-                    if(propertiesOpen && selectedProperties!=null) panelStates.SaveableStateProvider("properties:$propertiesSession:${selectedElement?.id?.value}") {
-                        PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,
-                        document.project.settings.decimalPlaces,onApply={actions.onProperties(it);propertiesOpen=false},
-                        onDismiss={propertiesOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
-                    }
-                    if(measurementsOpen) MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,
-                        actions.onDeleteElements,onDismiss={measurementsOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
-                    if(libraryOpen) LibraryPanel(document.libraryItems,onInsert={id->
-                        cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet())
-                        pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
-                        libraryOpen=false;propertiesOpen=false;toolsExpanded=false
-                    },onDismiss={libraryOpen=false},modifier=Modifier.align(Alignment.TopEnd).padding(8.dp))
+                        }, enabled = !busy && !lockedSelection && !(positionLockedSelection && gizmoMode==GizmoMode.MOVE) && waitingForCommit == null && sceneMatches,
+                        resizeFrame = if(positionLockedSelection)null else selectionResizeFrame,allowResize=!selectionHasMeasurements,
+                        mode=gizmoMode,rotationAngleDegrees=rotationAngle,pivotOverride=positionLockedPivot)
                 }
                 if(!zoomWindow && !panelsHidden) Row(Modifier.align(Alignment.TopStart).padding(8.dp),verticalAlignment=Alignment.Top) {
                     ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),
@@ -906,14 +870,111 @@ fun DrawingCanvasScreen(
                         })
                     CanvasActionButton(Icons.Outlined.Home,stringResource(R.string.canvas_home),{homeView()},Modifier.testTag("canvas_home"))
                 }
-                if(panelsHidden) CanvasToolbars({},{},{},{},{},{},{},{panelsHidden=false},true,
-                    Modifier.align(Alignment.TopEnd).padding(8.dp))
+                if(floatingPanelsVisible) {
+                    PersistentPanel(CanvasPanelId.VIEW,stringResource(R.string.panel_view),canvasLayout.panel(CanvasPanelId.VIEW),
+                        {setPanelPlacement(CanvasPanelId.VIEW,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VIEW,it)},width=520.dp,icon=Icons.Outlined.Visibility,compact=true) {viewToolbarContent()}
+                    editor?.let {actions->
+                        for(group in listOf(CanvasToolGroup.DRAW,CanvasToolGroup.EDIT)) {
+                            val id=if(group==CanvasToolGroup.DRAW)CanvasPanelId.DRAW else CanvasPanelId.EDIT
+                            PersistentPanel(id,stringResource(if(group==CanvasToolGroup.DRAW)R.string.panel_draw else R.string.panel_edit),canvasLayout.panel(id),
+                                {setPanelPlacement(id,it)},onBoundsChanged={recordPanelBounds(id,it)},icon=if(group==CanvasToolGroup.DRAW)Icons.Outlined.Draw else Icons.Outlined.Tune) {
+                                panelStates.SaveableStateProvider("tools:$group") {
+                                    ToolsPanel(tool,options,document.project.settings.lengthUnit,selectedIds.size,
+                                        actions.canUndo || canPointUndo,actions.canRedo || canPointRedo,actions.canPaste,points.size>=tool.minimumPoints && points.isNotEmpty(),
+                                        onTool={beginTool(it)},onOptions={options=it},onFinish={finishConstruction()},onCancel={cancelConstruction()},
+                                        onUndo={undoInputOrDocument()},onRedo={redoInputOrDocument()},onCopy=actions.onCopy,
+                                        onPaste={cancelConstruction();actions.onPaste()},onMirrorX={actions.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                                        onMirrorY={actions.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},onArray={arrayOpen=true},
+                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true)
+                                }
+                            }
+                        }
+                        PersistentPanel(CanvasPanelId.MEASURE,stringResource(R.string.panel_measure),canvasLayout.panel(CanvasPanelId.MEASURE),
+                            {setPanelPlacement(CanvasPanelId.MEASURE,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.MEASURE,it)},icon=Icons.Outlined.Straighten) {
+                            MeasureTools({beginMeasurement(MeasurementMode.DISTANCE)},{beginMeasurement(MeasurementMode.REFERENCE)},
+                                {setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)})
+                        }
+                        PersistentPanel(CanvasPanelId.LIBRARY,stringResource(R.string.panel_library),canvasLayout.panel(CanvasPanelId.LIBRARY),
+                            {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
+                            LibraryPanel(document.libraryItems,onInsert={id->
+                                cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet())
+                                pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
+                            },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true)
+                        }
+                        PersistentPanel(CanvasPanelId.PROPERTIES,stringResource(R.string.editing_properties),canvasLayout.panel(CanvasPanelId.PROPERTIES),
+                            {setPanelPlacement(CanvasPanelId.PROPERTIES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.PROPERTIES,it)},icon=Icons.Outlined.Tune) {
+                            val source=document.elements.singleOrNull {it.id in selectedIds}
+                            when {
+                                selectionHasMeasurements->MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
+                                    onDismiss={setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.HIDDEN)},embedded=true)
+                                selectedProperties!=null->panelStates.SaveableStateProvider("properties:$propertiesSession:${source?.id?.value}") {
+                                    PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,document.project.settings.decimalPlaces,
+                                        onApply=actions.onProperties,onDismiss={setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.HIDDEN)},
+                                        lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true)
+                                }
+                                else->Text(stringResource(R.string.presentation_select_properties),Modifier.padding(12.dp))
+                            }
+                        }
+                        PersistentPanel(CanvasPanelId.MEASUREMENTS,stringResource(R.string.panel_saved_measurements),canvasLayout.panel(CanvasPanelId.MEASUREMENTS),
+                            {setPanelPlacement(CanvasPanelId.MEASUREMENTS,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.MEASUREMENTS,it)},icon=Icons.Outlined.Straighten) {
+                            MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
+                                onDismiss={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.HIDDEN)},embedded=true)
+                        }
+                        PersistentPanel(CanvasPanelId.VISIBILITY,stringResource(R.string.panel_visibility),canvasLayout.panel(CanvasPanelId.VISIBILITY),
+                            {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
+                            ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},
+                                actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,
+                                onLayerVisible=actions.onLayerVisibility,onMeasurementsVisible=actions.onMeasurementsVisibility)
+                        }
+                    }
+                }
+                if(editor!=null && selectedIds.isNotEmpty() && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
+                    val pivot=selectedBounds?.center() ?: if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
+                    val at=if(is3D)orbit.project(pivot,size.width.toDouble(),size.height.toDouble())?.let {Point2(it.x,it.y)}
+                        else viewport.worldToScreen(Point2(pivot.x,pivot.y),size.width.toDouble(),size.height.toDouble())
+                    val occupied=panelBounds.values.toList()+listOf(Rect(0f,0f,180*density,128*density),
+                        Rect(0f,(size.height-64*density).coerceAtLeast(0f),64*density,size.height.toFloat()))
+                    val toolbarOffset=selectionToolbarPosition(at ?: Point2(size.width/2.0,size.height/2.0),size.width,size.height,density,occupied)
+                    val selectedElements=document.elements.filter {it.id in selectedIds}
+                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
+                    SelectionToolbar(gizmoMode,!busy && !lockedSelection && selectedRoomSide==null,editor.canUndo,editor.canRedo,editor.canPaste,
+                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
+                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
+                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
+                        onProperties={openProperties()},
+                        onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
+                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
+                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.offset {toolbarOffset},
+                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked,
+                        lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
+                        onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
+                        display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
+                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
+                        room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
+                        onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
+                        onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout,
+                        onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})
+                }
                 if(precisionActive && !zoomWindow) PrecisionPointerOverlay(precisionPick,precisionFinger,precisionDragging,
                     settings.precisionPointer,viewport,orbit,is3D,ready?.scene,ready?.surfaces,snapSettings.gridSpacing,grid,floorZ,
                     measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
                     pickContext=ready?.pointPicks,viewMode=document.project.settings.viewMode,levelId=selectedLevel)
+                CanvasActionButton(if(panelsHidden)Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                    stringResource(if(panelsHidden)R.string.panel_show_panels else R.string.panel_hide_panels),
+                    {updateLayout(canvasLayout.copy(hideAll=!panelsHidden))},
+                    Modifier.align(if(precisionActive && settings.precisionPointer.side==PrecisionOffsetSide.ABOVE_RIGHT)Alignment.BottomEnd else Alignment.BottomStart)
+                        .padding(8.dp).testTag(if(panelsHidden)"canvas_show_panels"else"canvas_hide_panels"))
+                if(selectedIds.isNotEmpty() && document.elements.any {it.id in selectedIds && it.lockMode!=LockMode.NONE}) {
+                    val p=selectedBounds?.center()
+                    val at=p?.let {projectPrecisionPoint(it,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())}
+                    if(at!=null) Icon(Icons.Outlined.Lock,stringResource(R.string.presentation_locked),
+                        Modifier.offset {IntOffset((at.x+28*density).toInt(),(at.y-32*density).toInt())}.size(20.dp).testTag("selection_padlock"),
+                        tint=MaterialTheme.colorScheme.primary)
+                }
                 if (loading == SceneLoad.Loading) Text(stringResource(R.string.canvas_preparing), Modifier.align(Alignment.Center))
                 if (rendererFailed) Text(stringResource(R.string.canvas_renderer_error), Modifier.align(Alignment.Center).padding(32.dp))
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))

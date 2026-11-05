@@ -82,6 +82,7 @@ set_offset = proc('glUniform3f', None, C.c_int, C.c_float, C.c_float, C.c_float)
 set_offset(uniform(program, b'uOffset'), 0, 0, 0)
 matrix_uniform(uniform(program, b'uModel'), 1, 0, (C.c_float * 16)(*identity))
 set_dark(uniform(program, b'uSelection'), 0)
+set_dark(uniform(program, b'uOpacity'), 1)
 clear_color = proc('glClearColor', None, C.c_float, C.c_float, C.c_float, C.c_float)
 clear = proc('glClear', None, C.c_uint)
 clear_color(0,0,0,1)
@@ -101,6 +102,15 @@ reset(); line((0,0,0)); dark_pixel=pixel()
 assert min(dark_pixel[:3]) > 160, dark_pixel
 reset(); line((.9,.1,.1)); color_pixel=pixel()
 assert color_pixel[0] > 220 and color_pixel[1] < 40, color_pixel
+# Hidden-object outlines use one shader uniform, preserving the uploaded geometry.
+proc('glEnable', None, C.c_uint)(0x0BE2)
+proc('glBlendFunc', None, C.c_uint, C.c_uint)(0x0302,0x0303)
+set_dark(uniform(program,b'uOpacity'),.18)
+reset(); line((1,1,1)); ghost_pixel=pixel()
+assert all(40 <= value <= 50 for value in ghost_pixel[:3]), ghost_pixel
+set_dark(uniform(program,b'uOpacity'),1)
+proc('glDisable', None, C.c_uint)(0x0BE2)
+
 set_dark(uniform(program, b'uDark'), 0)
 plan=identity.copy(); plan[10]=0
 matrix(plan); reset(); line((0,1,0),1e10); plan_pixel=pixel()
@@ -297,7 +307,7 @@ assert front_pixel[1] > 240, front_pixel
 error=proc('glGetError', C.c_uint)()
 assert error == 0, hex(error)
 print('Mesa EGL/GLES2 smoke passed: production line/surface shaders, VBO layouts, dark contrast, material colours, plan elevation projection, hidden-line depth, lighting, transparency, inverse-transpose normals, XYZ tilt lighting and selected local resizing/XYZ rotation at distant origin, no GL errors.')
-print('Samples:', dark_pixel,color_pixel,plan_pixel,depth_pixel)
+print('Samples:', dark_pixel,color_pixel,plan_pixel,depth_pixel,'hidden-outline',ghost_pixel)
 
 print('Selected preview samples:', preview_samples)
 print('Surface samples:',material_pixel,lit_surface_pixel,unlit_surface_pixel,realistic_pixel,normal_pixel,transparent_pixel,hidden_pixel,front_pixel)

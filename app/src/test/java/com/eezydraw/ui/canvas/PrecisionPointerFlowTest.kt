@@ -161,6 +161,7 @@ class PrecisionPointerFlowTest {
         startProject("Confirmed measurement")
         compose.onNodeWithTag("toolbar_measure").performClick()
         compose.onNodeWithTag("toolbar_measure_distance").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         touch(.40f, .80f)
         assertElements(0)
         confirm()
@@ -188,6 +189,8 @@ class PrecisionPointerFlowTest {
             snap = initial.project.settings.snap.copy(enabled = false)))))
         compose.onNodeWithTag("toolbar_library").performClick()
         compose.onNodeWithTag("library_insert_precision-socket").performClick()
+        compose.onNodeWithTag("library_panel").assertIsDisplayed()
+        compose.onNodeWithTag("panel_library_collapse").performClick()
         compose.onNodeWithTag("library_panel").assertDoesNotExist()
         assertElements(0)
         val expected = expectedPlanPoint(finger(.40f, .80f), frame(), canvasSize())
@@ -210,6 +213,7 @@ class PrecisionPointerFlowTest {
         startProject("Raised socket reference")
         compose.onNodeWithTag("toolbar_measure").performClick()
         compose.onNodeWithTag("toolbar_reference_dimension").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         // Build the host around a safe raw aim point in the active tool layout.
         // Grid is enabled deliberately: a grid candidate must not replace the
         // component's mounting/insertion position with a floor-plane position.
@@ -233,7 +237,9 @@ class PrecisionPointerFlowTest {
         touch(.40f, .38f)
         confirm()
         assertElements(1)
-        touch(.40f, .90f)
+        // The bottom View toolbar is persistent, so use a free canvas position
+        // for the label rather than touching through that toolbar.
+        touch(.40f, .65f)
         confirm()
         awaitElements(2)
         compose.runOnIdle {

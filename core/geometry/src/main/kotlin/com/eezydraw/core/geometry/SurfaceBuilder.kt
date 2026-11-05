@@ -29,34 +29,56 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
     val materials = document.materials.associateBy { it.id }
     val library = document.libraryItems.associateBy { it.id }
     val collector = SurfaceCollector()
+    val presentation = ScenePresentation(document)
     for (element in document.elements) {
         if (elementIds != null && element.id !in elementIds) continue
         val layer = layers[element.layerId]
         val system = element.systemId?.let(systems::get)
-        if (layer?.visible == false || system?.visible == false) continue
+        val display=presentation.display(element)
+        if(display==ObjectDisplay.HIDDEN)continue
         val component = element.body as? ElementBody.Component
         val definition = component?.let { library[it.libraryItemId] }
         val material = (element.materialId ?: definition?.materialId)?.let(materials::get)
         val colour = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb ?: 0xFF6688AA
         val transform = SurfaceTransform(element.transform)
-        val emitter = SurfaceEmitter(transform) { a, b, c, na, nb, nc ->
-            collector.triangle(a, b, c, na, nb, nc, element.id.value, element.levelId?.value, colour)
+        val partSide=if(element.body is ElementBody.Wall)presentation.wallSide(element) else null
+        val roomCenter=presentation.roomCenter(element)
+        fun emitter(mode:ObjectDisplay,side:RoomSideRef?,surfaceTransform:SurfaceTransform=transform):SurfaceEmitter? {
+            if(mode==ObjectDisplay.HIDDEN || mode==ObjectDisplay.WIREFRAME)return null
+            return SurfaceEmitter(surfaceTransform) {a,b,c,na,nb,nc->
+                collector.triangle(a,b,c,na,nb,nc,element.id.value,element.levelId?.value,colour,mode,side,roomCenter)
+            }
         }
+        val emit=emitter(display,partSide)
+        if(emit==null && element.body !is ElementBody.Room)continue
         when (val body = element.body) {
-            is ElementBody.DrawingShape -> surfaceShape(body.shape, emitter)
-            is ElementBody.Room -> surfaceExtrusion(body.boundary, 0.0, body.ceilingHeight, emitter)
-            is ElementBody.Slab -> surfaceExtrusion(body.boundary, -body.thickness, 0.0, emitter)
-            is ElementBody.Wall -> surfaceWall(body, emitter)
-            is ElementBody.Route -> surfaceRoute(body, emitter)
+            is ElementBody.DrawingShape -> surfaceShape(body.shape, requireNotNull(emit))
+            is ElementBody.Room -> {
+                emit?.let {surfaceCap(body.boundary,0.0,true,it);surfaceCap(body.boundary,body.ceilingHeight,false,it)}
+                (listOf(body.boundary.outer)+body.boundary.holes).forEachIndexed {ringIndex,vertices->
+                    val ccw=surfaceArea(vertices)>0.0
+                    val forward=if(ringIndex==0)ccw else !ccw
+                    for(i in vertices.indices) {
+                        val side=RoomSideRef(element.id,i,if(ringIndex==0)null else ringIndex-1)
+                        if(presentation.linkedWall(element,side)!=null)continue
+                        val output=emitter(presentation.sideDisplay(element,side),side) ?: continue
+                        val a=vertices[i];val b=vertices[(i+1)%vertices.size]
+                        val p=Point3(a.x,a.y,0.0);val q=Point3(b.x,b.y,0.0)
+                        val r=Point3(b.x,b.y,body.ceilingHeight);val t=Point3(a.x,a.y,body.ceilingHeight)
+                        if(forward)output.quad(p,q,r,t)else output.quad(t,r,q,p)
+                    }
+                }
+            }
+            is ElementBody.Slab -> surfaceExtrusion(body.boundary, -body.thickness, 0.0, requireNotNull(emit))
+            is ElementBody.Wall -> surfaceWall(body, requireNotNull(emit))
+            is ElementBody.Route -> surfaceRoute(body, requireNotNull(emit))
             is ElementBody.Component -> if (definition == null || definition.geometry.isEmpty()) {
-                surfaceBox(body.size, emitter)
+                surfaceBox(body.size, requireNotNull(emit))
             } else {
                 val scale = Scale3(element.transform.scale.x * body.size.width / definition.defaultSize.width,
                     element.transform.scale.y * body.size.depth / definition.defaultSize.depth,
                     element.transform.scale.z * body.size.height / definition.defaultSize.height)
-                val instance = SurfaceEmitter(SurfaceTransform(element.transform.copy(scale = scale))) { a, b, c, na, nb, nc ->
-                    collector.triangle(a, b, c, na, nb, nc, element.id.value, element.levelId?.value, colour)
-                }
+                val instance=requireNotNull(emitter(display,partSide,SurfaceTransform(element.transform.copy(scale=scale))))
                 definition.geometry.forEach { surfaceShape(it, instance) }
             }
         }
@@ -292,7 +314,8 @@ private class SurfaceTransform(private val transform: Transform3) {
     }
 }
 
-private data class SurfaceKey(val x: Double, val y: Double, val z: Double, val id: String, val level: String?)
+private data class SurfaceKey(val x:Double,val y:Double,val z:Double,val id:String,val level:String?,
+    val display:ObjectDisplay,val roomSide:RoomSideRef?,val roomCenter:Point3?)
 
 private class SurfaceCollector {
     private val active = linkedMapOf<SurfaceKey, SurfaceBatch>()
@@ -300,7 +323,7 @@ private class SurfaceCollector {
     private var triangleCount = 0
     private var bounds: Bounds3? = null
 
-    fun triangle(a: Point3, b: Point3, c: Point3, na: Point3, nb: Point3, nc: Point3, id: String, level: String?, colour: Long) {
+    fun triangle(a: Point3, b: Point3, c: Point3, na: Point3, nb: Point3, nc: Point3, id:String,level:String?,colour:Long,display:ObjectDisplay=ObjectDisplay.NORMAL,roomSide:RoomSideRef?=null,roomCenter:Point3?=null) {
         val low = Point3(minOf(a.x, b.x, c.x), minOf(a.y, b.y, c.y), minOf(a.z, b.z, c.z))
         val high = Point3(maxOf(a.x, b.x, c.x), maxOf(a.y, b.y, c.y), maxOf(a.z, b.z, c.z))
         val span = maxOf(high.x - low.x, high.y - low.y, high.z - low.z)
@@ -309,27 +332,27 @@ private class SurfaceCollector {
             val ab = magnitude(minus(a, b)); val bc = magnitude(minus(b, c)); val ca = magnitude(minus(c, a))
             when (maxOf(ab, bc, ca)) {
                 ab -> { val mid = midpoint(a, b); val normal = unit(plus(na, nb))
-                    triangle(a, mid, c, na, normal, nc, id, level, colour); triangle(mid, b, c, normal, nb, nc, id, level, colour) }
+                    triangle(a, mid, c, na, normal, nc, id,level,colour,display,roomSide,roomCenter); triangle(mid, b, c, normal, nb, nc, id,level,colour,display,roomSide,roomCenter) }
                 bc -> { val mid = midpoint(b, c); val normal = unit(plus(nb, nc))
-                    triangle(a, b, mid, na, nb, normal, id, level, colour); triangle(a, mid, c, na, normal, nc, id, level, colour) }
+                    triangle(a, b, mid, na, nb, normal, id,level,colour,display,roomSide,roomCenter); triangle(a, mid, c, na, normal, nc, id,level,colour,display,roomSide,roomCenter) }
                 else -> { val mid = midpoint(c, a); val normal = unit(plus(nc, na))
-                    triangle(a, b, mid, na, nb, normal, id, level, colour); triangle(mid, b, c, normal, nb, nc, id, level, colour) }
+                    triangle(a, b, mid, na, nb, normal, id,level,colour,display,roomSide,roomCenter); triangle(mid, b, c, normal, nb, nc, id,level,colour,display,roomSide,roomCenter) }
             }
             return
         }
         require(triangleCount++ < MAX_SURFACE_TRIANGLES) { "Drawing exceeds the $MAX_SURFACE_TRIANGLES surface triangle limit." }
         val centre = Point3(low.x + (high.x - low.x) / 2, low.y + (high.y - low.y) / 2, low.z + (high.z - low.z) / 2)
         val key = SurfaceKey(floor(centre.x / SURFACE_TILE) * SURFACE_TILE,
-            floor(centre.y / SURFACE_TILE) * SURFACE_TILE, floor(centre.z / SURFACE_TILE) * SURFACE_TILE, id, level)
+            floor(centre.y / SURFACE_TILE) * SURFACE_TILE, floor(centre.z / SURFACE_TILE) * SURFACE_TILE,id,level,display,roomSide,roomCenter)
         var batch = active[key]
         if (batch == null) {
             require(active.size + complete.size < MAX_SURFACE_CHUNKS) { "Drawing exceeds the $MAX_SURFACE_CHUNKS surface batch limit." }
-            batch = SurfaceBatch(a, id, level)
+            batch = SurfaceBatch(a,id,level,display,roomSide,roomCenter)
             active[key] = batch
         } else if (batch.size == CHUNK_TRIANGLES) {
             complete.add(batch.finish())
             require(active.size + complete.size < MAX_SURFACE_CHUNKS) { "Drawing exceeds the $MAX_SURFACE_CHUNKS surface batch limit." }
-            batch = SurfaceBatch(a, id, level)
+            batch = SurfaceBatch(a,id,level,display,roomSide,roomCenter)
             active[key] = batch
         }
         batch.add(a, na, colour); batch.add(b, nb, colour); batch.add(c, nc, colour)
@@ -340,7 +363,8 @@ private class SurfaceCollector {
     fun finish() = SurfaceScene(complete + active.values.map { it.finish() }, bounds ?: Bounds3(Point3(), Point3()))
 }
 
-private class SurfaceBatch(private val origin: Point3, private val id: String, private val level: String?) {
+private class SurfaceBatch(private val origin:Point3,private val id:String,private val level:String?,
+    private val display:ObjectDisplay,private val roomSide:RoomSideRef?,private val roomCenter:Point3?) {
     private val data = FloatArray(CHUNK_TRIANGLES * 30)
     private var count = 0
     private var bounds: Bounds3? = null
@@ -357,7 +381,7 @@ private class SurfaceBatch(private val origin: Point3, private val id: String, p
         bounds = bounds?.let { unionBounds(it, pointBounds) } ?: pointBounds
     }
 
-    fun finish() = SurfaceChunk(origin, requireNotNull(bounds), level, data.copyOf(count), id)
+    fun finish() = SurfaceChunk(origin,requireNotNull(bounds),level,data.copyOf(count),id,display,roomSide,roomCenter)
 }
 
 private fun surfaceArea(points: List<Point2>): Double {

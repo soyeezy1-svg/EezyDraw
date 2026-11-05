@@ -33,6 +33,8 @@ data class CanvasFrame(
     /** Dimension labels/extension lines are overlaid for readability in filled views. */
     val measurementScene: DrawingScene? = null,
     val selectionMeasurementScene: DrawingScene? = null,
+    /** Presentation-only camera classification of the front sides of rooms. */
+    val autoXrayFrontWalls: Boolean = false,
 ) {
     init {
         require(gridSpacing.isFinite() && gridSpacing > 0)

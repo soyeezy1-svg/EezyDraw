@@ -243,6 +243,16 @@ fun SettingsScreen(
                     { update(current.copy(inputMode = it)) }, "settings_input",
                 )
             }
+            item {
+                SettingSwitch(stringResource(R.string.settings_auto_hide_panels), current.autoHidePanelsWhileDrawing,
+                    { update(current.copy(autoHidePanelsWhileDrawing=it)) }, "settings_auto_hide_panels")
+                Text(stringResource(R.string.settings_auto_hide_panels_help), style=MaterialTheme.typography.bodySmall)
+            }
+            item {
+                SettingSwitch(stringResource(R.string.settings_lock_walls), current.lockWallsByDefault,
+                    { update(current.copy(lockWallsByDefault=it)) }, "settings_lock_walls")
+                Text(stringResource(R.string.settings_lock_walls_help), style=MaterialTheme.typography.bodySmall)
+            }
             item { SectionHeading(stringResource(R.string.settings_precision_pointer_heading)) }
             item {
                 SettingSwitch(stringResource(R.string.settings_precision_pointer), current.precisionPointer.enabled,

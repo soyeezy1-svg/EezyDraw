@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="presentation_select_properties">Select an object to view its properties.</string>
+    <string name="presentation_locked">Object locked</string>
+</resources>

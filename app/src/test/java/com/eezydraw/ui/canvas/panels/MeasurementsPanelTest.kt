@@ -150,6 +150,48 @@ class MeasurementsPanelTest {
         compose.onNodeWithText("A X 0.00 MM Y 0.00 MM Z 11200.00 MM").performScrollTo().assertExists()
     }
 
+    @Test
+    fun lockedMeasurementsRemainViewableButNumericEditsAndDeleteRespectTheLockMode() {
+        var document by mutableStateOf(fixture().let {doc->doc.copy(elements=doc.elements.map {if(it.id==measurementId)it.withLock(LockMode.ALL) else it})})
+        val edits=mutableListOf<Edit>()
+        val deleted=mutableListOf<Set<ElementId>>()
+        compose.setContent {EezyDrawTheme {Box(Modifier.size(700.dp,700.dp)) {
+            MeasurementsPanel(document,{},onEdit={id,a,b,label,name,coords,affl->edits+=Edit(id,a,b,label,name,coords,affl)},
+                onDelete=deleted::add,onDismiss={})
+        }}}
+        compose.onNodeWithTag("measurement_delete_socket-offset").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_edit_socket-offset").performScrollTo().performClick()
+        compose.onNodeWithTag("measurement_locked_message").performScrollTo().assertTextContains("Object is locked.",substring=true)
+        compose.onNodeWithTag("measurement_name").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_0_X").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_apply").assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.editing_cancel)).performClick()
+        compose.runOnIdle {document=document.copy(elements=document.elements.map {if(it.id==measurementId)it.withLock(LockMode.POSITION_ONLY) else it})}
+        compose.onNodeWithTag("measurement_delete_socket-offset").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("measurement_edit_socket-offset").performScrollTo().performClick()
+        compose.onNodeWithTag("measurement_0_X").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_name").performScrollTo().assertIsEnabled().performTextReplacement("Named while position locked")
+        compose.onNodeWithTag("measurement_apply").assertIsEnabled().performClick()
+        assertEquals(1,edits.size)
+        assertEquals(Point3(0.0,0.0,11.2),edits.single().start)
+        assertEquals(Point3(.3,0.0,10.0),edits.single().end)
+        assertTrue(deleted.isEmpty())
+    }
+
+    @Test
+    fun layerLockedMeasurementUsesReadOnlyFieldsEvenWithoutAnObjectLock() {
+        val original=fixture()
+        val document=original.copy(layers=original.layers.map {it.copy(locked=true)})
+        compose.setContent {EezyDrawTheme {Box(Modifier.size(700.dp,700.dp)) {
+            MeasurementsPanel(document,{},onEdit={_,_,_,_,_,_,_->error("A read-only editor cannot apply")},onDelete={},onDismiss={})
+        }}}
+        compose.onNodeWithTag("measurement_delete_socket-offset").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_edit_socket-offset").performScrollTo().performClick()
+        compose.onNodeWithTag("measurement_locked_message").performScrollTo().assertExists()
+        compose.onNodeWithTag("measurement_1_Z").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("measurement_apply").assertIsNotEnabled()
+    }
+
     private fun fixture(detailed: Boolean = false): ProjectDocument {
         val socket = Element(ElementId("socket"), projectId, layerId,
             ElementBody.Component(LibraryItemId("socket-definition"), Size3(.08, .04, .08)),

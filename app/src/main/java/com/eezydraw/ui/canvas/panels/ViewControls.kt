@@ -53,6 +53,7 @@ fun ViewControls(
     onSystemVisibility: (SystemId, Boolean) -> Unit,
     onMeasurementsVisibility: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenVisibility:(()->Unit)?=null,
 ) {
     var modesOpen by rememberSaveable { mutableStateOf(false) }
     var visibilityOpen by rememberSaveable { mutableStateOf(false) }
@@ -73,7 +74,7 @@ fun ViewControls(
             Text(stringResource(viewModeLabel(mode)), style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(horizontal = 4.dp))
             CanvasActionButton(Icons.Outlined.Layers, stringResource(R.string.panel_visibility),
-                { visibilityOpen = true }, Modifier.testTag("canvas_visibility"))
+                { if(onOpenVisibility!=null)onOpenVisibility() else visibilityOpen = true }, Modifier.testTag("canvas_visibility"))
         }
     }
     if (visibilityOpen) VisibilityPanel(document, onLayerVisibility, onSystemVisibility,
