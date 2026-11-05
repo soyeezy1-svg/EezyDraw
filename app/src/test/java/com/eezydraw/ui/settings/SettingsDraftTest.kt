@@ -4,6 +4,7 @@ import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.ElevationReference
 import com.eezydraw.core.model.ElevationSetting
 import com.eezydraw.core.model.LengthUnit
+import com.eezydraw.core.model.PrecisionPointerSettings
 import com.eezydraw.core.model.ProjectSettings
 import com.eezydraw.core.model.RouteKind
 import com.eezydraw.core.model.SnapSettings
@@ -99,4 +100,34 @@ class SettingsDraftTest {
         assertEquals(90, restored.projectDefaults.rotationSnapDegrees)
         assertEquals(.1, restored.projectDefaults.snap.gridSpacing, 1e-12)
     }
+    @Test
+    fun precisionNudgeUsesDisplayUnitsAndIgnoresInvalidHiddenCustomStep() {
+        val initial=AppSettings(projectDefaults=ProjectSettings(lengthUnit=LengthUnit.INCHES),
+            precisionPointer=PrecisionPointerSettings(nudgeStepMetres=.0254))
+        val draft=SettingsDraft.from(initial).input("pointer_offset","96").input("pointer_zoom","4")
+        assertEquals("1",draft.inputs["pointer_nudge"])
+        val metres=draft.changeUnits(LengthUnit.METRES)
+        assertEquals(.0254,metres.inputs.getValue("pointer_nudge").toDouble(),1e-12)
+        assertEquals(.0254,metres.toSettings()!!.precisionPointer.nudgeStepMetres!!,1e-12)
+        assertEquals(96.0,metres.toSettings()!!.precisionPointer.offsetDp,0.0)
+        val invalid=metres.input("pointer_nudge","-")
+        assertTrue("pointer_nudge" in invalid.errors())
+        assertNull(invalid.toSettings())
+        val grid=invalid.copy(settings=invalid.settings.copy(precisionPointer=initial.precisionPointer.copy(nudgeStepMetres=null)))
+        assertNull(grid.toSettings()!!.precisionPointer.nudgeStepMetres)
+    }
+
+    @Test
+    fun invalidPrecisionPointerDraftDoesNotConstructAnInvalidModel() {
+        for((key,value) in listOf("pointer_offset" to "-", "pointer_offset" to "241",
+            "pointer_zoom" to "1.9", "pointer_zoom" to "NaN")) {
+            val draft=SettingsDraft.from(AppSettings()).input(key,value)
+            assertTrue(key in draft.errors())
+            assertNull(draft.toSettings())
+        }
+        val tiny=SettingsDraft.from(AppSettings(precisionPointer=PrecisionPointerSettings(nudgeStepMetres=.01)))
+            .input("pointer_nudge","4.9e-324")
+        assertTrue("pointer_nudge" in tiny.errors())
+    }
+
 }

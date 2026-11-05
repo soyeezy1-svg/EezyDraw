@@ -24,6 +24,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.eezydraw.R
 import com.eezydraw.core.editing.readProperties
 import com.eezydraw.core.editing.resizeFrame
+import com.eezydraw.core.model.AppSettings
+import com.eezydraw.core.model.PrecisionPointerSettings
 import com.eezydraw.core.model.Element
 import com.eezydraw.core.model.ElementBody
 import com.eezydraw.core.model.Point2
@@ -63,7 +65,9 @@ class CanvasEditingFlowTest {
     private val renderedFrame = AtomicReference<CanvasFrame>()
 
     @Before fun prepareModel() {
-        repositories = TestAppRepositories(context)
+        // These regressions exercise the optional direct-tap workflow.
+        repositories = TestAppRepositories(context, AppSettings(autosaveIntervalSeconds = 0,
+            precisionPointer = PrecisionPointerSettings(enabled = false)))
         model = repositories.newViewModel()
     }
 

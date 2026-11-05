@@ -151,7 +151,9 @@ class ProjectStorageTest {
         assertEquals(AppSettings(), settingsRepository.settings.first())
         val chosen = AppSettings(theme = ThemeMode.DARK, inputMode = InputMode.STYLUS, undoLimit = 250,
             backupEnabled = false, showAutosaveNotification = true, bodyDragMovesSelection = true,
-            showDetailedMeasurement = true, keepToolActiveAfterPlacing = true)
+            showDetailedMeasurement = true, keepToolActiveAfterPlacing = true,
+            precisionPointer=PrecisionPointerSettings(enabled=false,offsetDp=120.0,side=PrecisionOffsetSide.ABOVE_RIGHT,
+                magnifier=false,magnifierZoom=4.0,nudgeStepMetres=.025,hapticFeedback=false))
         settingsRepository.save(chosen)
         database.close()
         database = open()

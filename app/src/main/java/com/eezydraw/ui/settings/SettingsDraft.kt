@@ -23,7 +23,7 @@ internal data class SettingsDraft(val settings: AppSettings, val inputs: Map<Str
         return copy(
             settings = settings.copy(projectDefaults = settings.projectDefaults.copy(lengthUnit = unit)),
             inputs = inputs.mapValues { (key, text) ->
-                if (key == "grid" || key == "tolerance" || key.startsWith("height_")) {
+                if (key == "grid" || key == "tolerance" || key == "pointer_nudge" || key.startsWith("height_")) {
                     text.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { formatNumber(it * conversion) } ?: text
                 } else text
             },
@@ -50,6 +50,14 @@ internal data class SettingsDraft(val settings: AppSettings, val inputs: Map<Str
             val canonical = value?.times(if (key == "line_weight") 1.0 else settings.projectDefaults.lengthUnit.metresPerUnit)
             if (canonical == null || !canonical.isFinite() || canonical <= 0) add(key)
         }
+        val pointerOffset = inputs["pointer_offset"]?.toDoubleOrNull()
+        if (pointerOffset == null || !pointerOffset.isFinite() || pointerOffset !in 24.0..240.0) add("pointer_offset")
+        val pointerZoom = inputs["pointer_zoom"]?.toDoubleOrNull()
+        if (pointerZoom == null || !pointerZoom.isFinite() || pointerZoom !in 2.0..4.0) add("pointer_zoom")
+        if (settings.precisionPointer.nudgeStepMetres != null) {
+            val step = inputs["pointer_nudge"]?.toDoubleOrNull()?.times(settings.projectDefaults.lengthUnit.metresPerUnit)
+            if (step == null || !step.isFinite() || step <= 0.0) add("pointer_nudge")
+        }
         val sensitivity = inputs["gesture"]?.toDoubleOrNull()
         if (sensitivity == null || !sensitivity.isFinite() || sensitivity !in 0.25..4.0) add("gesture")
         RouteKind.entries.forEach { kind ->
@@ -70,6 +78,12 @@ internal data class SettingsDraft(val settings: AppSettings, val inputs: Map<Str
             gestureSensitivity = inputs.getValue("gesture").toDouble(),
             defaultLineWeightMm = inputs.getValue("line_weight").toDouble(),
             fileNamingPattern = inputs.getValue("file_naming"),
+            precisionPointer = settings.precisionPointer.copy(
+                offsetDp = inputs.getValue("pointer_offset").toDouble(),
+                magnifierZoom = inputs.getValue("pointer_zoom").toDouble(),
+                nudgeStepMetres = if (settings.precisionPointer.nudgeStepMetres == null) null
+                    else inputs.getValue("pointer_nudge").toDouble() * factor,
+            ),
             projectDefaults = defaults.copy(
                 decimalPlaces = inputs.getValue("precision").toInt(),
                 snap = defaults.snap.copy(
@@ -99,6 +113,9 @@ internal data class SettingsDraft(val settings: AppSettings, val inputs: Map<Str
                 put("gesture", formatNumber(settings.gestureSensitivity))
                 put("line_weight", formatNumber(settings.defaultLineWeightMm))
                 put("file_naming", settings.fileNamingPattern)
+                put("pointer_offset", formatNumber(settings.precisionPointer.offsetDp))
+                put("pointer_zoom", formatNumber(settings.precisionPointer.magnifierZoom))
+                put("pointer_nudge", formatNumber((settings.precisionPointer.nudgeStepMetres ?: defaults.snap.gridSpacing) / factor))
                 RouteKind.entries.forEach { kind ->
                     put("height_${kind.name}", formatNumber((defaults.defaultRouteElevations[kind]?.value ?: 2.5) / factor))
                 }
@@ -114,9 +131,10 @@ internal data class SettingsDraft(val settings: AppSettings, val inputs: Map<Str
             },
             restore = { saved ->
                 val value = Json.parseToJsonElement(saved).jsonObject
+                val restoredSettings = Json.decodeFromString<AppSettings>(value.getValue("settings").jsonPrimitive.content)
                 SettingsDraft(
-                    Json.decodeFromString<AppSettings>(value.getValue("settings").jsonPrimitive.content),
-                    Json.decodeFromString<Map<String, String>>(value.getValue("inputs").jsonPrimitive.content),
+                    restoredSettings,
+                    from(restoredSettings).inputs + Json.decodeFromString<Map<String, String>>(value.getValue("inputs").jsonPrimitive.content),
                 )
             },
         )

@@ -40,6 +40,8 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -89,6 +91,8 @@ private sealed interface SceneLoad {
         val measurementScene: DrawingScene,
         val selectedMeasurementScene: DrawingScene?,
         val detailedMeasurements:Boolean,
+        val pointPicks:PointPickContext,
+        val componentReferences:Map<ElementId,Point3>,
     ) : SceneLoad
     data object Failed : SceneLoad
 }
@@ -102,6 +106,8 @@ private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean 
 
 private enum class MeasurementMode { NONE, DISTANCE, REFERENCE }
 private data class MeasurementPick(val point: Point3,val elementId: ElementId? = null)
+private data class PointInputSnapshot(val points:List<Point3>,val measurements:List<MeasurementPick>,val anchor:Point2?,val candidate:PrecisionPick?)
+private data class PrecisionSnapKey(val mode:SnapMode?,val element:ElementId?,val wallEdge:Boolean,val discretePoint:Point3?)
 private fun SurfaceScene.partition(ids: Set<ElementId>,selected: Boolean): SurfaceScene {
     val matching=chunks.filter { (ElementId(it.elementId) in ids)==selected }
     val bounds=matching.map {it.bounds}.reduceOrNull {a,b->Bounds3(
@@ -158,6 +164,12 @@ fun DrawingCanvasScreen(
     )) { mutableStateOf(ToolOptions()) }
     var points by remember(document.project.id.value) { mutableStateOf(emptyList<Point3>()) }
     var pointerWorld by remember {mutableStateOf<Point3?>(null)}
+    var precisionPick by remember(document.project.id) {mutableStateOf<PrecisionPick?>(null)}
+    var precisionFinger by remember {mutableStateOf<Point2?>(null)}
+    var precisionDragging by remember {mutableStateOf(false)}
+    var precisionSnap by remember {mutableStateOf<PrecisionSnapKey?>(null)}
+    var pointUndo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
+    var pointRedo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
     var pendingLibrary by rememberSaveable {mutableStateOf<String?>(null)}
     var placedToken by remember {mutableIntStateOf(0)}
     var placedFeedback by remember {mutableStateOf(false)}
@@ -189,6 +201,7 @@ fun DrawingCanvasScreen(
         settings=document.project.settings.copy(showDetailedMeasurements=settings.showDetailedMeasurement)))}
     val selectedIds = editor?.selectedIds ?: emptySet()
     val density = LocalDensity.current.density
+    val haptics=LocalHapticFeedback.current
     val selectedLevel = if (is3D) orbitLevel else level
     val floorZ = document.levels.find { it.id.value == selectedLevel }?.elevation ?: 0.0
     val snapSettings = document.project.settings.snap
@@ -226,6 +239,10 @@ fun DrawingCanvasScreen(
     val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE
     val placementActive=tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
     val latestPlacementActive=rememberUpdatedState(placementActive)
+    val precisionActive=placementActive && settings.precisionPointer.enabled
+    val latestPrecisionActive=rememberUpdatedState(precisionActive)
+    val canPointUndo=pointUndo.isNotEmpty()
+    val canPointRedo=pointRedo.isNotEmpty()
 
     LaunchedEffect(selectedIds) {
         gizmoMode=GizmoMode.MOVE;propertiesOpen=false;rotationAngle=null
@@ -268,7 +285,9 @@ fun DrawingCanvasScreen(
                 SceneLoad.Ready(document, selectedIds, scene, main, selected,
                     if (sameGeometry) previous!!.snaps else SnapEngine(index),
                     if (sameGeometry) previous!!.picker else EditorPicker(document, scene, index),resize,
-                    MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement)
+                    MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement,
+                    if(sameGeometry)previous!!.pointPicks else PointPickContext(document,scene),
+                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation})
             }
             prepared = compiled
             loading = compiled
@@ -288,13 +307,40 @@ fun DrawingCanvasScreen(
         // Commands are synchronous. A rejected or numerically unchanged drag has no new scene.
         if (latestDocument.value == before) { preview = null; waitingForCommit = null }
     }
+    fun inputSnapshot()=PointInputSnapshot(points,measurementPicks,anchor,precisionPick)
+    fun clearPrecisionCandidate() {precisionPick=null;precisionFinger=null;precisionDragging=false;precisionSnap=null}
+    fun retainInput(before:PointInputSnapshot) {
+        pointUndo=(pointUndo+before).takeLast(settings.undoLimit);pointRedo=emptyList()
+    }
+    fun applyPrecisionPick(pick:PrecisionPick,feedback:Boolean=true) {
+        precisionPick=pick;pointerWorld=pick.point
+        cursor.value=SnapResult(Point2(pick.point.x,pick.point.y),pick.mode,pick.elementId?.value)
+        val key=if(pick.mode==null && !pick.wallEdge && pick.elementId==null)null else PrecisionSnapKey(pick.mode,pick.elementId,pick.wallEdge,
+            pick.point.takeIf {pick.mode in setOf(SnapMode.GRID,SnapMode.ENDPOINT,SnapMode.MIDPOINT,SnapMode.INTERSECTION) || pick.elementId!=null && !pick.wallEdge && pick.mode==null})
+        if(feedback && key!=null && key!=precisionSnap && settings.precisionPointer.hapticFeedback)
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        precisionSnap=key
+    }
+    fun restoreInput(snapshot:PointInputSnapshot) {
+        points=snapshot.points;measurementPicks=snapshot.measurements
+        anchorX=snapshot.anchor?.x;anchorY=snapshot.anchor?.y
+        clearPrecisionCandidate()
+        snapshot.candidate?.let {candidate->
+            projectPrecisionPoint(candidate.point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())?.let {screen->
+                if(screen.x in 0.0..size.width.toDouble() && screen.y in 0.0..size.height.toDouble())applyPrecisionPick(candidate.copy(screen=screen),feedback=false)
+            }
+        }
+        pointerWorld=precisionPick?.point ?: snapshot.points.lastOrNull() ?: snapshot.measurements.lastOrNull()?.point
+    }
     fun cancelConstruction() {
         points = emptyList(); preview = null; waitingForCommit = null
+        pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         measurementPicks=emptyList();measurementMode=MeasurementMode.NONE
         pendingLibrary=null;tool=DrawingTool.SELECT;rotationAngle=null
         anchorX = null; anchorY = null
     }
     fun placed() {
+        pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
         propertiesOpen=false;measurementsOpen=false;libraryOpen=false;toolsExpanded=false;gizmoMode=GizmoMode.MOVE
         placedToken++
@@ -337,22 +383,23 @@ fun DrawingCanvasScreen(
     }
     val onCanvasTap = rememberUpdatedState<(Offset) -> Unit>({ position ->
         val actions = latestEditor.value
+        val confirmed=if(precisionActive)precisionPick else null
         if(actions!=null && !busy && pendingLibrary!=null) {
-            val at=pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
+            val at=confirmed?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
             if(actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed()
         } else if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
-            val sceneHit=if(is3D)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
+            val sceneHit=if(is3D && confirmed==null)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
                 position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density) else null
-            val picked=if(is3D)ready.picker.pick3D(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,selectedLevel) ?: sceneHit?.elementId
+            val picked=confirmed?.elementId ?: if(is3D)ready.picker.pick3D(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,selectedLevel) ?: sceneHit?.elementId
                 else ready.picker.pickPlan(viewport.screenToWorld(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble()),14.0*density/viewport.pixelsPerMetre,selectedLevel)
-            val raw=if(is3D)sceneHit?.point ?: pointerWorld
+            val raw=confirmed?.point ?: if(is3D)sceneHit?.point ?: pointerWorld
                 else cursor.value?.point?.let {Point3(it.x,it.y,floorZ)}
             raw?.let {point->
                 if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty() && picked==null) toolError="Tap a visible object for the first reference."
                 else if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==2) commitMeasurement(measurementPicks,point)
                 else {
-                    var at=if(measurementMode==MeasurementMode.REFERENCE && picked!=null)measurementPointForElement(document,picked,point) else point
-                    if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==1 && picked==null && grid) {
+                    var at=if(confirmed==null && measurementMode==MeasurementMode.REFERENCE && picked!=null)measurementPointForElement(document,picked,point) else point
+                    if(confirmed==null && measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==1 && picked==null && grid) {
                         val first=measurementPicks[0].point; val spacing=snapSettings.gridSpacing
                         val gx=kotlin.math.round(point.x/spacing)*spacing;val gy=kotlin.math.round(point.y/spacing)*spacing
                         at=if(abs(point.x-gx)<=abs(point.y-gy))Point3(gx,first.y,floorZ) else Point3(first.x,gy,floorZ)
@@ -381,7 +428,7 @@ fun DrawingCanvasScreen(
             (if(is3D)pointerWorld?.let {Point2(it.x,it.y)} else cursor.value?.point)?.let { point ->
                 if (points.size >= 512) toolError = "Finish this shape before adding more than 512 points."
                 else {
-                    val picks = points + Point3(point.x, point.y, latestFloorZ.value)
+                    val picks = points + (confirmed?.point ?: Point3(point.x, point.y, latestFloorZ.value))
                     points = picks
                     anchorX = point.x; anchorY = point.y
                     if (options.useDefaultDimensions && supportsDefaultPlacement(latestTool.value) ||
@@ -422,6 +469,79 @@ fun DrawingCanvasScreen(
             pointerWorld=if(measurementMode==MeasurementMode.NONE)point.copy(z=floorZ) else point
         }
     })
+    val updatePrecisionPointer=rememberUpdatedState<(Offset,Boolean)->Unit>({position,stylus->
+        if(size.width>0 && size.height>0 && latestGeometryMatches.value) {
+            val context=latestReady.value?.pointPicks
+            if(context!=null) {
+                val finger=Point2(position.x.toDouble(),position.y.toDouble())
+                val target=offsetCrosshair(finger,size.width.toDouble(),size.height.toDouble(),density.toDouble(),latestSettings.value.precisionPointer,stylus)
+                precisionFinger=finger
+                val reference=measurementPicks.firstOrNull()?.point ?: points.lastOrNull()
+                var picked=context.pick(target,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),floorZ,
+                    selectedLevel,snapSettings,reference,14.0*density)
+                if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.size<2 && picked.elementId==null) {
+                    val picker=latestReady.value?.picker
+                    val id=if(is3D)picker?.pick3D(orbit,picked.screen.x,picked.screen.y,size.width.toDouble(),size.height.toDouble(),14.0*density,selectedLevel)
+                        else picker?.pickPlan(Point2(picked.point.x,picked.point.y),14.0*density/viewport.pixelsPerMetre,selectedLevel)
+                    latestReady.value?.componentReferences?.get(id)?.let {mountingPoint->
+                        projectPrecisionPoint(mountingPoint,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())?.let {projected->
+                            if(projected.x in 0.0..size.width.toDouble() && projected.y in 0.0..size.height.toDouble())
+                                picked=PrecisionPick(mountingPoint,projected,elementId=id)
+                        }
+                    }
+                }
+                applyPrecisionPick(picked)
+            }
+        }
+    })
+    fun confirmPrecisionPoint() {
+        val pick=precisionPick ?: return
+        if(busy || !geometryMatches)return
+        val before=inputSnapshot();val token=placedToken
+        onCanvasTap.value(Offset(pick.screen.x.toFloat(),pick.screen.y.toFloat()))
+        if(token==placedToken && (before.points!=points || before.measurements!=measurementPicks))retainInput(before)
+        clearPrecisionCandidate()
+    }
+    fun nudgePrecision(dx:Int,dy:Int) {
+        val pick=precisionPick ?: return
+        if(busy)return
+        val step=settings.precisionPointer.nudgeStepMetres ?: snapSettings.gridSpacing
+        try {
+            val next=nudgePrecisionPoint(pick.point,dx,dy,step,viewport,orbit,is3D)
+            val screen=projectPrecisionPoint(next,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble()) ?: return
+            if(screen.x !in 0.0..size.width.toDouble() || screen.y !in 0.0..size.height.toDouble())return
+            retainInput(inputSnapshot())
+            // A nudge is an exact SI displacement, rather than another approximate finger pick.
+            fun aligned(value:Double)=abs(value/snapSettings.gridSpacing-kotlin.math.round(value/snapSettings.gridSpacing))<1e-7
+            val gridPoint=snapSettings.enabled && SnapMode.GRID in snapSettings.modes && aligned(next.x) && aligned(next.y) &&
+                (!is3D || abs(next.z-floorZ)<1e-7 || aligned(next.z))
+            applyPrecisionPick(PrecisionPick(next,screen,if(gridPoint)SnapMode.GRID else null))
+        } catch(_:IllegalArgumentException) { /* Invalid or unprojectable nudges leave the retained point intact. */ }
+    }
+    fun undoInputOrDocument() {
+        if(pointUndo.isNotEmpty()) {
+            val previous=pointUndo.last();pointRedo=(pointRedo+inputSnapshot()).takeLast(settings.undoLimit)
+            pointUndo=pointUndo.dropLast(1);restoreInput(previous)
+        } else {cancelConstruction();editor?.onUndo?.invoke()}
+    }
+    fun redoInputOrDocument() {
+        if(pointRedo.isNotEmpty()) {
+            val next=pointRedo.last();pointUndo=(pointUndo+inputSnapshot()).takeLast(settings.undoLimit)
+            pointRedo=pointRedo.dropLast(1);restoreInput(next)
+        } else {cancelConstruction();editor?.onRedo?.invoke()}
+    }
+    LaunchedEffect(viewport,orbit,is3D,size) {
+        precisionPick?.let {pick->
+            val screen=projectPrecisionPoint(pick.point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())
+            if(screen==null || screen.x !in 0.0..size.width.toDouble() || screen.y !in 0.0..size.height.toDouble())clearPrecisionCandidate()
+            else precisionPick=pick.copy(screen=screen)
+        }
+    }
+    LaunchedEffect(document.elements,document.layers,document.systems,document.libraryItems,selectedLevel,snapSettings,settings.precisionPointer.enabled) {
+        // A pending snap must never confirm a host that was hidden/removed while the tool stayed active.
+        clearPrecisionCandidate()
+        pointUndo=pointUndo.map {it.copy(candidate=null)};pointRedo=pointRedo.map {it.copy(candidate=null)}
+    }
     fun beginTool(next:DrawingTool) {
         cancelConstruction();tool=next;probe=false;zoomWindow=false;gizmoMode=GizmoMode.MOVE
         if(next!=DrawingTool.SELECT) {
@@ -449,7 +569,7 @@ fun DrawingCanvasScreen(
     }
     fun finishTool() {
         if(tool!=DrawingTool.SELECT && points.size>=tool.minimumPoints && points.isNotEmpty())finishConstruction()
-        else if(measurementPicks.size>=2)commitMeasurement(measurementPicks,pointerWorld ?: measurementPicks.last().point)
+        else if(!precisionActive && measurementPicks.size>=2)commitMeasurement(measurementPicks,pointerWorld ?: measurementPicks.last().point)
         else cancelConstruction()
     }
     val activeLabel=when {
@@ -473,9 +593,9 @@ fun DrawingCanvasScreen(
                 event.key == Key.Escape -> { cancelConstruction(); tool = DrawingTool.SELECT; true }
                 event.isCtrlPressed && event.key == Key.C -> { actions.onCopy(); true }
                 event.isCtrlPressed && event.key == Key.V -> { cancelConstruction(); actions.onPaste(); true }
-                event.isCtrlPressed && event.key == Key.Z && event.isShiftPressed -> { cancelConstruction(); actions.onRedo(); true }
-                event.isCtrlPressed && event.key == Key.Z -> { cancelConstruction(); actions.onUndo(); true }
-                event.isCtrlPressed && event.key == Key.Y -> { cancelConstruction(); actions.onRedo(); true }
+                event.isCtrlPressed && event.key == Key.Z && event.isShiftPressed -> { redoInputOrDocument(); true }
+                event.isCtrlPressed && event.key == Key.Z -> { undoInputOrDocument(); true }
+                event.isCtrlPressed && event.key == Key.Y -> { redoInputOrDocument(); true }
                 event.key == Key.Delete || event.key == Key.Backspace -> { cancelConstruction(); actions.onDelete(); true }
                 else -> false
             }
@@ -517,8 +637,8 @@ fun DrawingCanvasScreen(
                     CanvasActionButton(Icons.Outlined.FitScreen,stringResource(R.string.canvas_extents),{fit()},Modifier.testTag("canvas_extents"),enabled=geometryMatches)
                     CanvasActionButton(Icons.Outlined.CropFree,stringResource(R.string.canvas_window),{zoomWindow=!zoomWindow;window.value=null},Modifier.testTag("canvas_zoom_window"),selected=zoomWindow)
                     editor?.let {actions->
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{cancelConstruction();actions.onUndo()},Modifier.testTag("view_undo"),enabled=actions.canUndo)
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{cancelConstruction();actions.onRedo()},Modifier.testTag("view_redo"),enabled=actions.canRedo)
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{undoInputOrDocument()},Modifier.testTag("view_undo"),enabled=actions.canUndo || canPointUndo)
+                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{redoInputOrDocument()},Modifier.testTag("view_redo"),enabled=actions.canRedo || canPointRedo)
                         ViewControls(renderDocument,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility)
                     }
                     CanvasActionButton(Icons.Outlined.Save,stringResource(R.string.canvas_save),onSave,Modifier.testTag("canvas_save"),enabled=dirty && !busy)
@@ -535,6 +655,7 @@ fun DrawingCanvasScreen(
                 }
                 if(placementActive) PlacementBanner(activeLabel,
                     when {
+                        precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
                         pendingLibrary!=null || options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
                         measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_measure_pick_first)
                         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.canvas_measure_pick_second)
@@ -543,7 +664,7 @@ fun DrawingCanvasScreen(
                         measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.canvas_reference_place_label)
                         points.isEmpty()->stringResource(R.string.placement_tap_to_start,activeLabel)
                         else->stringResource(R.string.placement_add_points)
-                    },canDone=true,onCancel={cancelConstruction()},onDone={finishTool()})
+                    },canDone=true,onCancel={cancelConstruction()},onDone={finishTool()},showCancel=!precisionActive)
                 if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
             }
             Box(
@@ -571,7 +692,9 @@ fun DrawingCanvasScreen(
                             val bodyPivot=latestBounds.value?.center() ?: Point3()
                             var bodyCancelled=false
                             val probing = probe || (down.type == PointerType.Stylus && latestSettings.value.inputMode == InputMode.STYLUS)
-                            updatePointer.value(first)
+                            val precise=latestPrecisionActive.value && !zoomWindow
+                            val pen=down.type==PointerType.Stylus || down.type==PointerType.Eraser || down.type==PointerType.Mouse
+                            if(precise) {precisionDragging=true;updatePrecisionPointer.value(first,pen)} else updatePointer.value(first)
                             if (zoomWindow) window.value = first to first
                             down.consume()
                             try { while (true) {
@@ -597,6 +720,8 @@ fun DrawingCanvasScreen(
                                         } else viewport = viewport.zoomWindow(first.x.toDouble(), first.y.toDouble(), position.x.toDouble(), position.y.toDouble(), size.width.toDouble(), size.height.toDouble())
                                         window.value = null
                                         zoomWindow = false
+                                    } else if(precise && !multi) {
+                                        updatePrecisionPointer.value(position,pen)
                                     } else if (!multi && moved < viewConfiguration.touchSlop) {
                                         updatePointer.value(position)
                                         onCanvasTap.value(position)
@@ -610,6 +735,7 @@ fun DrawingCanvasScreen(
                                 val sensitivity = latestSettings.value.gestureSensitivity
                                 if (pressed >= 2) {
                                     multi = true
+                                    precisionDragging=false;precisionFinger=null
                                     cameraOrbiting=is3D
                                     if(bodyMove) {bodyCancelled=true;preview=null}
                                     val zoom = event.calculateZoom().toDouble().pow(sensitivity)
@@ -629,16 +755,17 @@ fun DrawingCanvasScreen(
                                     else orbit.orbit(-pan.x*.006*sensitivity, pan.y*.006*sensitivity)
                                 }
                                 else if (!probing) viewport = viewport.pan(pan.x*sensitivity, pan.y*sensitivity)
-                                updatePointer.value(position)
+                                if(precise && !multi)updatePrecisionPointer.value(position,pen)
+                                else if(!precise)updatePointer.value(position)
                                 event.changes.forEach { it.consume() }
-                            } } finally {cameraOrbiting=false}
+                            } } finally {cameraOrbiting=false;precisionDragging=false;precisionFinger=null}
                         }
                     }
                     .pointerInput(document.project.id) {
                         awaitPointerEventScope {
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Final)
-                                if (event.type == PointerEventType.Move && event.changes.none { it.pressed }) {
+                                if (!latestPrecisionActive.value && event.type == PointerEventType.Move && event.changes.none { it.pressed }) {
                                     event.changes.firstOrNull()?.let { updatePointer.value(it.position) }
                                 }
                             }
@@ -740,11 +867,11 @@ fun DrawingCanvasScreen(
                 if(!panelsHidden) editor?.let { actions ->
                     if(selectedIds.isEmpty() || placementActive) panelStates.SaveableStateProvider("tools") {
                     ToolsPanel(tool,options,document.project.settings.lengthUnit,selectedIds.size,
-                        actions.canUndo,actions.canRedo,actions.canPaste,points.size >= tool.minimumPoints && points.isNotEmpty(),
+                        actions.canUndo || canPointUndo,actions.canRedo || canPointRedo,actions.canPaste,points.size >= tool.minimumPoints && points.isNotEmpty(),
                         onTool = { beginTool(it) },
                         onOptions = { if (it.useDefaultDimensions != options.useDefaultDimensions) {points=emptyList();anchorX=null;anchorY=null}; options = it },
                         onFinish = { finishConstruction() },onCancel = { cancelConstruction(); tool = DrawingTool.SELECT },
-                        onUndo = { cancelConstruction(); actions.onUndo() },onRedo = { cancelConstruction(); actions.onRedo() },
+                        onUndo = { undoInputOrDocument() },onRedo = { redoInputOrDocument() },
                         onCopy = actions.onCopy,onPaste = { cancelConstruction(); tool = DrawingTool.SELECT; actions.onPaste() },
                         onMirrorX = { if (selectedIds.isNotEmpty()) actions.onMirror(MirrorAxis.X,elementWorldBounds(document,selectedIds).center()) },
                         onMirrorY = { if (selectedIds.isNotEmpty()) actions.onMirror(MirrorAxis.Y,elementWorldBounds(document,selectedIds).center()) },
@@ -781,6 +908,12 @@ fun DrawingCanvasScreen(
                 }
                 if(panelsHidden) CanvasToolbars({},{},{},{},{},{},{},{panelsHidden=false},true,
                     Modifier.align(Alignment.TopEnd).padding(8.dp))
+                if(precisionActive && !zoomWindow) PrecisionPointerOverlay(precisionPick,precisionFinger,precisionDragging,
+                    settings.precisionPointer,viewport,orbit,is3D,ready?.scene,ready?.surfaces,snapSettings.gridSpacing,grid,floorZ,
+                    measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,
+                    document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
+                    onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
+                    pickContext=ready?.pointPicks,viewMode=document.project.settings.viewMode,levelId=selectedLevel)
                 if (loading == SceneLoad.Loading) Text(stringResource(R.string.canvas_preparing), Modifier.align(Alignment.Center))
                 if (rendererFailed) Text(stringResource(R.string.canvas_renderer_error), Modifier.align(Alignment.Center).padding(32.dp))
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))

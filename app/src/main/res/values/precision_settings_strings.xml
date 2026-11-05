@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_precision_pointer_heading">Precision pointer</string>
+    <string name="settings_precision_pointer">Use precision pointer</string>
+    <string name="settings_precision_pointer_help">Drag to aim, lift to keep the point, then tap Place. Turn off for direct-tap placement. A stylus aims at its pen tip and still uses Place.</string>
+    <string name="settings_pointer_offset">Finger offset distance (dp)</string>
+    <string name="settings_pointer_offset_help">24–240 dp; the pointer flips near canvas edges.</string>
+    <string name="settings_pointer_side">Offset side</string>
+    <string name="settings_pointer_right_handed">Right-handed · above left</string>
+    <string name="settings_pointer_left_handed">Left-handed · above right</string>
+    <string name="settings_pointer_magnifier">Show magnifier</string>
+    <string name="settings_pointer_zoom">Magnifier zoom</string>
+    <string name="settings_pointer_zoom_help">2–4 times magnification.</string>
+    <string name="settings_pointer_use_grid">Nudge by project grid</string>
+    <string name="settings_pointer_nudge">Nudge step</string>
+    <string name="settings_pointer_nudge_unit">Nudge step (%1$s)</string>
+    <string name="settings_pointer_nudge_help">Use the active project’s grid spacing, or set a positive physical step.</string>
+    <string name="settings_pointer_haptic">Vibrate when snap changes</string>
+</resources>
