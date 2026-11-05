@@ -102,11 +102,12 @@ fun ToolsPanel(
     expandedOverride: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
     focusGroup: CanvasToolGroup? = null,
+    embedded: Boolean = false,
 ) {
     var localExpanded by rememberSaveable { mutableStateOf(false) }
     var drawExpanded by rememberSaveable { mutableStateOf(true) }
     var editExpanded by rememberSaveable { mutableStateOf(true) }
-    val expanded = expandedOverride ?: localExpanded
+    val expanded = embedded || (expandedOverride ?: localExpanded)
     fun expand(value: Boolean) { localExpanded = value; onExpandedChange?.invoke(value) }
     LaunchedEffect(expandedOverride, focusGroup) {
         if (expandedOverride == true && focusGroup != null) {
@@ -117,25 +118,26 @@ fun ToolsPanel(
     // A blank panel area still owns its down event. Child buttons and scrolling handle
     // their gestures first; the canvas underneath must never start a pan from this area.
     Surface(modifier.pointerInput(Unit) { detectTapGestures(onTap = {}) },
-        shape = RoundedCornerShape(16.dp), tonalElevation = 5.dp, shadowElevation = 4.dp) {
+        shape = RoundedCornerShape(16.dp), tonalElevation = if(embedded) 0.dp else 5.dp, shadowElevation = if(embedded) 0.dp else 4.dp) {
         if (!expanded) {
             TextButton(onClick = { expand(true) }, modifier = Modifier.heightIn(min = 48.dp).testTag("tools_expand")) {
                 Icon(Icons.Outlined.Construction, stringResource(R.string.editing_expand_tools))
                 Text(stringResource(R.string.editing_tools), Modifier.padding(start = 8.dp))
             }
         } else {
-            Column(Modifier.width(300.dp).heightIn(max = 480.dp).testTag("tools_panel")) {
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(300.dp).heightIn(max = 480.dp).testTag(if(embedded && focusGroup==CanvasToolGroup.EDIT)"edit_tools_panel" else "tools_panel")) {
+                if(!embedded) Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.editing_tools), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     IconButton(onClick = { expand(false) }, modifier = Modifier.testTag("tools_collapse")) {
                         Icon(Icons.Outlined.Close, stringResource(R.string.editing_collapse_tools))
                     }
                 }
-                HorizontalDivider()
+                if(!embedded) HorizontalDivider()
                 Column(
                     Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if(!embedded || focusGroup!=CanvasToolGroup.EDIT) {
                     ToolChoices(listOf(DrawingTool.SELECT), tool, onTool)
                     if (tool != DrawingTool.SELECT) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -144,8 +146,10 @@ fun ToolsPanel(
                         }
                     }
                     ToolOptionsFields(tool, options, units, onOptions)
-                    ToolGroupHeader(R.string.panel_edit, editExpanded, { editExpanded = !editExpanded }, "tools_edit_group")
-                    if (editExpanded) {
+                    }
+                    if(!embedded || focusGroup!=CanvasToolGroup.DRAW) {
+                    if(!embedded) ToolGroupHeader(R.string.panel_edit, editExpanded, { editExpanded = !editExpanded }, "tools_edit_group")
+                    if (embedded || editExpanded) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             PanelAction(R.string.editing_undo, "tools_undo", canUndo, onUndo, Modifier.weight(1f))
                             PanelAction(R.string.editing_redo, "tools_redo", canRedo, onRedo, Modifier.weight(1f))
@@ -162,8 +166,10 @@ fun ToolsPanel(
                         PanelAction(R.string.editing_array, "tools_array", selectedCount > 0, onArray, Modifier.weight(1f))
                         }
                     }
-                    ToolGroupHeader(R.string.panel_draw, drawExpanded, { drawExpanded = !drawExpanded }, "tools_draw_group")
-                    if (drawExpanded) {
+                    }
+                    if(!embedded || focusGroup!=CanvasToolGroup.EDIT) {
+                    if(!embedded) ToolGroupHeader(R.string.panel_draw, drawExpanded, { drawExpanded = !drawExpanded }, "tools_draw_group")
+                    if (embedded || drawExpanded) {
                         ToolSection(R.string.editing_shapes, listOf(DrawingTool.LINE, DrawingTool.POLYLINE,
                         DrawingTool.ARC, DrawingTool.CIRCLE, DrawingTool.ELLIPSE, DrawingTool.RECTANGLE,
                         DrawingTool.POLYGON, DrawingTool.TRIANGLE, DrawingTool.SPLINE), tool, onTool)
@@ -171,6 +177,7 @@ fun ToolsPanel(
                         DrawingTool.DIM_ALIGNED, DrawingTool.DIM_ANGULAR, DrawingTool.DIM_RADIAL), tool, onTool)
                     ToolSection(R.string.editing_solids, listOf(DrawingTool.BOX, DrawingTool.SPHERE,
                         DrawingTool.CYLINDER, DrawingTool.CONE, DrawingTool.PYRAMID), tool, onTool)
+                    }
                     }
                 }
             }

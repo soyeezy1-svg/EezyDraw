@@ -1,21 +1,21 @@
 # Drawing editor validation
 
-Validated on 2026-11-05 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
+Validated on 2026-11-06 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
 
 ## Results
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 19 passed |
-| `:core:geometry:test` | 67 passed |
-| `:core:editing:test` | 129 passed |
-| `:core:data:testDebugUnitTest` | 12 passed |
-| `:app:testDebugUnitTest` | 163 passed |
+| `:core:model:test` | 23 passed |
+| `:core:geometry:test` | 75 passed |
+| `:core:editing:test` | 142 passed |
+| `:core:data:testDebugUnitTest` | 13 passed |
+| `:app:testDebugUnitTest` | 197 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **390 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **450 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -26,6 +26,10 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Coverage and corrected issues
 
+- Panel integration checks retain exact user layout across selection, move, rotation, Measure and placement. Collapse/expand/hide and drag-end edits are explicit; changing panel contents preserves its viewport anchor, and context actions avoid occupied panel bounds. Fullscreen keeps one restore control. Project saves, a per-project Room-settings cache and late-settings cold-start tests restore layout with autosave off; layout stays outside drawing undo.
+- Lock tests cover ALL and POSITION_ONLY, view-only locked Properties and padlock feedback, unlock, layer unlock precedence, current-level bulk locks and generated-wall defaults. POSITION_ONLY protects insertion XYZ while permitting rotation/scale about that insertion and numeric size edits; only ALL blocks deletion. No-op actions do not offer an unrelated Undo, and ordinary save/settings notices never inherit drawing Undo.
+- Per-object and per-room-edge display tests cover Normal, Hide, X-ray and Wireframe across shapes, rooms, walls, slabs and library items. Linked shared walls keep one physical geometry; restoring room walls clears conflicting owner-side overrides in one undoable change. Bounds and associative measurements use unfiltered physical geometry and do not shrink when display changes.
+- Visibility checks cover hierarchy eyes, Show all, hidden-object interaction only when faint outlines are enabled, save/reopen/native export and exact undo/redo. PNG/PDF and native render policies cover individual wireframe/X-ray overrides, hidden outline opacity and camera-dependent front walls. Raster ghost coverage is deduplicated so coincident projected edges remain faint. GLES smoke validates the actual opacity shader in addition to the existing XYZ/lighting checks.
 - Precision input defaults on and shares one `PrecisionPick` between crosshair, ghost, snap labels, live distance and confirmation. Finger down/drag/up never writes geometry; Place confirms each point. Tests cover retained candidates, cancellation, exact library/shape placement, all current drawing-tool previews, line/Measure/reference sequences, partial-point and nudge undo/redo, and the optional legacy direct-tap path.
 - Pure geometry tests check the 80dp offset at different densities, handedness, edge flipping/clamping, pen-tip input, loupe corner avoidance and physical nudge directions in every view/projection at large coordinates. Prepared point queries cover all six snap modes, real 3D intersections, wall edges, level filtering, near/eye-plane clipping and bounded local queries on 100,000 edges.
 - Loupe screenshot tests verify actual red/blue drawing geometry, 2×/4× source-pixel spacing, dark-theme edge contrast and finger/control avoidance. The sRGB expectation permits one 8-bit colour quantization unit, matching Compose and the framebuffer. Snap haptics fire once for a changed discrete snap and respect the persisted off option; a real stylus `MotionEvent` confirms pen-tip coordinates without a finger offset.

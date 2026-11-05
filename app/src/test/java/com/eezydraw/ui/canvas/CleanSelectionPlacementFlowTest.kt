@@ -112,9 +112,10 @@ class CleanSelectionPlacementFlowTest {
         compose.onNodeWithTag("properties_side_panel").assertDoesNotExist()
         compose.onNodeWithTag("selection_properties").performClick()
         compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
-        compose.onNodeWithTag("properties_close").performClick()
+        compose.onNodeWithTag("panel_properties_hide").performClick()
         compose.onNodeWithTag("properties_side_panel").assertDoesNotExist()
-        tapCanvas(.94f, .92f)
+        // A tap on the persistent View bar is a panel interaction, not a canvas deselection.
+        tapCanvas(.94f, .20f)
         compose.runOnIdle { assertTrue(model.state.value.selectedIds.isEmpty()) }
         compose.onNodeWithTag("selection_toolbar").assertDoesNotExist()
         compose.onNodeWithTag("selection_gizmo").assertDoesNotExist()
@@ -156,6 +157,8 @@ class CleanSelectionPlacementFlowTest {
         fun chooseSocket() {
             compose.onNodeWithTag("toolbar_library").performClick()
             compose.onNodeWithTag("library_insert_socket").performClick()
+            compose.onNodeWithTag("library_panel").assertIsDisplayed()
+            compose.onNodeWithTag("panel_library_collapse").performClick()
             compose.onNodeWithTag("library_panel").assertDoesNotExist()
             compose.onNodeWithTag("placement_hint").assertIsDisplayed()
             assertElements(0)
@@ -171,8 +174,12 @@ class CleanSelectionPlacementFlowTest {
         assertEquals(socket.id, (component.body as ElementBody.Component).libraryItemId)
         compose.onNodeWithTag("placement_banner").assertDoesNotExist()
         compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
+        // This small library symbol puts its floating actions over the View
+        // toolbar; collapse View explicitly, undo, then restore its saved state.
+        compose.onNodeWithTag("panel_view_collapse").performClick()
         selectionAction("undo")
         awaitElements(0)
+        compose.onNodeWithTag("panel_view_expand").performClick()
         compose.runOnIdle { assertFalse(model.state.value.dirty) }
     }
 
@@ -344,6 +351,7 @@ class CleanSelectionPlacementFlowTest {
         startProject("Distance only")
         compose.onNodeWithTag("toolbar_measure").performClick()
         compose.onNodeWithTag("toolbar_measure_distance").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         assertElements(0)
         compose.onNodeWithTag("placement_hint").assertIsDisplayed()
         tapCanvas(.40f, .72f)

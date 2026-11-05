@@ -28,11 +28,11 @@ import kotlin.math.hypot
 @Composable
 fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
     onEdit:(ElementId,Point3,Point3,Point3,String,Boolean,Boolean)->Unit,onDelete:(Set<ElementId>)->Unit,
-    onDismiss:()->Unit,modifier:Modifier=Modifier) {
+    onDismiss:()->Unit,modifier:Modifier=Modifier,embedded:Boolean=false) {
     var editing by remember { mutableStateOf<ElementId?>(null) }
-    Surface(modifier.width(320.dp).pointerInput(Unit){detectTapGestures(onTap={})},tonalElevation=5.dp,shadowElevation=4.dp) {
-        Column(Modifier.fillMaxHeight().testTag("measurements_panel")) {
-            Row(Modifier.fillMaxWidth().padding(start=12.dp),verticalAlignment=Alignment.CenterVertically) {
+    val content: @Composable () -> Unit = {
+        Column(Modifier.width(320.dp).fillMaxHeight().testTag("measurements_panel")) {
+            if(!embedded) Row(Modifier.fillMaxWidth().padding(start=12.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text(stringResource(R.string.canvas_measurements),Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
                 IconButton(onDismiss) { Icon(Icons.Outlined.Close,stringResource(R.string.close)) }
             }
@@ -50,7 +50,8 @@ fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 Text(summary.name,Modifier.weight(1f),style=MaterialTheme.typography.titleSmall)
                                 IconButton({editing=element.id},Modifier.testTag("measurement_edit_${element.id.value}")) { Icon(Icons.Outlined.Edit,stringResource(R.string.canvas_edit_measurement)) }
-                                IconButton({onDelete(setOf(element.id))},Modifier.testTag("measurement_delete_${element.id.value}")) { Icon(Icons.Outlined.Delete,stringResource(R.string.editing_delete)) }
+                                val allLocked=element.lockMode==LockMode.ALL || document.layers.any {it.id==element.layerId && it.locked}
+                                IconButton({onDelete(setOf(element.id))},Modifier.testTag("measurement_delete_${element.id.value}"),enabled=!allLocked) { Icon(Icons.Outlined.Delete,stringResource(R.string.editing_delete)) }
                             }
                             measurementText(summary,document.project.settings).forEach { Text(it,style=MaterialTheme.typography.bodySmall) }
                         }
@@ -59,6 +60,9 @@ fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
             }
         }
     }
+    if(embedded) Box(modifier) {content()} else Surface(
+        modifier.pointerInput(Unit){detectTapGestures(onTap={})},tonalElevation=5.dp,shadowElevation=4.dp,
+    ) {content()}
     editing?.let { id -> document.elements.find { it.id==id }?.let { element ->
         resolveMeasurement(document,element)?.let { summary ->
             MeasurementEditor(document,element,summary,onApply={a,b,label,name,coords,affl->
@@ -73,6 +77,9 @@ private fun MeasurementEditor(document:ProjectDocument,element:Element,summary:M
     onApply:(Point3,Point3,Point3,String,Boolean,Boolean)->Unit,onDismiss:()->Unit) {
     val data=((element.body as ElementBody.DrawingShape).shape as Shape.Dimension).measurement!!
     val settings=document.project.settings
+    val lockMode=if(document.layers.any {it.id==element.layerId && it.locked})LockMode.ALL else element.lockMode
+    val allLocked=lockMode==LockMode.ALL
+    val positionLocked=lockMode!=LockMode.NONE
     val factor=unitFactor(settings.lengthUnit)
     val source=listOf(summary.start.x,summary.start.y,summary.start.z,summary.end.x,summary.end.y,summary.end.z,
         summary.labelPoint.x,summary.labelPoint.y,summary.labelPoint.z)
@@ -86,19 +93,21 @@ private fun MeasurementEditor(document:ProjectDocument,element:Element,summary:M
         if(parsed.all {it!=null}) hypot(hypot(parsed[3]!!-parsed[0]!!,parsed[4]!!-parsed[1]!!),parsed[5]!!-parsed[2]!!)>1e-9 else false
     AlertDialog(onDismissRequest=onDismiss,title={Text(stringResource(R.string.canvas_edit_measurement))},
         text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(name,{name=it},Modifier.fillMaxWidth().testTag("measurement_name"),label={Text(stringResource(R.string.canvas_measurement_name))},isError=name.isBlank()||name.length>120)
+            if(positionLocked) Text(stringResource(if(allLocked)R.string.selection_locked_properties else R.string.selection_position_locked_properties),
+                Modifier.testTag("measurement_locked_message"),style=MaterialTheme.typography.bodySmall)
+            OutlinedTextField(name,{name=it},Modifier.fillMaxWidth().testTag("measurement_name"),label={Text(stringResource(R.string.canvas_measurement_name))},isError=name.isBlank()||name.length>120,enabled=!allLocked)
             val groups=listOf(R.string.canvas_measurement_start,R.string.canvas_measurement_end,R.string.canvas_measurement_label)
             groups.forEachIndexed { group,label ->
                 Text(stringResource(label),style=MaterialTheme.typography.titleSmall)
                 listOf("X","Y","Z").forEachIndexed { axis,axisName ->
                     val index=group*3+axis
                     OutlinedTextField(fields[index],{value->fields=fields.toMutableList().also {it[index]=value}},
-                        Modifier.fillMaxWidth().testTag("measurement_${group}_$axisName"),label={Text(axisName)},singleLine=true,isError=parsed[index]==null)
+                        Modifier.fillMaxWidth().testTag("measurement_${group}_$axisName"),label={Text(axisName)},singleLine=true,isError=parsed[index]==null,enabled=!positionLocked)
                 }
             }
-            Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(coordinates,{coordinates=it});Text(stringResource(R.string.canvas_measurement_coordinates)) }
-            Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(affl,{affl=it});Text(stringResource(R.string.canvas_measurement_affl)) }
+            Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(coordinates,{coordinates=it},enabled=!allLocked);Text(stringResource(R.string.canvas_measurement_coordinates)) }
+            Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(affl,{affl=it},enabled=!allLocked);Text(stringResource(R.string.canvas_measurement_affl)) }
         }},confirmButton={TextButton({onApply(Point3(parsed[0]!!,parsed[1]!!,parsed[2]!!),Point3(parsed[3]!!,parsed[4]!!,parsed[5]!!),
-            Point3(parsed[6]!!,parsed[7]!!,parsed[8]!!),name.trim(),coordinates,affl)},enabled=valid,modifier=Modifier.testTag("measurement_apply")) {Text(stringResource(R.string.editing_apply))}},
+            Point3(parsed[6]!!,parsed[7]!!,parsed[8]!!),name.trim(),coordinates,affl)},enabled=valid && !allLocked,modifier=Modifier.testTag("measurement_apply")) {Text(stringResource(R.string.editing_apply))}},
         dismissButton={TextButton(onDismiss){Text(stringResource(R.string.editing_cancel))}})
 }

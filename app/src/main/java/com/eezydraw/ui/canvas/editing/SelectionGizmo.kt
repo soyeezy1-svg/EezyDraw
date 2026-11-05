@@ -132,10 +132,11 @@ fun gizmoHandles(
     preview: EditDelta? = null,
     allowResize: Boolean = true,
     mode: GizmoMode = GizmoMode.MOVE,
+    pivotOverride: Point3? = null,
 ): List<GizmoControl> {
     if (width <= 0.0 || height <= 0.0 || density <= 0.0) return emptyList()
     val shownBounds = previewGizmoBounds(bounds, preview)
-    val pivot = gizmoCenter(shownBounds)
+    val pivot = pivotOverride?.let {preview?.apply(it) ?: it} ?: gizmoCenter(shownBounds)
     val center = projectGizmo(pivot, viewport, orbit, is3D, width, height) ?: return emptyList()
     if (mode == GizmoMode.ROTATE) return rotationControls(pivot, center, viewport, orbit, is3D, width, height, density)
     if (mode == GizmoMode.SCALE) {
@@ -286,6 +287,7 @@ fun SelectionGizmo(
     allowResize: Boolean = true,
     mode: GizmoMode = GizmoMode.MOVE,
     rotationAngleDegrees: Double? = null,
+    pivotOverride: Point3? = null,
 ) {
     val density = LocalDensity.current.density.toDouble()
     val accent = MaterialTheme.colorScheme.primary
@@ -318,14 +320,14 @@ fun SelectionGizmo(
     val description = stringResource(R.string.gizmo_selection)
     fun currentBounds() = previewGizmoBounds(bounds, latestPreview)
     val controls = gizmoHandles(bounds, viewport, orbit, is3D,
-        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode)
+        surfaceSize.width.toDouble(), surfaceSize.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode,pivotOverride)
     Canvas(modifier.fillMaxSize().onSizeChanged { surfaceSize = it }.testTag("selection_gizmo")
         .semantics {
             contentDescription = description
             if (mode == GizmoMode.ROTATE && rotationAngleDegrees != null) stateDescription = angleLabel(rotationAngleDegrees)
             if (enabled) customActions = controls.map { control ->
                 CustomAccessibilityAction(labels.getValue(control.handle)) {
-                    val center = projectGizmo(gizmoCenter(currentBounds()), viewport, orbit, is3D,
+                    val center = projectGizmo(pivotOverride ?: gizmoCenter(currentBounds()), viewport, orbit, is3D,
                         surfaceSize.width.toDouble(), surfaceSize.height.toDouble())
                     if (center == null) false else {
                         val start = Offset(control.center.x.toFloat(), control.center.y.toFloat())
@@ -343,12 +345,12 @@ fun SelectionGizmo(
                 }
             }
         }
-        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame, allowResize, mode) {
+        .pointerInput(bounds, viewport, orbit, is3D, density, enabled, resizeFrame, allowResize, mode,pivotOverride) {
             if (!enabled) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = true)
                 val controlsAtDown = gizmoHandles(bounds, viewport, orbit, is3D,
-                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode)
+                    size.width.toDouble(), size.height.toDouble(), density, resizeFrame, latestPreview, allowResize, mode,pivotOverride)
                 val position = Point2(down.position.x.toDouble(), down.position.y.toDouble())
                 val knob = controlsAtDown.minByOrNull { hypot(it.center.x - position.x, it.center.y - position.y) }
                     ?.takeIf {
@@ -406,10 +408,10 @@ fun SelectionGizmo(
             }
         }
         val shownBounds = previewGizmoBounds(bounds, latestPreview)
-        val center = projectGizmo(gizmoCenter(shownBounds), viewport, orbit, is3D, width, height) ?: return@Canvas
+        val center = projectGizmo(pivotOverride?.let {latestPreview?.apply(it) ?: it} ?: gizmoCenter(shownBounds), viewport, orbit, is3D, width, height) ?: return@Canvas
         val origin = center.offset()
         if (!enabled) return@Canvas
-        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview, allowResize, mode)
+        val visibleControls = gizmoHandles(bounds, viewport, orbit, is3D, width, height, density, resizeFrame, latestPreview, allowResize, mode,pivotOverride)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 12f * this@Canvas.density
             textAlign = Paint.Align.CENTER

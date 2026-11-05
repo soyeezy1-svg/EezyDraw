@@ -132,15 +132,15 @@ class CanvasWorkflowImprovementsTest {
         compose.runOnIdle { assertEquals(ViewMode.SHADED_WITH_EDGES, model.state.value.document?.project?.settings?.viewMode) }
 
         compose.onNodeWithTag("canvas_visibility").performClick()
-        compose.onNodeWithTag("visibility_system_power").performClick()
+        compose.onNodeWithTag("object_visibility_system_power").performScrollTo().performClick()
         compose.runOnIdle {
             assertFalse(checkNotNull(model.state.value.document).systems.single().visible)
             assertTrue(model.state.value.selectedIds.isEmpty())
         }
-        compose.onNodeWithTag("visibility_system_power").performClick()
-        compose.onNodeWithTag("visibility_layer_${box.layerId.value}").performClick()
-        compose.onNodeWithTag("visibility_measurements").performClick()
-        compose.onNodeWithText(context.getString(R.string.close)).performClick()
+        compose.onNodeWithTag("object_visibility_system_power").performScrollTo().performClick()
+        compose.onNodeWithTag("object_visibility_layer_${box.layerId.value}").performScrollTo().performClick()
+        compose.onNodeWithTag("object_visibility_measurements").performScrollTo().performClick()
+        compose.onNodeWithTag("panel_visibility_hide").performClick()
         save()
         val id = fixture.project.id.value
         compose.runOnIdle { model.open(id) }
@@ -158,6 +158,7 @@ class CanvasWorkflowImprovementsTest {
         startProject("Position sharing")
         compose.onNodeWithTag("toolbar_measure").performClick()
         compose.onNodeWithTag("toolbar_measure_distance").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         compose.onNodeWithTag("canvas_surface").performTouchInput {
             click(Offset(width * .40f, height * .62f))
             click(Offset(width * .60f, height * .42f))
@@ -176,14 +177,24 @@ class CanvasWorkflowImprovementsTest {
         compose.runOnIdle {
             assertEquals("Shared position", resolveMeasurement(checkNotNull(model.state.value.document), singleElement())?.name)
         }
+        // Properties remains open until explicitly hidden. Open the persistent
+        // measurement list before hiding its selected annotation, so it remains editable.
+        compose.onNodeWithTag("panel_properties_hide").performClick()
+        compose.onNodeWithTag("toolbar_measure").performClick()
+        compose.onNodeWithTag("toolbar_measurements").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         compose.onNodeWithTag("measurements_visible").performClick()
         compose.runOnIdle {
             assertFalse(checkNotNull(model.state.value.document).project.settings.showMeasurements)
             assertTrue(model.state.value.selectedIds.isEmpty())
         }
+        // The persistent full-height list covers the bottom Save control.
+        // Collapse it manually, save, and reopen the same list to continue.
+        compose.onNodeWithTag("panel_measurements_collapse").performClick()
         save()
         val saved = repositories.projects.documents.values.single()
         assertEquals("Shared position", resolveMeasurement(saved, saved.elements.single())?.name)
+        compose.onNodeWithTag("panel_measurements_expand").performClick()
         compose.onNodeWithTag("measurement_delete_${annotation.id.value}").performScrollTo().performClick()
         awaitElements(0)
         compose.runOnIdle { model.undo() }
@@ -206,8 +217,17 @@ class CanvasWorkflowImprovementsTest {
         val item = LibraryItem(libraryId, "Socket", Discipline.ELECTRICAL, "Outlets", Size3(.12, .08, .12))
         reopenFixture(base.copy(levels = listOf(level), elements = listOf(socket, wall), libraryItems = listOf(item)))
         compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
+        // This fixture's wall corner is on the lower fitting margin, where
+        // both the open View bar and its collapsed icon would intercept it.
+        // Explicitly arrange that panel as hidden, independently of selection.
+        compose.runOnIdle {
+            val layout = checkNotNull(model.state.value.document).project.settings.canvasLayout
+            model.setCanvasLayout(layout.withPanel(CanvasPanelId.VIEW,
+                layout.panel(CanvasPanelId.VIEW).copy(state = PanelVisibility.HIDDEN)))
+        }
         compose.onNodeWithTag("toolbar_measure").performClick()
         compose.onNodeWithTag("toolbar_reference_dimension").performClick()
+        compose.onNodeWithTag("panel_measure_collapse").performClick()
         clickWorld(Point3(.3, 0.0, 1.2))
         clickWorld(Point3(0.0, 0.0, 0.0))
         clickWorld(Point3(.7, .5, 0.0))
@@ -296,7 +316,7 @@ class CanvasWorkflowImprovementsTest {
     }
 
     private fun save() {
-        compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
+        compose.onNodeWithTag("canvas_save").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
     }
 

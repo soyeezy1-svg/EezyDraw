@@ -33,6 +33,7 @@ import com.eezydraw.core.editing.DrawingTool
 import com.eezydraw.core.editing.ToolOptions
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.ui.theme.EezyDrawTheme
+import com.eezydraw.ui.canvas.panels.CanvasToolGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -230,6 +231,24 @@ class ToolsPanelTest {
         assertTrue(options.keepProportions)
     }
 
+    @Test
+    fun embeddedDrawAndEditContentHaveNoAutomaticExpansionOrDuplicateChrome() {
+        var focus by mutableStateOf(CanvasToolGroup.DRAW)
+        var tool by mutableStateOf(DrawingTool.SELECT)
+        compose.setContent {EezyDrawTheme {Panel(tool=tool,onTool={tool=it},embedded=true,focusGroup=focus)}}
+        compose.onNodeWithTag("tool_line").performScrollTo().performClick()
+        assertEquals(DrawingTool.LINE,tool)
+        compose.onNodeWithTag("tools_expand").assertDoesNotExist()
+        compose.onNodeWithTag("tools_collapse").assertDoesNotExist()
+        compose.onNodeWithTag("tools_undo").assertDoesNotExist()
+        compose.onNodeWithTag("tools_panel").assertExists()
+        compose.runOnIdle {focus=CanvasToolGroup.EDIT}
+        compose.onNodeWithTag("edit_tools_panel").assertExists()
+        compose.onNodeWithTag("tools_copy").assertExists()
+        compose.onNodeWithTag("tool_line").assertDoesNotExist()
+        compose.onNodeWithTag("tools_finish").assertDoesNotExist()
+    }
+
     private fun inputNumber(tag: String): Double = compose.onNodeWithTag(tag).fetchSemanticsNode()
         .config[SemanticsProperties.EditableText].text.toDouble()
 
@@ -246,7 +265,10 @@ class ToolsPanelTest {
         onCopy: () -> Unit = {},
         onDelete: () -> Unit = {},
         units: LengthUnit = LengthUnit.MILLIMETRES,
+        embedded: Boolean = false,
+        focusGroup: CanvasToolGroup? = null,
     ) = ToolsPanel(tool, options, units, selectedCount,
         canUndo = false, canRedo = false, canPaste = false, canFinish = canFinish,
-        onTool, onOptions, onFinish, onCancel, {}, {}, onCopy, {}, {}, {}, {}, onDelete, {})
+        onTool, onOptions, onFinish, onCancel, {}, {}, onCopy, {}, {}, {}, {}, onDelete, {},
+        embedded=embedded,focusGroup=focusGroup)
 }

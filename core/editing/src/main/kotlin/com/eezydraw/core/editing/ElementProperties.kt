@@ -3,6 +3,7 @@ package com.eezydraw.core.editing
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.Viewport2D
 import com.eezydraw.core.geometry.buildDrawingScene
+import com.eezydraw.core.geometry.unfilteredGeometryDocument
 import com.eezydraw.core.model.*
 import kotlin.math.abs
 import kotlin.math.cos
@@ -15,19 +16,11 @@ data class ElementProperties(val position: Point3, val rotation: Rotation3, val 
 
 /** Hidden/locked metadata must not change the intrinsic dimensions displayed in Properties. */
 fun elementLocalBounds(document: ProjectDocument, element: Element): Bounds3 = buildDrawingScene(
-    document.copy(
-        elements = listOf(element.copy(transform = Transform3())),
-        layers = document.layers.map { it.copy(visible = true) },
-        systems = document.systems.map { it.copy(visible = true) },
-    ),
+    unfilteredGeometryDocument(document.copy(elements=listOf(element.copy(transform=Transform3())))),
 ).bounds
 
 fun elementWorldBounds(document: ProjectDocument, ids: Set<ElementId>): Bounds3 = buildDrawingScene(
-    document.copy(
-        elements = document.elements.filter { it.id in ids },
-        layers = document.layers.map { it.copy(visible = true) },
-        systems = document.systems.map { it.copy(visible = true) },
-    ),
+    unfilteredGeometryDocument(document.copy(elements=document.elements.filter {it.id in ids})),
 ).bounds
 
 fun readProperties(document: ProjectDocument, element: Element): ElementProperties {

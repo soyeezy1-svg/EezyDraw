@@ -259,6 +259,25 @@ class SettingsScreenTest {
         compose.runOnIdle {assertEquals(false,saved?.precisionPointer?.enabled)}
     }
 
+    @Test
+    fun automaticPanelHidingAndGeneratedWallLocksAreOptionalAndSurviveRestoration() {
+        var saved:AppSettings?=null
+        val restoration=StateRestorationTester(compose)
+        restoration.setContent { EezyDrawTheme { Surface {
+            SettingsScreen(AppSettings(),onSave={saved=it},onBack={},onChooseSaveLocation={},onResetSaveLocation={},onOpenPermissions={})
+        } } }
+        visible("settings_auto_hide_panels").assertIsOff().performClick()
+        visible("settings_lock_walls").assertIsOff().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        visible("settings_auto_hide_panels").assertIsOn()
+        visible("settings_lock_walls").assertIsOn()
+        compose.onNodeWithTag("settings_save").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(true,saved?.autoHidePanelsWhileDrawing)
+            assertEquals(true,saved?.lockWallsByDefault)
+        }
+    }
+
     private fun showSettings(
         settings: AppSettings = AppSettings(),
         onSave: (AppSettings) -> Unit = {},

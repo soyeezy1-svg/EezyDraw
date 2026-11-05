@@ -2,6 +2,8 @@ package com.eezydraw.core.geometry
 
 import com.eezydraw.core.model.Bounds3
 import com.eezydraw.core.model.Point3
+import com.eezydraw.core.model.ObjectDisplay
+import com.eezydraw.core.model.RoomSideRef
 
 /**
  * Immutable GL_TRIANGLES batch. Every vertex contains local x/y/z, world normal x/y/z,
@@ -13,6 +15,9 @@ data class SurfaceChunk(
     val levelId: String?,
     val vertices: FloatArray,
     val elementId: String,
+    val display: ObjectDisplay = ObjectDisplay.NORMAL,
+    val roomSide: RoomSideRef? = null,
+    val roomCenter: Point3? = null,
 )
 
 data class SurfaceScene(val chunks: List<SurfaceChunk>, val bounds: Bounds3) {

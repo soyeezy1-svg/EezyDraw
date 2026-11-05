@@ -17,6 +17,17 @@ import org.junit.Test
 
 class SettingsDraftTest {
     @Test
+    fun panelAndWallDefaultsSurviveValidatedDraftConversion() {
+        val original=AppSettings(autoHidePanelsWhileDrawing=true,lockWallsByDefault=true)
+        val draft=SettingsDraft.from(original).input("precision","-").changeUnits(LengthUnit.FEET)
+        assertNull(draft.toSettings())
+        val saved=draft.input("precision","3").toSettings()!!
+        assertTrue(saved.autoHidePanelsWhileDrawing)
+        assertTrue(saved.lockWallsByDefault)
+        assertEquals(LengthUnit.FEET,saved.projectDefaults.lengthUnit)
+    }
+
+    @Test
     fun changingDisplayUnitsPreservesPhysicalGridToleranceAndRouteHeight() {
         val original = AppSettings(projectDefaults = ProjectSettings(
             lengthUnit = LengthUnit.FEET,

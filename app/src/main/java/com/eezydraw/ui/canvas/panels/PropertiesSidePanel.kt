@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.model.LockMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.ui.canvas.editing.PropertiesEditor
 
@@ -42,7 +43,16 @@ fun PropertiesSidePanel(
     onApply: (ElementProperties) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    lockMode:LockMode=LockMode.NONE,
+    layerLocked:Boolean=false,
+    embedded:Boolean=false,
 ) {
+    if(embedded) {
+        PropertiesEditor(properties,units,precision,onApply,onDismiss,
+            modifier.width(320.dp).heightIn(max=520.dp).testTag("properties_side_panel").padding(12.dp),
+            lockMode=lockMode,layerLocked=layerLocked)
+        return
+    }
     var expanded by rememberSaveable { mutableStateOf(true) }
     val drafts = rememberSaveableStateHolder()
     Surface(modifier.width(320.dp).heightIn(max = 560.dp).testTag("properties_side_panel")
@@ -61,7 +71,7 @@ fun PropertiesSidePanel(
                 HorizontalDivider()
                 drafts.SaveableStateProvider("properties_editor") {
                     PropertiesEditor(properties, units, precision, onApply, onDismiss,
-                        Modifier.fillMaxWidth().weight(1f, fill = false).padding(12.dp))
+                        Modifier.fillMaxWidth().weight(1f, fill = false).padding(12.dp),lockMode=lockMode,layerLocked=layerLocked)
                 }
             }
         }

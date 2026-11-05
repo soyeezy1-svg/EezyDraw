@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.model.LockMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.Rotation3
@@ -41,8 +43,10 @@ fun PropertiesDialog(
     precision: Int,
     onApply: (ElementProperties) -> Unit,
     onDismiss: () -> Unit,
+    lockMode:LockMode=LockMode.NONE,
+    layerLocked:Boolean=false,
 ) {
-    PropertiesEditor(properties, units, precision, onApply, onDismiss, dialog = true)
+    PropertiesEditor(properties, units, precision, onApply, onDismiss, dialog = true,lockMode=lockMode,layerLocked=layerLocked)
 }
 
 /** Shared atomic numeric draft for the modal editor and the collapsible canvas side panel. */
@@ -55,6 +59,8 @@ fun PropertiesEditor(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     dialog: Boolean = false,
+    lockMode:LockMode=LockMode.NONE,
+    layerLocked:Boolean=false,
 ) {
     val factor = editingMetresPerUnit(units)
     val source = remember(properties) { listOf(
@@ -68,6 +74,12 @@ fun PropertiesEditor(
     } }
     var fields by rememberSaveable(properties, units, precision, stateSaver = StringFieldsSaver) {
         mutableStateOf(initial)
+    }
+    val fullyLocked=layerLocked || lockMode==LockMode.ALL
+    LaunchedEffect(lockMode,layerLocked,initial) {
+        if(fullyLocked || lockMode==LockMode.POSITION_ONLY)fields=fields.mapIndexed {index,value->
+            if(fullyLocked || index<3)initial[index] else value
+        }
     }
     // An untouched rounded field retains its original canonical value, including tiny dimensions.
     val parsed = fields.mapIndexed { index, text ->
@@ -86,6 +98,10 @@ fun PropertiesEditor(
         "property_rotation_z", "property_width", "property_depth", "property_height")
     val fieldsContent: @Composable () -> Unit = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if(fullyLocked || lockMode==LockMode.POSITION_ONLY)Text(
+                stringResource(if(fullyLocked)R.string.selection_locked_properties else R.string.selection_position_locked_properties),
+                modifier=Modifier.testTag("properties_lock_message"),style=MaterialTheme.typography.bodyMedium,
+            )
             fields.forEachIndexed { index, value ->
                 if (index % 3 == 0) {
                     val heading = when (index) {
@@ -97,8 +113,8 @@ fun PropertiesEditor(
                 }
                 val flat = index >= 6 && source[index] == 0.0
                 EditingNumberField(
-                    value, { next -> fields = fields.toMutableList().also { it[index] = next } },
-                    stringResource(labels[index]), tags[index], errors[index], enabled = !flat,
+                    value, { next -> fields = fields.toMutableList().also { it[index] = next }; applied=false },
+                    stringResource(labels[index]), tags[index], errors[index], enabled = !flat && !fullyLocked && !(lockMode==LockMode.POSITION_ONLY && index<3),
                     error = stringResource(if (index >= 6) R.string.editing_positive_error else R.string.editing_finite_error),
                 )
             }
@@ -110,7 +126,7 @@ fun PropertiesEditor(
     val applyButton: @Composable () -> Unit = {
         TextButton(
             onClick = {
-                if (!applied && errors.none { it }) {
+                if (!fullyLocked && !applied && errors.none { it }) {
                     applied = true
                     onApply(ElementProperties(
                         Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
@@ -118,7 +134,7 @@ fun PropertiesEditor(
                         Point3(parsed[6]!!, parsed[7]!!, parsed[8]!!),
                     ))
                 }
-            }, enabled = !applied && errors.none { it }, modifier = Modifier.testTag("properties_apply"),
+            }, enabled = !fullyLocked && !applied && errors.none { it }, modifier = Modifier.testTag("properties_apply"),
         ) { Text(stringResource(R.string.editing_apply)) }
     }
     val cancelButton: @Composable () -> Unit = {

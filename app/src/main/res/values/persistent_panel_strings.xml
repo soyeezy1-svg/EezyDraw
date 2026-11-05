@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="persistent_panel_expand">Expand %1$s panel</string>
+    <string name="persistent_panel_collapse">Collapse %1$s panel</string>
+    <string name="persistent_panel_hide">Hide %1$s panel</string>
+    <string name="persistent_panel_drag">Drag %1$s panel</string>
+</resources>

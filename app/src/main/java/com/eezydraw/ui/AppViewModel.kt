@@ -12,6 +12,10 @@ import com.eezydraw.core.data.ProjectRepository
 import com.eezydraw.core.data.ProjectStorageException
 import com.eezydraw.core.data.SettingsRepository
 import com.eezydraw.core.data.StoredProject
+import com.eezydraw.core.editing.PresentationCommands
+import com.eezydraw.core.editing.lockGeneratedWalls
+import com.eezydraw.core.geometry.ScenePresentation
+import kotlinx.coroutines.Job
 import com.eezydraw.core.editing.EditCommand
 import com.eezydraw.core.editing.EditCommands
 import com.eezydraw.core.editing.EditDelta
@@ -75,6 +79,7 @@ data class AppUiState(
     val canRedo: Boolean = false,
     val canPaste: Boolean = false,
     val autosaving: Boolean = false,
+    val noticeUndo: Boolean = false,
 )
 
 class AppViewModel(
@@ -98,6 +103,7 @@ class AppViewModel(
     private var clipboard = emptyList<Element>()
     private var pasteSequence = 0L
     private val storageMutex = Mutex()
+    private var panelLayoutSave:Job?=null
     private var pendingViewExport: Pair<ViewExportRequest, ViewExportFormat>? = null
 
     init {
@@ -106,10 +112,20 @@ class AppViewModel(
                 preferencesReady = true
                 mutableState.update { it.copy(ready = catalogueReady, error = userMessage(error)) }
             }.collect { settings ->
+                val initialPreferences=!preferencesReady
                 preferencesReady = true
                 history.setLimit(settings.undoLimit)
-                mutableState.update {
-                    it.copy(settings = settings, ready = catalogueReady, canUndo = history.canUndo, canRedo = history.canRedo)
+                val active=state.value.document
+                val restoredLayout=if(initialPreferences)active?.project?.id?.value?.let {settings.canvasLayouts[it]} else null
+                if(restoredLayout!=null && savedDocument?.project?.id==active?.project?.id) {
+                    savedDocument=savedDocument?.let {it.copy(project=it.project.copy(settings=it.project.settings.copy(canvasLayout=restoredLayout)))}
+                }
+                mutableState.update { current->
+                    val document=if(restoredLayout!=null && current.document?.project?.id==active?.project?.id)current.document?.let {
+                        it.copy(project=it.project.copy(settings=it.project.settings.copy(canvasLayout=restoredLayout)))
+                    } else current.document
+                    current.copy(settings = settings,document=document,dirty=if(document!=current.document)document!=savedDocument else current.dirty,
+                        ready = catalogueReady, canUndo = history.canUndo, canRedo = history.canRedo)
                 }
             }
         }
@@ -146,6 +162,8 @@ class AppViewModel(
         require(name.isNotBlank() && name.trim().length <= 120)
         val settings = state.value.settings
         var document = projects.create(name.trim(), template, settings.projectDefaults.copy(lengthUnit = unit))
+        val generated=lockGeneratedWalls(document.copy(elements=emptyList()),document,settings.lockWallsByDefault)
+        if(generated!=document)document=projects.save(generated,backupEnabled=false)
         if (document.layers.any { it.lineWeightMm != settings.defaultLineWeightMm }) {
             document = projects.save(
                 document.copy(layers = document.layers.map { it.copy(lineWeightMm = settings.defaultLineWeightMm) }),
@@ -211,15 +229,54 @@ class AppViewModel(
             .map {it.copy(properties=it.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(argb)))},"Change colour")}
     }
 
-    fun setSelectionLocked(locked:Boolean) {
-        drawingEdit {current,document->
-            val selected=document.elements.filter {it.id in current.selectedIds}
-            val selectedLayers=selected.mapTo(HashSet()){it.layerId}
-            val lockedLayers=document.layers.filter {it.id in selectedLayers && it.locked}.mapTo(HashSet()){it.id}
-            if(!locked && lockedLayers.isNotEmpty()) {
-                EditCommands.between(document,document.copy(layers=document.layers.map {if(it.id in lockedLayers)it.copy(locked=false)else it}),"Unlock layer")
-            } else EditCommands.replace(document,selected.map {it.copy(properties=if(locked)it.properties+(ELEMENT_LOCKED_KEY to ParameterValue.Flag(true)) else it.properties-ELEMENT_LOCKED_KEY)},
-                if(locked)"Lock objects"else"Unlock objects")
+    fun setSelectionLocked(locked:Boolean)=setSelectionLockMode(if(locked)LockMode.ALL else LockMode.NONE)
+
+    private fun presentationEdit(message:String,build:(AppUiState,ProjectDocument)->EditCommand) {
+        val before=state.value.document
+        if(drawingEdit(build=build) && state.value.document!=before)mutableState.update {it.copy(notice=message,noticeUndo=it.canUndo)}
+    }
+
+    fun setSelectionLockMode(mode:LockMode) {
+        val current=state.value;val document=current.document ?: return
+        val selectedLayers=document.elements.filter {it.id in current.selectedIds}.mapTo(HashSet()) {it.layerId}
+        val lockedLayers=document.layers.filter {it.id in selectedLayers && it.locked}.mapTo(HashSet()) {it.id}
+        if(mode==LockMode.NONE && lockedLayers.isNotEmpty())presentationEdit("Layer unlocked") {_,source->
+            EditCommands.between(source,source.copy(layers=source.layers.map {if(it.id in lockedLayers)it.copy(locked=false)else it}),"Unlock layer")
+        } else presentationEdit(if(mode==LockMode.NONE)"Object unlocked"else"Object locked") {state,source->
+            PresentationCommands.setLock(source,state.selectedIds,mode)
+        }
+    }
+    fun setLevelLock(levelId:String?,mode:LockMode) = presentationEdit(if(mode==LockMode.NONE)"Level unlocked"else"Level locked") {_,document->
+        PresentationCommands.lockLevel(document,levelId?.let(::LevelId),mode)
+    }
+    fun setSelectionDisplay(display:ObjectDisplay)=setElementsDisplay(state.value.selectedIds,display)
+    fun setElementsDisplay(ids:Set<ElementId>,display:ObjectDisplay)=presentationEdit(when(display) {
+        ObjectDisplay.HIDDEN->"Object hidden";ObjectDisplay.XRAY->"Object X-ray";ObjectDisplay.WIREFRAME->"Object wireframe";else->"Object shown"
+    }) {_,document->PresentationCommands.setDisplay(document,ids,display)}
+    fun setRoomSideDisplay(side:RoomSideRef,display:ObjectDisplay)=presentationEdit(if(display==ObjectDisplay.HIDDEN)"Wall hidden"else"Wall display changed") {_,document->
+        PresentationCommands.setRoomSideDisplay(document,side,display)
+    }
+    fun showRoomWalls(roomId:ElementId)=presentationEdit("Room walls shown") {_,document->PresentationCommands.showRoomWalls(document,roomId)}
+    fun showAllObjects()=presentationEdit("All objects shown") {_,document->PresentationCommands.showAll(document)}
+    fun setLevelVisibility(id:LevelId,visible:Boolean)=presentationEdit(if(visible)"Level shown"else"Level hidden") {_,document->
+        PresentationCommands.setLevelVisibility(document,id,visible)
+    }
+    fun showHiddenObjects(show:Boolean)=updateProjectSettings("Show hidden objects") {it.copy(showHiddenObjects=show)}
+    fun autoXrayFrontWalls(enabled:Boolean)=updateProjectSettings("Auto X-ray front walls") {it.copy(autoXrayFrontWalls=enabled)}
+
+    fun setCanvasLayout(layout:CanvasLayout) {
+        val current=state.value;val document=current.document ?: return
+        if(document.project.settings.canvasLayout==layout)return
+        val changed=document.copy(project=document.project.copy(settings=document.project.settings.copy(canvasLayout=layout)))
+        val settings=current.settings.copy(canvasLayouts=current.settings.canvasLayouts+(document.project.id.value to layout))
+        mutableState.value=current.copy(document=changed,settings=settings,dirty=changed!=savedDocument)
+        panelLayoutSave?.cancel()
+        panelLayoutSave=viewModelScope.launch {
+            delay(150)
+            try {preferences.save(state.value.settings)} catch(error:Exception) {
+                if(error is CancellationException)throw error
+                reportError("Panel layout could not be saved: ${error.message.orEmpty()}")
+            }
         }
     }
 
@@ -228,7 +285,8 @@ class AppViewModel(
         if(current.selectedIds.isEmpty())return
         try {
             val bounds=com.eezydraw.core.editing.elementWorldBounds(document,current.selectedIds)
-            val pivot=Point3(bounds.min.x+(bounds.max.x-bounds.min.x)/2,bounds.min.y+(bounds.max.y-bounds.min.y)/2,bounds.min.z+(bounds.max.z-bounds.min.z)/2)
+            val pivot=document.elements.singleOrNull {it.id in current.selectedIds && it.lockMode==LockMode.POSITION_ONLY}?.transform?.translation
+                ?: Point3(bounds.min.x+(bounds.max.x-bounds.min.x)/2,bounds.min.y+(bounds.max.y-bounds.min.y)/2,bounds.min.z+(bounds.max.z-bounds.min.z)/2)
             transformSelection(EditDelta(pivot=pivot,rotation=Rotation3(z=Math.PI/2)))
         } catch(error:IllegalArgumentException) {reportError(error.message ?: "The object could not be rotated.")}
     }
@@ -353,7 +411,10 @@ class AppViewModel(
         if (current.busy) return false
         val document = current.document ?: return false
         return try {
-            val command = build(current, document)
+            val prepared = build(current, document)
+            val preview=prepared.preview(document)
+            val generated=lockGeneratedWalls(document,preview,current.settings.lockWallsByDefault)
+            val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
             val changed = history.execute(document, command)
             publishDrawing(current, changed, if (selectAdded && !command.isEmpty) command.addedElementIds else current.selectedIds)
             true
@@ -384,16 +445,15 @@ class AppViewModel(
             canRedo = history.canRedo,
             canPaste = clipboard.isNotEmpty(),
             error = null,
-            notice = null,
+            notice = null,noticeUndo=false,
         )
     }
 
     private fun visibleSelection(document: ProjectDocument, ids: Set<ElementId>): Set<ElementId> {
         if (ids.isEmpty()) return emptySet()
-        val hiddenLayers = document.layers.filterNot { it.visible }.mapTo(HashSet()) { it.id }
-        val hiddenSystems = document.systems.filterNot { it.visible }.mapTo(HashSet()) { it.id }
-        return document.elements.asSequence().filter { it.id in ids && it.layerId !in hiddenLayers &&
-            it.systemId !in hiddenSystems && (document.project.settings.showMeasurements || !isMeasurement(it)) }.map { it.id }.toSet()
+        val presentation=ScenePresentation(document)
+        return document.elements.asSequence().filter { it.id in ids && presentation.shown(presentation.display(it)) &&
+            (document.project.settings.showMeasurements || !isMeasurement(it)) }.map {it.id}.toSet()
     }
 
     fun prepareViewExport(request: ViewExportRequest, format: ViewExportFormat) {
@@ -409,7 +469,7 @@ class AppViewModel(
                 ?: error(application.getString(R.string.file_unavailable_error))
         }
         pendingViewExport = null
-        mutableState.update { it.copy(notice = application.getString(R.string.canvas_view_exported)) }
+        mutableState.update { it.copy(notice = application.getString(R.string.canvas_view_exported),noticeUndo=false) }
     }
 
     private fun drawingLayer(document: ProjectDocument, lineWeight: Double): Pair<ProjectDocument, Layer> {
@@ -430,7 +490,7 @@ class AppViewModel(
             try {
                 storageMutex.withLock {
                     if (state.value.dirty && persistCurrent() && state.value.settings.showAutosaveNotification) {
-                        mutableState.update { it.copy(notice = application.getString(R.string.project_autosaved_notice)) }
+                        mutableState.update { it.copy(notice = application.getString(R.string.project_autosaved_notice),noticeUndo=false) }
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -445,7 +505,7 @@ class AppViewModel(
 
     fun save() = operation {
         if (persistCurrent()) {
-            mutableState.update { it.copy(notice = application.getString(R.string.project_saved_notice)) }
+            mutableState.update { it.copy(notice = application.getString(R.string.project_saved_notice),noticeUndo=false) }
         }
     }
 
@@ -455,8 +515,9 @@ class AppViewModel(
     }
 
     fun saveSettings(settings: AppSettings) = operation {
-        preferences.save(settings)
-        mutableState.update { it.copy(settings = settings, notice = application.getString(R.string.settings_saved_notice)) }
+        val merged=settings.copy(canvasLayouts=state.value.settings.canvasLayouts)
+        preferences.save(merged)
+        mutableState.update { it.copy(settings = merged, notice = application.getString(R.string.settings_saved_notice),noticeUndo=false) }
         navigate(AppScreen.MENU)
     }
 
@@ -483,7 +544,7 @@ class AppViewModel(
                 ?: error(application.getString(R.string.file_unavailable_error))
         }
         showProject(document)
-        mutableState.update { it.copy(notice = application.getString(R.string.project_imported_notice)) }
+        mutableState.update { it.copy(notice = application.getString(R.string.project_imported_notice),noticeUndo=false) }
     }
 
     fun exportProject(uri: String) = operation {
@@ -494,19 +555,19 @@ class AppViewModel(
                 projects.exportProject(document.project.id.value, it)
             } ?: error(application.getString(R.string.file_unavailable_error))
         }
-        mutableState.update { it.copy(notice = application.getString(R.string.project_exported_notice)) }
+        mutableState.update { it.copy(notice = application.getString(R.string.project_exported_notice),noticeUndo=false) }
     }
 
     fun restoreBackup() {
         val id = state.value.failedProjectId ?: return
         operation {
             showProject(projects.restoreBackup(id))
-            mutableState.update { it.copy(notice = application.getString(R.string.backup_restored_notice)) }
+            mutableState.update { it.copy(notice = application.getString(R.string.backup_restored_notice),noticeUndo=false) }
         }
     }
 
     fun clearError() = mutableState.update { it.copy(error = null, failedProjectId = null) }
-    fun clearNotice() = mutableState.update { it.copy(notice = null) }
+    fun clearNotice() = mutableState.update { it.copy(notice = null,noticeUndo=false) }
     fun reportError(message: String) = mutableState.update { it.copy(error = message) }
 
     private suspend fun persistCurrent(): Boolean {
@@ -535,12 +596,14 @@ class AppViewModel(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            mutableState.update { it.copy(notice = application.getString(R.string.folder_copy_failed_notice)) }
+            mutableState.update { it.copy(notice = application.getString(R.string.folder_copy_failed_notice),noticeUndo=false) }
             false
         }
     }
 
-    private fun showProject(document: ProjectDocument) {
+    private fun showProject(loaded: ProjectDocument) {
+        val remembered=state.value.settings.canvasLayouts[loaded.project.id.value]
+        val document=if(remembered==null)loaded else loaded.copy(project=loaded.project.copy(settings=loaded.project.settings.copy(canvasLayout=remembered)))
         savedDocument = document
         history.clear()
         history.setLimit(state.value.settings.undoLimit)
@@ -558,7 +621,7 @@ class AppViewModel(
 
     private fun operation(action: suspend () -> Unit) {
         if (state.value.busy) return
-        mutableState.update { it.copy(busy = true, error = null, notice = null) }
+        mutableState.update { it.copy(busy = true, error = null, notice = null,noticeUndo=false) }
         viewModelScope.launch {
             try {
                 storageMutex.withLock { action() }

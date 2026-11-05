@@ -66,6 +66,34 @@ class ProjectStorageTest {
     }
 
     @Test
+    fun panelLayoutLocksAndIndividualRoomSideDisplaySurviveReopenAndPortableFiles() = runBlocking {
+        val original=repository.create("Presentation",ProjectTemplate.OFFICE,ProjectSettings())
+        val room=original.elements.first {it.body is ElementBody.Room}
+        val side=RoomSideRef(room.id,0)
+        val displayed=room.withLock(LockMode.POSITION_ONLY).withDisplay(ObjectDisplay.XRAY)
+            .withRoomSideDisplay(side,ObjectDisplay.HIDDEN)
+        val layout=CanvasLayout(hideAll=true).withPanel(CanvasPanelId.PROPERTIES,
+            PanelPlacement(PanelVisibility.COLLAPSED,.82,.44)).withPanel(CanvasPanelId.DRAW,
+            PanelPlacement(PanelVisibility.OPEN,.12,.7))
+        val settings=original.project.settings.copy(canvasLayout=layout,showHiddenObjects=true,
+            hiddenLevelIds=original.levels.take(1).mapTo(mutableSetOf()) {it.id},autoXrayFrontWalls=true)
+        val saved=repository.save(original.copy(project=original.project.copy(settings=settings),
+            elements=original.elements.map {if(it.id==room.id)displayed else it}))
+        val archive=ByteArrayOutputStream()
+        repository.exportProject(saved.project.id.value,archive)
+        database.close();database=open();repository=RoomProjectRepository(context,database)
+        assertEquals(saved,repository.load(saved.project.id.value))
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()))
+        assertEquals(settings,imported.project.settings)
+        val importedRoom=imported.elements.first {it.id==room.id}
+        assertEquals(LockMode.POSITION_ONLY,importedRoom.lockMode)
+        assertEquals(ObjectDisplay.XRAY,importedRoom.objectDisplay)
+        assertEquals(ObjectDisplay.HIDDEN,importedRoom.roomSideDisplay(RoomSideRef(importedRoom.id,0)))
+        assertEquals(room.body,importedRoom.body)
+        assertEquals(room.transform,importedRoom.transform)
+    }
+
+    @Test
     fun openingAProjectMovesItToTheFrontOfRecents() = runBlocking {
         val first = repository.create("First", ProjectTemplate.EMPTY, ProjectSettings())
         val second = repository.create("Second", ProjectTemplate.RESIDENTIAL, ProjectSettings())
@@ -152,6 +180,9 @@ class ProjectStorageTest {
         val chosen = AppSettings(theme = ThemeMode.DARK, inputMode = InputMode.STYLUS, undoLimit = 250,
             backupEnabled = false, showAutosaveNotification = true, bodyDragMovesSelection = true,
             showDetailedMeasurement = true, keepToolActiveAfterPlacing = true,
+            autoHidePanelsWhileDrawing=true,lockWallsByDefault=true,
+            canvasLayouts=mapOf("restored-project" to CanvasLayout(hideAll=true).withPanel(CanvasPanelId.PROPERTIES,
+                PanelPlacement(PanelVisibility.OPEN,.62,.27))),
             precisionPointer=PrecisionPointerSettings(enabled=false,offsetDp=120.0,side=PrecisionOffsetSide.ABOVE_RIGHT,
                 magnifier=false,magnifierZoom=4.0,nudgeStepMetres=.025,hapticFeedback=false))
         settingsRepository.save(chosen)

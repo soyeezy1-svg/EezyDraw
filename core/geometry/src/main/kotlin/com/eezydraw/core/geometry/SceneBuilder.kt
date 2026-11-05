@@ -37,35 +37,66 @@ fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
     val bounds = SceneBounds()
     val levelBounds = linkedMapOf<String?, SceneBounds>()
     val chunks = ChunkCollector()
+    val presentation = ScenePresentation(document)
     for (element in document.elements) {
         if (elementIds != null && element.id !in elementIds) continue
         val layer = layers[element.layerId]
         val system = element.systemId?.let(systems::get)
-        if (layer?.visible == false || system?.visible == false) continue
+        val display = presentation.display(element)
+        if (!presentation.shown(display)) continue
         if (!document.project.settings.showMeasurements && isMeasurement(element)) continue
         val transform = SceneTransform(element.transform)
         val levelId = element.levelId?.value
         val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
         val color = element.colourOverride ?: system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
             ?: layer?.colourArgb ?: 0xFF334455
-        val emitWorld: (Point3, Point3) -> Unit = { a, b ->
+        val partSide = if(element.body is ElementBody.Wall)presentation.wallSide(element) else null
+        val roomCenter = presentation.roomCenter(element)
+        fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { a,b ->
             if (a != b) {
                 require(segments.size < MAX_SEGMENTS) { "Drawing exceeds the $MAX_SEGMENTS wireframe edge limit." }
-                val edge = SceneSegment(a, b, element.id.value, levelId, color)
+                val edge = SceneSegment(a,b,element.id.value,levelId,color,mode,side,roomCenter)
                 segments.add(edge)
-                bounds.add(a); bounds.add(b)
-                levelBounds.getOrPut(levelId, ::SceneBounds).apply { add(a); add(b) }
+                bounds.add(a);bounds.add(b)
+                levelBounds.getOrPut(levelId,::SceneBounds).apply {add(a);add(b)}
                 chunks.add(edge)
             }
         }
-        val emit: (Point3, Point3) -> Unit = { a, b -> emitWorld(transform.apply(a), transform.apply(b)) }
+        fun localEmitter(mode:ObjectDisplay,side:RoomSideRef?):(Point3,Point3)->Unit {
+            val output=worldEmitter(mode,side)
+            return {a,b->output(transform.apply(a),transform.apply(b))}
+        }
+        val emitWorld=worldEmitter(display,partSide)
+        val emit=localEmitter(display,partSide)
         when (val body = element.body) {
             is ElementBody.DrawingShape -> {
                 val measurement = resolveMeasurement(document, element, elements)
                 if (measurement == null) drawShape(body.shape, emit, document.project.settings, transform::apply)
                 else drawMeasurement(measurement, document.project.settings, emitWorld)
             }
-            is ElementBody.Room -> extrude(body.boundary, 0.0, body.ceilingHeight, emit)
+            is ElementBody.Room -> {
+                (listOf(body.boundary.outer)+body.boundary.holes).forEachIndexed {ringIndex,vertices->
+                    for(i in vertices.indices) {
+                        val side=RoomSideRef(element.id,i,if(ringIndex==0)null else ringIndex-1)
+                        val a=vertices[i];val b=vertices[(i+1)%vertices.size]
+                        if(presentation.linkedWall(element,side)!=null) {
+                            // These edges bound the room caps; the linked wall supplies its physical sides.
+                            emit(point(a.x,a.y),point(b.x,b.y))
+                            emit(point(a.x,a.y,body.ceilingHeight),point(b.x,b.y,body.ceilingHeight))
+                            continue
+                        }
+                        val mode=presentation.sideDisplay(element,side)
+                        if(!presentation.shown(mode))continue
+                        val output=localEmitter(mode,side)
+                        output(point(a.x,a.y),point(b.x,b.y))
+                        output(point(a.x,a.y,body.ceilingHeight),point(b.x,b.y,body.ceilingHeight))
+                        output(point(a.x,a.y),point(a.x,a.y,body.ceilingHeight))
+                        val next=RoomSideRef(element.id,(i+1)%vertices.size,side.ringIndex)
+                        if(presentation.sideDisplay(element,next)!=mode)
+                            output(point(b.x,b.y),point(b.x,b.y,body.ceilingHeight))
+                    }
+                }
+            }
             is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
             is ElementBody.Wall -> wall(body, emit)
             is ElementBody.Route -> polyline(body.path, false, emit)
@@ -521,7 +552,8 @@ private class SceneBounds {
     fun build() = if (minX.isFinite()) Bounds3(Point3(minX, minY, minZ), Point3(maxX, maxY, maxZ)) else Bounds3(Point3(), Point3())
 }
 
-private data class ChunkKey(val x: Long, val y: Long, val z: Long, val levelId: String?)
+private data class ChunkKey(val x: Long,val y: Long,val z: Long,val levelId: String?,
+    val display:ObjectDisplay,val roomSide:RoomSideRef?,val roomCenter:Point3?,val elementId:String?)
 
 private class ChunkCollector {
     private val pending = linkedMapOf<ChunkKey, ChunkBuffer>()
@@ -547,12 +579,13 @@ private class ChunkCollector {
                 floor((a.x + (b.x - a.x) * 0.5) / TILE_SIZE).toLong(),
                 floor((a.y + (b.y - a.y) * 0.5) / TILE_SIZE).toLong(),
                 floor((a.z + (b.z - a.z) * 0.5) / TILE_SIZE).toLong(), edge.levelId,
+                edge.display,edge.roomSide,edge.roomCenter.takeIf {edge.roomSide!=null},edge.elementId.takeIf {edge.roomSide!=null},
             )
             var buffer = pending[key]
             if (buffer == null || buffer.count == CHUNK_SEGMENTS) {
                 if (buffer != null) complete.add(buffer.finish())
                 require(complete.size + pending.size < MAX_CHUNKS) { "Drawing exceeds the $MAX_CHUNKS spatial chunk limit." }
-                buffer = ChunkBuffer(a, edge.levelId)
+                buffer = ChunkBuffer(a,edge.levelId,edge.display,edge.roomSide,edge.roomCenter,edge.elementId.takeIf {edge.roomSide!=null})
                 pending[key] = buffer
             }
             buffer.add(a, b, edge.colorArgb)
@@ -566,7 +599,8 @@ private class ChunkCollector {
     }
 }
 
-private class ChunkBuffer(private val origin: Point3, private val levelId: String?) {
+private class ChunkBuffer(private val origin: Point3,private val levelId: String?,
+    private val display:ObjectDisplay,private val roomSide:RoomSideRef?,private val roomCenter:Point3?,private val elementId:String?) {
     var count = 0
         private set
     private var values = FloatArray(14 * 8)
@@ -587,5 +621,5 @@ private class ChunkBuffer(private val origin: Point3, private val levelId: Strin
         values[offset + 5] = (color and 255) / 255f
         values[offset + 6] = ((color shr 24) and 255) / 255f
     }
-    fun finish() = SceneChunk(origin, bounds.build(), levelId, values.copyOf(count * 14))
+    fun finish() = SceneChunk(origin,bounds.build(),levelId,values.copyOf(count*14),display,roomSide,roomCenter,elementId)
 }
