@@ -25,6 +25,8 @@ import com.eezydraw.core.editing.ElementProperties
 import com.eezydraw.core.editing.elementWorldBounds
 import com.eezydraw.core.editing.readProperties
 import com.eezydraw.core.editing.resizeFrame
+import com.eezydraw.core.model.AppSettings
+import com.eezydraw.core.model.PrecisionPointerSettings
 import com.eezydraw.core.model.Element
 import com.eezydraw.core.model.ElementBody
 import com.eezydraw.core.model.LengthUnit
@@ -63,7 +65,9 @@ class ShapeDimensionsFlowTest {
     private val renderedFrame = AtomicReference<CanvasFrame>()
 
     @Before fun prepare() {
-        repositories = TestAppRepositories(context)
+        // These regressions exercise the optional direct-tap workflow.
+        repositories = TestAppRepositories(context, AppSettings(autosaveIntervalSeconds = 0,
+            precisionPointer = PrecisionPointerSettings(enabled = false)))
         model = repositories.newViewModel()
     }
 

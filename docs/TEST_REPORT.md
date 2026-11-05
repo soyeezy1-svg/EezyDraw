@@ -1,21 +1,21 @@
 # Drawing editor validation
 
-Validated on 2026-11-04 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
+Validated on 2026-11-05 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
 
 ## Results
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 16 passed |
+| `:core:model:test` | 19 passed |
 | `:core:geometry:test` | 67 passed |
-| `:core:editing:test` | 115 passed |
+| `:core:editing:test` | 129 passed |
 | `:core:data:testDebugUnitTest` | 12 passed |
-| `:app:testDebugUnitTest` | 142 passed |
+| `:app:testDebugUnitTest` | 163 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **352 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **390 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -26,6 +26,10 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Coverage and corrected issues
 
+- Precision input defaults on and shares one `PrecisionPick` between crosshair, ghost, snap labels, live distance and confirmation. Finger down/drag/up never writes geometry; Place confirms each point. Tests cover retained candidates, cancellation, exact library/shape placement, all current drawing-tool previews, line/Measure/reference sequences, partial-point and nudge undo/redo, and the optional legacy direct-tap path.
+- Pure geometry tests check the 80dp offset at different densities, handedness, edge flipping/clamping, pen-tip input, loupe corner avoidance and physical nudge directions in every view/projection at large coordinates. Prepared point queries cover all six snap modes, real 3D intersections, wall edges, level filtering, near/eye-plane clipping and bounded local queries on 100,000 edges.
+- Loupe screenshot tests verify actual red/blue drawing geometry, 2×/4× source-pixel spacing, dark-theme edge contrast and finger/control avoidance. The sRGB expectation permits one 8-bit colour quantization unit, matching Compose and the framebuffer. Snap haptics fire once for a changed discrete snap and respect the persisted off option; a real stylus `MotionEvent` confirms pen-tip coordinates without a finger offset.
+- Settings tests validate precision enable/direct-tap mode, offset/side, loupe/zoom, grid or custom SI nudges, haptics, partial drafts, recreation and durable Room serialization. Integration checks preserve chosen levels and exact 3D preview/commit XYZ, and save a raised component reference at its shown 1.2m mounting height. Pending candidates are invalidated when geometry/visibility changes or camera motion makes them unprojectable/offscreen.
 - Selected objects expose five primary actions only: Move/Rotate, Copy, Delete, Properties and More. Tests check explicit Properties opening, More-only Scale, layer/colour/object locks, Rotate 90°, rotation-snap choices, exact undo/redo and persistence-compatible preference defaults.
 - Axis gesture tests cover X/Y/Z movement in plan/top/front/side/isometric views and both projection types, including collapsed-axis fallbacks, absolute grid capture, geometry snaps and preservation of untouched coordinates. Rotation tests cover all three axes, each snap interval, pre-existing tilted/mirrored objects, preview/commit agreement, cancellation and history.
 - Every drawing tool builds a disposable ghost before the first pick. Integration tests check no immediate creation, drag-only preview tracking, explicit cancellation, default Select reset, Keep tool active, library placement, floor-consistent front/side previews and one-step placement undo. Screenshot checks draw the actual Compose view and verify ghost opacity without requiring a Robolectric Window compositor callback.

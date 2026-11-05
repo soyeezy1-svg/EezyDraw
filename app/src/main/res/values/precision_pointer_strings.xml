@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="precision_crosshair">Precision crosshair</string>
+    <string name="precision_loupe">Magnified precision point</string>
+    <string name="precision_place">Place</string>
+    <string name="precision_cancel">Cancel</string>
+    <string name="precision_nudge_up">Nudge up</string>
+    <string name="precision_nudge_down">Nudge down</string>
+    <string name="precision_nudge_left">Nudge left</string>
+    <string name="precision_nudge_right">Nudge right</string>
+    <string name="precision_wall_edge">Wall edge</string>
+    <string name="precision_distance">Distance %1$s %2$s</string>
+</resources>

@@ -52,6 +52,7 @@ import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.ElevationReference
 import com.eezydraw.core.model.InputMode
 import com.eezydraw.core.model.LengthUnit
+import com.eezydraw.core.model.PrecisionOffsetSide
 import com.eezydraw.core.model.ProjectTemplate
 import com.eezydraw.core.model.RenderQuality
 import com.eezydraw.core.model.RouteKind
@@ -242,6 +243,40 @@ fun SettingsScreen(
                     { update(current.copy(inputMode = it)) }, "settings_input",
                 )
             }
+            item { SectionHeading(stringResource(R.string.settings_precision_pointer_heading)) }
+            item {
+                SettingSwitch(stringResource(R.string.settings_precision_pointer), current.precisionPointer.enabled,
+                    { update(current.copy(precisionPointer=current.precisionPointer.copy(enabled=it))) }, "settings_precision_pointer")
+                Text(stringResource(R.string.settings_precision_pointer_help), style=MaterialTheme.typography.bodySmall)
+            }
+            item { NumericField("pointer_offset", R.string.settings_pointer_offset, draft, errors, input,
+                help=R.string.settings_pointer_offset_help) }
+            item {
+                ChoiceField(stringResource(R.string.settings_pointer_side), current.precisionPointer.side,
+                    PrecisionOffsetSide.entries.map { it to stringResource(if(it==PrecisionOffsetSide.ABOVE_LEFT)
+                        R.string.settings_pointer_right_handed else R.string.settings_pointer_left_handed) },
+                    { update(current.copy(precisionPointer=current.precisionPointer.copy(side=it))) }, "settings_pointer_side")
+            }
+            item {
+                SettingSwitch(stringResource(R.string.settings_pointer_magnifier), current.precisionPointer.magnifier,
+                    { update(current.copy(precisionPointer=current.precisionPointer.copy(magnifier=it))) }, "settings_pointer_magnifier")
+            }
+            item { NumericField("pointer_zoom", R.string.settings_pointer_zoom, draft, errors, input,
+                help=R.string.settings_pointer_zoom_help) }
+            item {
+                SettingSwitch(stringResource(R.string.settings_pointer_use_grid), current.precisionPointer.nudgeStepMetres==null,
+                    { followGrid-> update(current.copy(precisionPointer=current.precisionPointer.copy(
+                        nudgeStepMetres=if(followGrid)null else current.projectDefaults.snap.gridSpacing))) }, "settings_pointer_use_grid")
+                Text(stringResource(R.string.settings_pointer_nudge_help), style=MaterialTheme.typography.bodySmall)
+            }
+            if(current.precisionPointer.nudgeStepMetres!=null) item {
+                NumericField("pointer_nudge", R.string.settings_pointer_nudge, draft, errors, input,
+                    label=stringResource(R.string.settings_pointer_nudge_unit,unit))
+            }
+            item {
+                SettingSwitch(stringResource(R.string.settings_pointer_haptic), current.precisionPointer.hapticFeedback,
+                    { update(current.copy(precisionPointer=current.precisionPointer.copy(hapticFeedback=it))) }, "settings_pointer_haptic")
+            }
             item { NumericField("gesture", R.string.settings_gesture, draft, errors, input, help = R.string.settings_gesture_help) }
             item {
                 SettingSwitch(
@@ -357,6 +392,8 @@ private fun NumericField(
                 "autosave" -> R.string.settings_autosave_help
                 "undo" -> R.string.settings_undo_help
                 "gesture" -> R.string.settings_gesture_help
+                "pointer_offset" -> R.string.settings_pointer_offset_help
+                "pointer_zoom" -> R.string.settings_pointer_zoom_help
                 else -> R.string.settings_number_error
             }))
             else if (help != null) Text(stringResource(help))

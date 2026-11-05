@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="precision_aim_hint">Drag to aim %1$s, then tap Place to confirm each point.</string>
+    <string name="precision_object_reference">Object reference</string>
+</resources>

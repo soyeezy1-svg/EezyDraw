@@ -14,7 +14,7 @@ import com.eezydraw.R
 @Composable
 internal fun PlacementBanner(
     activeLabel: String, hint: String, canDone: Boolean,
-    onCancel: () -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier,
+    onCancel: () -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier, showCancel:Boolean=true,
 ) {
     Surface(modifier.fillMaxWidth().testTag("placement_banner"),
         color = MaterialTheme.colorScheme.primaryContainer,
@@ -24,7 +24,7 @@ internal fun PlacementBanner(
                 Text(activeLabel, style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("placement_active_tool"))
                 Text(hint, style = MaterialTheme.typography.bodySmall, maxLines = 2, modifier = Modifier.testTag("placement_hint"))
             }
-            TextButton(onCancel, Modifier.heightIn(min = 48.dp).testTag("placement_cancel")) {
+            if(showCancel) TextButton(onCancel, Modifier.heightIn(min = 48.dp).testTag("placement_cancel")) {
                 Text(stringResource(R.string.placement_cancel))
             }
             TextButton(onDone, Modifier.heightIn(min = 48.dp).testTag("placement_done"), enabled = canDone) {

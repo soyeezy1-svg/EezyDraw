@@ -73,7 +73,9 @@ class CleanSelectionPlacementFlowTest {
     private val drawing = AtomicReference<DrawingScene?>()
 
     @Before fun prepare() {
-        repositories = TestAppRepositories(context)
+        // These regressions exercise the optional direct-tap workflow.
+        repositories = TestAppRepositories(context, AppSettings(autosaveIntervalSeconds = 0,
+            precisionPointer = PrecisionPointerSettings(enabled = false)))
         model = repositories.newViewModel()
     }
     @After fun close() { repositories.close() }

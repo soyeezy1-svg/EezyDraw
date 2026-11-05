@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.LengthUnit
+import com.eezydraw.core.model.PrecisionOffsetSide
 import com.eezydraw.core.model.SnapMode
 import com.eezydraw.core.model.ThemeMode
 import com.eezydraw.ui.theme.EezyDrawTheme
@@ -206,6 +207,56 @@ class SettingsScreenTest {
             assertEquals(true, saved?.showDetailedMeasurement)
             assertEquals(true, saved?.keepToolActiveAfterPlacing)
         }
+    }
+
+    @Test
+    fun precisionPointerChoicesAndCustomNudgeSurviveDraftRestoration() {
+        var saved:AppSettings?=null
+        val restoration=StateRestorationTester(compose)
+        restoration.setContent {
+            EezyDrawTheme { Surface {SettingsScreen(AppSettings(),{saved=it},{},{},{},{})} }
+        }
+        visible("settings_precision_pointer").assertIsOn()
+        enter("settings_pointer_offset","96")
+        choose("settings_pointer_side","Left-handed · above right")
+        visible("settings_pointer_magnifier").assertIsOn().performClick()
+        enter("settings_pointer_zoom","4")
+        visible("settings_pointer_use_grid").assertIsOn().performClick()
+        enter("settings_pointer_nudge","25")
+        visible("settings_pointer_haptic").assertIsOn().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        visible("settings_pointer_offset").assertTextContains("96")
+        visible("settings_pointer_side").assertTextContains("Left-handed · above right")
+        visible("settings_pointer_magnifier").assertIsOff()
+        visible("settings_pointer_haptic").assertIsOff()
+        visible("settings_pointer_use_grid").assertIsOff()
+        visible("settings_pointer_nudge").assertTextContains("25")
+        compose.onNodeWithTag("settings_save").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            val pointer=checkNotNull(saved).precisionPointer
+            assertEquals(true,pointer.enabled)
+            assertEquals(96.0,pointer.offsetDp,0.0)
+            assertEquals(PrecisionOffsetSide.ABOVE_RIGHT,pointer.side)
+            assertEquals(4.0,pointer.magnifierZoom,0.0)
+            assertEquals(.025,pointer.nudgeStepMetres!!,1e-12)
+            assertEquals(false,pointer.magnifier)
+            assertEquals(false,pointer.hapticFeedback)
+        }
+    }
+
+    @Test
+    fun directTapOptionAndInvalidPointerNumbersAreExplicit() {
+        var saved:AppSettings?=null
+        showSettings(onSave={saved=it})
+        enter("settings_pointer_offset","12")
+        compose.onNodeWithTag("settings_save").assertIsNotEnabled()
+        enter("settings_pointer_offset","80")
+        enter("settings_pointer_zoom","5")
+        compose.onNodeWithTag("settings_save").assertIsNotEnabled()
+        enter("settings_pointer_zoom","3")
+        visible("settings_precision_pointer").assertIsOn().performClick()
+        compose.onNodeWithTag("settings_save").assertIsEnabled().performClick()
+        compose.runOnIdle {assertEquals(false,saved?.precisionPointer?.enabled)}
     }
 
     private fun showSettings(

@@ -45,6 +45,27 @@ data class ProjectSettings(
     }
 }
 
+/** Finger offset is a screen preference; physical nudge lengths are canonical metres. */
+@Serializable enum class PrecisionOffsetSide { ABOVE_LEFT, ABOVE_RIGHT }
+
+@Serializable
+data class PrecisionPointerSettings(
+    val enabled: Boolean = true,
+    val offsetDp: Double = 80.0,
+    val side: PrecisionOffsetSide = PrecisionOffsetSide.ABOVE_LEFT,
+    val magnifier: Boolean = true,
+    val magnifierZoom: Double = 3.0,
+    /** Null follows the active project's grid, rather than a device-specific length. */
+    val nudgeStepMetres: Double? = null,
+    val hapticFeedback: Boolean = true,
+) {
+    init {
+        require(offsetDp.isFinite() && offsetDp in 24.0..240.0)
+        require(magnifierZoom.isFinite() && magnifierZoom in 2.0..4.0)
+        require(nudgeStepMetres == null || nudgeStepMetres.isFinite() && nudgeStepMetres > 0.0)
+    }
+}
+
 /** Device preferences are separate from project data and from Android permission grants. */
 @Serializable
 data class AppSettings(
@@ -67,6 +88,7 @@ data class AppSettings(
     val bodyDragMovesSelection: Boolean = false,
     val showDetailedMeasurement: Boolean = false,
     val keepToolActiveAfterPlacing: Boolean = false,
+    val precisionPointer: PrecisionPointerSettings = PrecisionPointerSettings(),
 ) {
     init {
         require(languageTag.isNotBlank())
