@@ -143,11 +143,12 @@ class CanvasPanelsTest {
     }
 
     @Test
-    fun libraryOffersOnlyDefinitionsActuallyPresentInTheProject() {
+    fun libraryOffersBuiltInsAndProjectSpecificDefinitions() {
         var items by mutableStateOf(emptyList<LibraryItem>())
         val inserted = mutableListOf<LibraryItemId>()
         compose.setContent { EezyDrawTheme { LibraryPanel(items, inserted::add, {}) } }
-        compose.onNodeWithText("This project has no library definitions yet. Imported project definitions appear here.").assertExists()
+        compose.onNodeWithTag("library_search").assertExists()
+        compose.onNodeWithTag("library_folder_category_Electrical").assertExists()
         val socket = LibraryItem(LibraryItemId("socket"), "Socket", Discipline.ELECTRICAL, "Electrical", Size3(.1, .05, .1))
         compose.runOnIdle { items = listOf(socket) }
         compose.onNodeWithTag("library_insert_socket").performClick()

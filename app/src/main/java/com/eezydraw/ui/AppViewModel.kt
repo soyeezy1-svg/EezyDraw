@@ -21,6 +21,9 @@ import com.eezydraw.core.editing.EditCommands
 import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.editing.EditHistory
 import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.editing.LibraryCommands
+import com.eezydraw.core.editing.LibraryInstanceProperties
+import com.eezydraw.core.editing.previewLibraryPlacement
 import com.eezydraw.core.editing.MirrorAxis
 import com.eezydraw.core.editing.SketchGeometry
 import com.eezydraw.core.editing.applyProperties
@@ -350,13 +353,33 @@ class AppViewModel(
     }
 
     fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?):Boolean {
-        return drawingEdit(selectAdded = true) { current, document ->
-            val item = requireNotNull(document.libraryItems.find { it.id == id }) { "The library item is no longer available." }
+        val placed = drawingEdit(selectAdded = true) { current, document ->
+            val item = requireNotNull(document.libraryItems.find { it.id == id } ?: BuiltInLibrary.find(id)) {
+                "The library item is no longer available."
+            }
             val (prepared, layer) = drawingLayer(document,current.settings.defaultLineWeightMm)
-            val element = Element(ElementId(UUID.randomUUID().toString()),document.project.id,layer.id,
-                ElementBody.Component(item.id,item.defaultSize, item.parameters),levelId?.let(::LevelId),
-                name = item.name,transform = Transform3(translation = at),materialId = item.materialId)
-            EditCommands.between(document,prepared.copy(elements = document.elements + element),"Insert library item")
+            val placement = previewLibraryPlacement(prepared,item,at,levelId?.let(::LevelId),layer.id,
+                ElementId(UUID.randomUUID().toString()))
+            EditCommands.between(document,LibraryCommands.place(prepared,placement).preview(prepared),"Insert library item")
+        }
+        if (placed) state.value.document?.libraryState?.recordUsed(id)?.let(::setLibraryState)
+        return placed
+    }
+
+    /** Browsing preferences persist with the project, independently of geometry undo. */
+    fun setLibraryState(libraryState: LibraryState) = edit { it.copy(libraryState=libraryState) }
+
+    fun updateLibraryProperties(transform: ElementProperties, properties: LibraryInstanceProperties, updateAll: Boolean = false) {
+        drawingEdit { current, document ->
+            require(current.selectedIds.size == 1) { "Select one library item to edit its properties." }
+            LibraryCommands.edit(document,current.selectedIds.single(),properties,transform,updateAll)
+        }
+    }
+
+    fun resetLibraryProperties() {
+        drawingEdit { current, document ->
+            require(current.selectedIds.size == 1) { "Select one library item to reset." }
+            LibraryCommands.reset(document,current.selectedIds.single())
         }
     }
 

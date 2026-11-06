@@ -43,6 +43,9 @@ data class CanvasEditorActions(
     val onShowAll:()->Unit={},
     val onShowHidden:(Boolean)->Unit={},
     val onAutoXray:(Boolean)->Unit={},
+    val onLibraryState:(LibraryState)->Unit={},
+    val onLibraryProperties:(ElementProperties,LibraryInstanceProperties,Boolean)->Unit={_,_,_->},
+    val onResetLibraryProperties:()->Unit={},
 )
 
 internal fun Bounds3.center() = Point3(

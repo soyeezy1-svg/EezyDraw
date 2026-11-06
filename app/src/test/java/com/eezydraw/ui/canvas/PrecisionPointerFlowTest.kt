@@ -188,7 +188,7 @@ class PrecisionPointerFlowTest {
         reopen(initial.copy(libraryItems = listOf(socket), project = initial.project.copy(settings = initial.project.settings.copy(
             snap = initial.project.settings.snap.copy(enabled = false)))))
         compose.onNodeWithTag("toolbar_library").performClick()
-        compose.onNodeWithTag("library_insert_precision-socket").performClick()
+        compose.onNodeWithTag("library_insert_precision-socket").performScrollTo().performClick()
         compose.onNodeWithTag("library_panel").assertIsDisplayed()
         compose.onNodeWithTag("panel_library_collapse").performClick()
         compose.onNodeWithTag("library_panel").assertDoesNotExist()
@@ -205,7 +205,10 @@ class PrecisionPointerFlowTest {
         compose.onNodeWithTag("precision_place").assertDoesNotExist()
         compose.onNodeWithTag("view_undo").performScrollTo().performClick()
         awaitElements(0)
-        compose.runOnIdle { assertFalse(model.state.value.dirty) }
+        compose.runOnIdle {
+            assertEquals(listOf(socket.id), checkNotNull(model.state.value.document).libraryState.recentIds)
+            assertTrue("Undoing geometry retains the saved Recently used preference", model.state.value.dirty)
+        }
     }
 
     @Test

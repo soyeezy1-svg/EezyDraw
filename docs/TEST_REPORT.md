@@ -1,4 +1,4 @@
-# Drawing editor validation
+# Library and drawing editor validation
 
 Validated on 2026-11-06 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
 
@@ -6,16 +6,16 @@ Validated on 2026-11-06 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned 
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 23 passed |
-| `:core:geometry:test` | 75 passed |
-| `:core:editing:test` | 142 passed |
-| `:core:data:testDebugUnitTest` | 13 passed |
-| `:app:testDebugUnitTest` | 197 passed |
+| `:core:model:test` | 27 passed |
+| `:core:geometry:test` | 83 passed |
+| `:core:editing:test` | 168 passed |
+| `:core:data:testDebugUnitTest` | 15 passed |
+| `:app:testDebugUnitTest` | 217 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **450 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **510 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -26,6 +26,9 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Coverage and corrected issues
 
+- Library regressions cover all 32 Electrical/ICT definitions, stable IDs, physical sizes, vector symbols and 3D geometry; case/punctuation search (including Wi-Fi aliases), favorites, bounded recents, grid/list switching and lazy composition with 500 definitions. Scene tests compile 384 instances and retain physical bounds, signed transforms, visibility and colours with plan symbols enabled.
+- Placement checks cover both finish faces and all wall references, outward orientation, rotated/scaled/mirrored walls, implicit room and hole faces, linked-wall suppression, per-level floors, room/level ceilings and hanging ceiling geometry. Ghost and precision confirmation share the resolved insertion and AFFL; missing walls and hidden target systems cannot commit. Whole-canvas checks keep Library open/collapsed/hidden as explicitly chosen even with panel auto-hide enabled, and return library placement to Select despite the repeat-tool preference.
+- Instance Properties tests apply physical size, mounting height, material, colour, system, manufacturer, model and name tag atomically. Update-all tests preserve other types and each instance's X/Y/orientation, use each floor, include hidden instances and reject locked bulk edits without partial changes. Reset restores library/custom defaults, including legacy material references, while preserving position locks. Metadata-only edits on legacy items retain their rendered layer/material/system colours. Real Room/archive and ViewModel tests retain used definitions, hosts, edited parameters and browsing state across save/reopen/import. Browsing preferences survive geometry undo/redo; placement and associated definition/system/material additions undo together.
 - Panel integration checks retain exact user layout across selection, move, rotation, Measure and placement. Collapse/expand/hide and drag-end edits are explicit; changing panel contents preserves its viewport anchor, and context actions avoid occupied panel bounds. Fullscreen keeps one restore control. Project saves, a per-project Room-settings cache and late-settings cold-start tests restore layout with autosave off; layout stays outside drawing undo.
 - Lock tests cover ALL and POSITION_ONLY, view-only locked Properties and padlock feedback, unlock, layer unlock precedence, current-level bulk locks and generated-wall defaults. POSITION_ONLY protects insertion XYZ while permitting rotation/scale about that insertion and numeric size edits; only ALL blocks deletion. No-op actions do not offer an unrelated Undo, and ordinary save/settings notices never inherit drawing Undo.
 - Per-object and per-room-edge display tests cover Normal, Hide, X-ray and Wireframe across shapes, rooms, walls, slabs and library items. Linked shared walls keep one physical geometry; restoring room walls clears conflicting owner-side overrides in one undoable change. Bounds and associative measurements use unfiltered physical geometry and do not shrink when display changes.

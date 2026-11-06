@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.editing.LibraryInstanceProperties
 import com.eezydraw.core.model.LockMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.ui.canvas.editing.PropertiesEditor
@@ -46,11 +47,17 @@ fun PropertiesSidePanel(
     lockMode:LockMode=LockMode.NONE,
     layerLocked:Boolean=false,
     embedded:Boolean=false,
+    libraryProperties: LibraryInstanceProperties? = null,
+    onApplyLibrary: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onUpdateAllOfType: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onResetToLibraryDefault: (() -> Unit)? = null,
 ) {
     if(embedded) {
         PropertiesEditor(properties,units,precision,onApply,onDismiss,
             modifier.width(320.dp).heightIn(max=520.dp).testTag("properties_side_panel").padding(12.dp),
-            lockMode=lockMode,layerLocked=layerLocked)
+            lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
+            onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
+            onResetToLibraryDefault=onResetToLibraryDefault)
         return
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
@@ -71,7 +78,10 @@ fun PropertiesSidePanel(
                 HorizontalDivider()
                 drafts.SaveableStateProvider("properties_editor") {
                     PropertiesEditor(properties, units, precision, onApply, onDismiss,
-                        Modifier.fillMaxWidth().weight(1f, fill = false).padding(12.dp),lockMode=lockMode,layerLocked=layerLocked)
+                        Modifier.fillMaxWidth().weight(1f, fill = false).padding(12.dp),
+                        lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
+                        onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
+                        onResetToLibraryDefault=onResetToLibraryDefault)
                 }
             }
         }

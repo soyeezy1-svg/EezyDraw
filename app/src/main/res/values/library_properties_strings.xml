@@ -1,0 +1,15 @@
+<resources>
+    <string name="library_instance_parameters">Item parameters</string>
+    <string name="library_instance_only">Apply changes this instance only.</string>
+    <string name="library_mounting_height">Mounting height above floor (%1$s)</string>
+    <string name="library_mounting_error">Enter a finite mounting height of zero or more.</string>
+    <string name="library_property_material">Material</string>
+    <string name="library_property_colour">Colour (#AARRGGBB)</string>
+    <string name="library_property_system">System (power, ICT, HVAC…)</string>
+    <string name="library_property_manufacturer">Manufacturer</string>
+    <string name="library_property_model">Model</string>
+    <string name="library_property_name_tag">Name tag</string>
+    <string name="library_colour_error">Use six RGB or eight ARGB hexadecimal digits.</string>
+    <string name="library_update_all_type">Update all of this type in the project</string>
+    <string name="library_reset_default">Reset to library default</string>
+</resources>

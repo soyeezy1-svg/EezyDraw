@@ -173,6 +173,8 @@ fun EezyDrawApp(
                                             onElementsDisplay=viewModel::setElementsDisplay,onRoomSideDisplay=viewModel::setRoomSideDisplay,
                                             onShowRoomWalls=viewModel::showRoomWalls,onLevelVisibility=viewModel::setLevelVisibility,
                                             onShowAll=viewModel::showAllObjects,onShowHidden=viewModel::showHiddenObjects,onAutoXray=viewModel::autoXrayFrontWalls,
+                                            onLibraryState=viewModel::setLibraryState,onLibraryProperties=viewModel::updateLibraryProperties,
+                                            onResetLibraryProperties=viewModel::resetLibraryProperties,
                                         ),
                                         onExportView={request,format->
                                             viewModel.prepareViewExport(request,format)

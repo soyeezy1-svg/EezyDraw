@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_placement_mounting_height">Mounting height: %1$s %2$s AFFL</string>
+    <string name="library_placement_needs_wall">Choose a visible wall on this level to mount this item.</string>
+</resources>

@@ -16,8 +16,9 @@ object EditCommands {
         allowLockedPresentation:Boolean=false): EditCommand {
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
         require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues,
-            systems=after.systems,project=before.project.copy(settings=after.project.settings)) == after) {
-            "Drawing edits can change only elements, layers, systems, settings, groups and issues"
+            systems=after.systems,libraryItems=after.libraryItems,materials=after.materials,
+            project=before.project.copy(settings=after.project.settings)) == after) {
+            "Drawing edits can change only elements, library definitions, materials, layers, systems, settings, groups and issues"
         }
         val old = before.elements.withIndex().associateBy { it.value.id }
         val next = after.elements.withIndex().associateBy { it.value.id }
@@ -47,11 +48,16 @@ object EditCommands {
             if(!(allowLockedPresentation && previous!=null && isPresentationOnly(previous,candidate)))requireLayerEditable(after,candidate)
         }
         require(after.systems.map {it.id}.toSet().size==after.systems.size && after.systems.all {it.projectId==after.project.id}) {"Invalid drawing systems"}
+        require(after.libraryItems.map {it.id}.toSet().size==after.libraryItems.size) {"Duplicate library definitions"}
+        require(after.materials.map {it.id}.toSet().size==after.materials.size) {"Duplicate drawing materials"}
         val systemIds=after.systems.mapTo(HashSet()){it.id}
         require(after.elements.all {it.systemId==null || it.systemId in systemIds}) {"An object system no longer exists"}
         require(candidates.none { element -> after.underlays.any { it.id == element.id } }) { "Object ID is used by an underlay" }
         val deleted = old.keys - next.keys
-        validateReferences(after, after.elements, if (deleted.isEmpty()) candidates else after.elements)
+        val definitionReferencesChanged = before.libraryItems != after.libraryItems || before.materials != after.materials
+        validateReferences(after, after.elements, if (deleted.isEmpty() && !definitionReferencesChanged) candidates else after.elements)
+        val materialIds = after.materials.mapTo(HashSet()) { it.id }
+        require(after.libraryItems.all { it.materialId == null || it.materialId in materialIds }) { "A library material no longer exists" }
         if (deleted.isNotEmpty()) {
             require(after.groups.none { group -> group.elementIds.any { it in deleted } } &&
                 after.issues.none { issue ->
@@ -72,6 +78,8 @@ object EditCommands {
             groups = if (before.groups == after.groups) null else LinkPatch(before.groups, after.groups),
             issues = if (before.issues == after.issues) null else LinkPatch(before.issues, after.issues),
             systems = if(before.systems==after.systems)null else LinkPatch(before.systems,after.systems),
+            libraryItems = if(before.libraryItems==after.libraryItems)null else LinkPatch(before.libraryItems,after.libraryItems),
+            materials = if(before.materials==after.materials)null else LinkPatch(before.materials,after.materials),
             settings = after.project.settings.copy(canvasLayout=before.project.settings.canvasLayout).let {nextSettings->
                 if(before.project.settings==nextSettings)null else ValuePatch(before.project.settings,nextSettings)
             },

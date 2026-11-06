@@ -24,10 +24,16 @@ private const val TAU = PI * 2
  * Builds a bounded wireframe snapshot without Android dependencies. Call off the UI thread.
  * Curves use 64 segments per turn; routes show their actual centreline. Library geometry is
  * scaled to the instance size, with a size box only when its definition has no geometry.
+ * Plan symbols add their strokes to the component's upward-facing local face; the physical edges
+ * remain present so selection bounds, height handles and reference dimensions stay physical.
  * The explicit 500,000-edge / 16,384-chunk budget rejects oversized documents rather than
  * silently dropping geometry or allocating unbounded GPU buffers.
  */
-fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = null): DrawingScene {
+fun buildDrawingScene(
+    document: ProjectDocument,
+    elementIds: Set<ElementId>? = null,
+    planSymbols: Boolean = false,
+): DrawingScene {
     val layers = document.layers.associateBy { it.id }
     val systems = document.systems.associateBy { it.id }
     val library = document.libraryItems.associateBy { it.id }
@@ -104,7 +110,8 @@ fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                 val definition = library[body.libraryItemId]
                 if (definition == null || definition.geometry.isEmpty()) {
                     box(body.size, emit)
-                } else {
+                }
+                if (definition != null) {
                     val sx = body.size.width / definition.defaultSize.width
                     val sy = body.size.depth / definition.defaultSize.depth
                     val sz = body.size.height / definition.defaultSize.height
@@ -114,6 +121,20 @@ fun buildDrawingScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                     definition.geometry.forEach { shape ->
                         drawShape(shape, instance, document.project.settings) { p ->
                             transform.apply(point(p.x * sx, p.y * sy, p.z * sz))
+                        }
+                    }
+                    if (planSymbols) {
+                        // Symbol coordinates use the definition's XY footprint. Raising them
+                        // before the element transform keeps local scale/rotation/mirroring
+                        // identical to the physical body, without scaling height twice. A
+                        // ceiling item hangs with negative local Z, so its upper face is Z=0.
+                        val rotation = element.transform.rotation
+                        val upward = element.transform.scale.z * cos(rotation.x) * cos(rotation.y) >= 0.0
+                        val symbolZ = if (upward) body.size.height else 0.0
+                        fun symbolPoint(p: Point3) = point(p.x * sx, p.y * sy, symbolZ)
+                        val symbolEmitter: (Point3, Point3) -> Unit = { a, b -> emit(symbolPoint(a), symbolPoint(b)) }
+                        definition.symbolGeometry.forEach { shape ->
+                            drawShape(shape, symbolEmitter, document.project.settings) { p -> transform.apply(symbolPoint(p)) }
                         }
                     }
                 }

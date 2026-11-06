@@ -23,4 +23,5 @@ data class ProjectDocument(
     val sheets: List<Sheet> = emptyList(),
     val revisions: List<Revision> = emptyList(),
     val assets: List<ProjectAsset> = emptyList(),
+    val libraryState: LibraryState = LibraryState(),
 )

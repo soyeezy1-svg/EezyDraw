@@ -94,6 +94,7 @@ private sealed interface SceneLoad {
         val detailedMeasurements:Boolean,
         val pointPicks:PointPickContext,
         val componentReferences:Map<ElementId,Point3>,
+        val planSymbols:Boolean,
     ) : SceneLoad
     data object Failed : SceneLoad
 }
@@ -172,7 +173,7 @@ fun DrawingCanvasScreen(
     var precisionSnap by remember {mutableStateOf<PrecisionSnapKey?>(null)}
     var pointUndo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
     var pointRedo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
-    var pendingLibrary by rememberSaveable {mutableStateOf<String?>(null)}
+    var pendingLibrary by rememberSaveable(document.project.id.value) {mutableStateOf<String?>(null)}
     var placedToken by remember {mutableIntStateOf(0)}
     var placedFeedback by remember {mutableStateOf(false)}
     var addSelection by rememberSaveable { mutableStateOf(false) }
@@ -232,12 +233,36 @@ fun DrawingCanvasScreen(
         if(propertiesOpen)document.elements.singleOrNull {it.id in selectedIds} else null
     }
     val selectedProperties=remember(document,selectedElement) { selectedElement?.let {readProperties(document,it)} }
+    val selectedLibraryProperties=remember(document,selectedElement) {
+        selectedElement?.takeIf {it.body is ElementBody.Component}?.let {readLibraryProperties(document,it)}
+    }
+    val pendingLibraryItem=remember(document.libraryItems,pendingLibrary) {
+        pendingLibrary?.let {id->document.libraryItems.find {it.id.value==id} ?: BuiltInLibrary.find(LibraryItemId(id))}
+    }
+    val libraryAim=precisionPick?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
+    val libraryPlacementResult=remember(document,pendingLibraryItem,libraryAim,selectedLevel) {
+        pendingLibraryItem?.let {item->runCatching {
+            previewLibraryPlacement(libraryPreviewDocument(document),item,libraryAim,selectedLevel?.let(::LevelId))
+        }}
+    }
+    val libraryPlacement=libraryPlacementResult?.getOrNull()
+    // Keep the raw aim for recomputing the host attachment; display the resolved insertion point.
+    val displayedPrecisionPick=if(pendingLibraryItem!=null && libraryPlacement!=null)precisionPick?.let {pick->
+        val point=libraryPlacement.element.transform.translation
+        projectPrecisionPoint(point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())?.let {screen->
+            pick.copy(point=point,screen=screen,wallEdge=libraryPlacement.wallSnapped,
+                mode=pick.mode.takeIf {pick.point==point},
+                elementId=(libraryPlacement.element.body as ElementBody.Component).host?.hostElementId)
+        }
+    } else precisionPick
     val lockedSelection = remember(document.elements,document.layers,selectedIds) {
         val lockedLayers = document.layers.filter { it.locked }.mapTo(HashSet()) { it.id }
         document.elements.any { it.id in selectedIds && (it.layerId in lockedLayers || it.lockMode==LockMode.ALL) }
     }
     val positionLockedSelection=remember(document.elements,selectedIds) {document.elements.any {it.id in selectedIds && it.lockMode==LockMode.POSITION_ONLY}}
     val positionLockedPivot=remember(document.elements,selectedIds) {document.elements.singleOrNull {it.id in selectedIds && it.lockMode==LockMode.POSITION_ONLY}?.transform?.translation}
+    // Plan symbols add strokes to the same physical geometry. Keep valid picks available
+    // while the camera's line presentation is being rebuilt after a 2D/3D switch.
     val geometryMatches = remember(ready?.document,document,ready?.detailedMeasurements,settings.showDetailedMeasurement) {
         ready?.let { sameCanvasGeometry(it.document,document) && it.detailedMeasurements==settings.showDetailedMeasurement } == true }
     val sceneMatches = geometryMatches && ready?.selectedIds == selectedIds
@@ -275,24 +300,25 @@ fun DrawingCanvasScreen(
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
         document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
-        settings.showDetailedMeasurement,selectedIds,needsSurfaces) {
+        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
-                val sameGeometry = previous != null && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement
-                val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument)
+                val planSymbols=!is3D
+                val sameGeometry = previous != null && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
+                val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument,planSymbols=planSymbols)
                 val index = SpatialIndex(scene.segments)
                 val allIds=document.elements.mapTo(HashSet()) {it.id}
                 val mainIds=allIds-selectedIds
-                val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(renderDocument,mainIds)
-                val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(renderDocument,selectedIds)
+                val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(renderDocument,mainIds,planSymbols)
+                val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(renderDocument,selectedIds,planSymbols)
                 val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)buildSurfaceScene(document) else null
                 val mainSurfaces=surfaces?.let {if(selectedIds.isEmpty())it else it.partition(selectedIds,false)}
                 val selectedSurfaces=if(selectedIds.isEmpty())null else surfaces?.partition(selectedIds,true)
                 val surfacedIds=surfaces?.chunks.orEmpty().mapTo(HashSet()) {ElementId(it.elementId)}
-                val annotationIds=allIds-surfacedIds
-                val annotations=if(surfaces==null)main else buildDrawingScene(renderDocument,annotationIds-selectedIds)
-                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else buildDrawingScene(renderDocument,annotationIds.intersect(selectedIds))
+                val annotationIds=allIds-surfacedIds+if(planSymbols)document.elements.filter {it.body is ElementBody.Component}.map {it.id} else emptyList()
+                val annotations=if(surfaces==null)main else buildDrawingScene(renderDocument,annotationIds-selectedIds,planSymbols)
+                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else buildDrawingScene(renderDocument,annotationIds.intersect(selectedIds),planSymbols)
                 val dimensionIds=document.elements.filter {((it.body as? ElementBody.DrawingShape)?.shape is Shape.Dimension)}.mapTo(HashSet()){it.id}
                 val measurementScene=buildDrawingScene(renderDocument,dimensionIds-selectedIds)
                 val selectedMeasurements=if(selectedIds.isEmpty())null else buildDrawingScene(renderDocument,dimensionIds.intersect(selectedIds))
@@ -303,7 +329,7 @@ fun DrawingCanvasScreen(
                     if (sameGeometry) previous!!.picker else EditorPicker(document, scene, index),resize,
                     MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement,
                     if(sameGeometry)previous!!.pointPicks else PointPickContext(document,scene),
-                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation})
+                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols)
             }
             prepared = compiled
             loading = compiled
@@ -355,12 +381,12 @@ fun DrawingCanvasScreen(
         pendingLibrary=null;tool=DrawingTool.SELECT;rotationAngle=null
         anchorX = null; anchorY = null
     }
-    fun placed() {
+    fun placed(library:Boolean=false) {
         pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
         gizmoMode=GizmoMode.MOVE
         placedToken++
-        if(!settings.keepToolActiveAfterPlacing) {tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
+        if(library || !settings.keepToolActiveAfterPlacing) {tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
     }
     fun commitMeasurement(picks:List<MeasurementPick>,label:Point3):Boolean {
         if(picks.size<2 || busy)return false
@@ -402,7 +428,7 @@ fun DrawingCanvasScreen(
         val confirmed=if(precisionActive)precisionPick else null
         if(actions!=null && !busy && pendingLibrary!=null) {
             val at=confirmed?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
-            if(actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed()
+            if((!precisionActive || libraryPlacement!=null) && actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed(library=true)
         } else if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
             val sceneHit=if(is3D && confirmed==null)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
                 position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density) else null
@@ -588,7 +614,7 @@ fun DrawingCanvasScreen(
         else cancelConstruction()
     }
     val activeLabel=when {
-        pendingLibrary!=null->document.libraryItems.find {it.id.value==pendingLibrary}?.name ?: "Library item"
+        pendingLibrary!=null->pendingLibraryItem?.name ?: "Library item"
         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.panel_measure_distance)
         measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.panel_reference_dimension)
         tool!=DrawingTool.SELECT->stringResource(drawingToolLabel(tool))
@@ -802,7 +828,7 @@ fun DrawingCanvasScreen(
                         orbit=orbit,is3D=is3D,cursorWorld=pointerWorld)
                 }
                 if(measurementMode!=MeasurementMode.NONE) MeasurementGhostPreview(measurementPicks.map {it.point},pointerWorld,viewport,orbit=orbit,is3D=is3D)
-                pendingLibrary?.let { LibraryGhostPreview(document,LibraryItemId(it),pointerWorld,viewport,orbit,is3D) }
+                libraryPlacement?.let { LibraryGhostPreview(document,it.item.id,libraryAim,viewport,orbit,is3D,placement=it) }
                 if (editor != null && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden && selectedRoomSide==null) {
                     SelectionGizmo(selectedBounds, viewport, orbit, is3D, preview,
                         onStart = { _, _ -> dragPivot = positionLockedPivot ?: selectedBounds.center(); dragResizeFrame = if(positionLockedSelection)null else selectionResizeFrame
@@ -870,6 +896,21 @@ fun DrawingCanvasScreen(
                         })
                     CanvasActionButton(Icons.Outlined.Home,stringResource(R.string.canvas_home),{homeView()},Modifier.testTag("canvas_home"))
                 }
+                // Library visibility changes only through explicit panel/full-screen controls.
+                if(!panelsHidden) editor?.let {actions->
+                    PersistentPanel(CanvasPanelId.LIBRARY,stringResource(R.string.panel_library),canvasLayout.panel(CanvasPanelId.LIBRARY),
+                        {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
+                        panelStates.SaveableStateProvider("library") {
+                        LibraryPanel(document.libraryItems,onInsert={id->
+                            cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet());probe=false;zoomWindow=false
+                            pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
+                        },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true,
+                            state=document.libraryState,onStateChange=actions.onLibraryState,
+                            units=document.project.settings.lengthUnit,decimalPlaces=document.project.settings.decimalPlaces,
+                            activeItemId=pendingLibraryItem?.id)
+                        }
+                    }
+                }
                 if(floatingPanelsVisible) {
                     PersistentPanel(CanvasPanelId.VIEW,stringResource(R.string.panel_view),canvasLayout.panel(CanvasPanelId.VIEW),
                         {setPanelPlacement(CanvasPanelId.VIEW,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VIEW,it)},width=520.dp,icon=Icons.Outlined.Visibility,compact=true) {viewToolbarContent()}
@@ -894,13 +935,6 @@ fun DrawingCanvasScreen(
                             MeasureTools({beginMeasurement(MeasurementMode.DISTANCE)},{beginMeasurement(MeasurementMode.REFERENCE)},
                                 {setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)})
                         }
-                        PersistentPanel(CanvasPanelId.LIBRARY,stringResource(R.string.panel_library),canvasLayout.panel(CanvasPanelId.LIBRARY),
-                            {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
-                            LibraryPanel(document.libraryItems,onInsert={id->
-                                cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet())
-                                pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
-                            },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true)
-                        }
                         PersistentPanel(CanvasPanelId.PROPERTIES,stringResource(R.string.editing_properties),canvasLayout.panel(CanvasPanelId.PROPERTIES),
                             {setPanelPlacement(CanvasPanelId.PROPERTIES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.PROPERTIES,it)},icon=Icons.Outlined.Tune) {
                             val source=document.elements.singleOrNull {it.id in selectedIds}
@@ -910,7 +944,11 @@ fun DrawingCanvasScreen(
                                 selectedProperties!=null->panelStates.SaveableStateProvider("properties:$propertiesSession:${source?.id?.value}") {
                                     PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,document.project.settings.decimalPlaces,
                                         onApply=actions.onProperties,onDismiss={setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.HIDDEN)},
-                                        lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true)
+                                        lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true,
+                                        libraryProperties=selectedLibraryProperties,
+                                        onApplyLibrary={transform,parameters->actions.onLibraryProperties(transform,parameters,false)},
+                                        onUpdateAllOfType={transform,parameters->actions.onLibraryProperties(transform,parameters,true)},
+                                        onResetToLibraryDefault=actions.onResetLibraryProperties)
                                 }
                                 else->Text(stringResource(R.string.presentation_select_properties),Modifier.padding(12.dp))
                             }
@@ -957,12 +995,21 @@ fun DrawingCanvasScreen(
                         onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout,
                         onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})
                 }
-                if(precisionActive && !zoomWindow) PrecisionPointerOverlay(precisionPick,precisionFinger,precisionDragging,
+                if(pendingLibraryItem!=null) Surface(Modifier.align(Alignment.TopCenter).padding(8.dp).testTag("library_mounting_height"),
+                    shape=MaterialTheme.shapes.small,tonalElevation=4.dp) {
+                    Text(if(libraryPlacement==null)libraryPlacementResult?.exceptionOrNull()?.message
+                        ?: stringResource(R.string.library_placement_needs_wall) else
+                        stringResource(R.string.library_placement_mounting_height,coordinate(libraryPlacement.mountingHeight,
+                            document.project.settings.lengthUnit,document.project.settings.decimalPlaces),unitSuffix(document.project.settings.lengthUnit)),
+                        Modifier.padding(horizontal=12.dp,vertical=8.dp),style=MaterialTheme.typography.labelLarge)
+                }
+                if(precisionActive && !zoomWindow) PrecisionPointerOverlay(displayedPrecisionPick,precisionFinger,precisionDragging,
                     settings.precisionPointer,viewport,orbit,is3D,ready?.scene,ready?.surfaces,snapSettings.gridSpacing,grid,floorZ,
                     measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
-                    pickContext=ready?.pointPicks,viewMode=document.project.settings.viewMode,levelId=selectedLevel)
+                    pickContext=ready?.pointPicks,viewMode=document.project.settings.viewMode,levelId=selectedLevel,
+                    canPlace=pendingLibrary==null || libraryPlacement!=null)
                 CanvasActionButton(if(panelsHidden)Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
                     stringResource(if(panelsHidden)R.string.panel_show_panels else R.string.panel_hide_panels),
                     {updateLayout(canvasLayout.copy(hideAll=!panelsHidden))},

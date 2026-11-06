@@ -22,6 +22,13 @@ internal fun validateDocument(document: ProjectDocument) {
     val systems = unique(document.systems.map { it.id }, "system")
     val materials = unique(document.materials.map { it.id }, "material")
     val libraryItems = unique(document.libraryItems.map { it.id }, "library item")
+    val availableLibraryItems = libraryItems + BuiltInLibrary.items.map { it.id }
+    valid(document.libraryState.favoriteIds.all(availableLibraryItems::contains),
+        "A library favorite refers to a missing item.")
+    valid(document.libraryState.recentIds.size <= 24 &&
+        document.libraryState.recentIds.distinct().size == document.libraryState.recentIds.size &&
+        document.libraryState.recentIds.all(availableLibraryItems::contains),
+        "The recently used library items are invalid.")
     val elementIds = unique(document.elements.map { it.id } + document.underlays.map { it.id }, "element")
     val elements = document.elements.associateBy { it.id }
     val views = unique(document.views.map { it.id }, "view")

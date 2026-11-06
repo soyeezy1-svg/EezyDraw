@@ -23,6 +23,4 @@
     <string name="panel_collapse_properties">Collapse properties</string>
     <string name="panel_expand_properties">Expand properties</string>
     <string name="panel_close_properties">Close properties</string>
-    <string name="panel_library_empty">This project has no library definitions yet. Imported project definitions appear here.</string>
-    <string name="panel_insert_library">Insert %1$s</string>
 </resources>

@@ -76,7 +76,7 @@ object ViewExport {
         val width = max(1, (request.width * scale).toInt())
         val height = max(1, (request.height * scale).toInt())
         val raster = Raster(request, width, height)
-        val scene = buildDrawingScene(request.document)
+        val scene = buildDrawingScene(request.document,planSymbols=!request.frame.is3D)
         val mode = request.frame.viewMode
         val autoWalls = request.frame.autoXrayFrontWalls || request.document.project.settings.autoXrayFrontWalls
         val surfaces = if (mode != ViewMode.WIREFRAME || autoWalls && request.frame.is3D || hasXrayOverrides(request.document))
@@ -88,7 +88,7 @@ object ViewExport {
         val meshIds = surfaces?.chunks?.filter { objectRenderPlan(mode,it.display,front(it.roomSide)).surfaces }
             ?.mapTo(HashSet()) { it.elementId } ?: emptySet()
         val annotations = request.document.elements.asSequence().filter { element ->
-            when ((element.body as? ElementBody.DrawingShape)?.shape) {
+            !request.frame.is3D && element.body is ElementBody.Component || when ((element.body as? ElementBody.DrawingShape)?.shape) {
                 is Shape.Dimension, is Shape.Text, is Shape.Leader -> true
                 else -> false
             }
