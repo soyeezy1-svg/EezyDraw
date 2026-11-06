@@ -28,10 +28,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.ElementProperties
+import com.eezydraw.core.editing.LibraryInstanceProperties
 import com.eezydraw.core.model.LockMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.Point3
 import com.eezydraw.core.model.Rotation3
+import com.eezydraw.core.model.Size3
 import java.math.BigDecimal
 import java.util.Locale
 
@@ -45,8 +47,15 @@ fun PropertiesDialog(
     onDismiss: () -> Unit,
     lockMode:LockMode=LockMode.NONE,
     layerLocked:Boolean=false,
+    libraryProperties: LibraryInstanceProperties? = null,
+    onApplyLibrary: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onUpdateAllOfType: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onResetToLibraryDefault: (() -> Unit)? = null,
 ) {
-    PropertiesEditor(properties, units, precision, onApply, onDismiss, dialog = true,lockMode=lockMode,layerLocked=layerLocked)
+    PropertiesEditor(properties, units, precision, onApply, onDismiss, dialog = true,
+        lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
+        onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
+        onResetToLibraryDefault=onResetToLibraryDefault)
 }
 
 /** Shared atomic numeric draft for the modal editor and the collapsible canvas side panel. */
@@ -61,6 +70,10 @@ fun PropertiesEditor(
     dialog: Boolean = false,
     lockMode:LockMode=LockMode.NONE,
     layerLocked:Boolean=false,
+    libraryProperties: LibraryInstanceProperties? = null,
+    onApplyLibrary: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onUpdateAllOfType: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
+    onResetToLibraryDefault: (() -> Unit)? = null,
 ) {
     val factor = editingMetresPerUnit(units)
     val source = remember(properties) { listOf(
@@ -75,10 +88,26 @@ fun PropertiesEditor(
     var fields by rememberSaveable(properties, units, precision, stateSaver = StringFieldsSaver) {
         mutableStateOf(initial)
     }
+    val libraryInitial = remember(libraryProperties, units, precision) {
+        libraryProperties?.let { library -> listOf(
+            String.format(Locale.ROOT, "%.${precision.coerceIn(0, 8)}f", library.mountingHeight / factor),
+            library.material, String.format(Locale.ROOT, "#%08X", library.colourArgb),
+            library.system, library.manufacturer, library.model, library.nameTag,
+        ) } ?: emptyList()
+    }
+    var libraryFields by rememberSaveable(libraryProperties, units, precision, stateSaver = StringFieldsSaver) {
+        mutableStateOf(libraryInitial)
+    }
     val fullyLocked=layerLocked || lockMode==LockMode.ALL
     LaunchedEffect(lockMode,layerLocked,initial) {
         if(fullyLocked || lockMode==LockMode.POSITION_ONLY)fields=fields.mapIndexed {index,value->
             if(fullyLocked || index<3)initial[index] else value
+        }
+    }
+    LaunchedEffect(lockMode, layerLocked, libraryInitial) {
+        if (fullyLocked) libraryFields = libraryInitial
+        else if (lockMode == LockMode.POSITION_ONLY && libraryFields.isNotEmpty()) {
+            libraryFields = libraryFields.toMutableList().also { it[0] = libraryInitial[0] }
         }
     }
     // An untouched rounded field retains its original canonical value, including tiny dimensions.
@@ -90,7 +119,27 @@ fun PropertiesEditor(
     val errors = parsed.mapIndexed { index, value ->
         value == null || (index >= 6 && source[index] > 0.0 && value <= 0.0)
     }
-    var applied by remember(properties) { mutableStateOf(false) }
+    val mountingHeight = libraryProperties?.let { library ->
+        if (libraryFields[0] == libraryInitial[0]) library.mountingHeight
+        else libraryFields[0].toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it >= 0.0 }
+    }
+    val libraryColour = libraryProperties?.let { parseLibraryColour(libraryFields[2]) }
+    val libraryInvalid = libraryProperties != null && (mountingHeight == null || libraryColour == null)
+    var applied by remember(properties, libraryProperties) { mutableStateOf(false) }
+    fun transformDraft() = ElementProperties(
+        Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
+        Rotation3(parsed[3]!!, parsed[4]!!, parsed[5]!!),
+        Point3(parsed[6]!!, parsed[7]!!, parsed[8]!!),
+    )
+    fun libraryDraft() = libraryProperties!!.copy(
+        // Legacy project definitions may use a flat symbol; keep its positive catalog axis.
+        size = Size3(parsed[6]!!.takeIf { it > 0.0 } ?: libraryProperties.size.width,
+            parsed[7]!!.takeIf { it > 0.0 } ?: libraryProperties.size.depth,
+            parsed[8]!!.takeIf { it > 0.0 } ?: libraryProperties.size.height),
+        mountingHeight = mountingHeight!!, material = libraryFields[1], colourArgb = libraryColour!!,
+        system = libraryFields[3], manufacturer = libraryFields[4], model = libraryFields[5],
+        nameTag = libraryFields[6],
+    )
     val labels = listOf(R.string.editing_property_x, R.string.editing_property_y, R.string.editing_property_z,
         R.string.editing_property_x, R.string.editing_property_y, R.string.editing_property_z,
         R.string.editing_property_width, R.string.editing_property_depth, R.string.editing_property_height)
@@ -121,20 +170,41 @@ fun PropertiesEditor(
             if (source.drop(6).any { it == 0.0 }) Text(
                 stringResource(R.string.editing_property_flat_hint), style = MaterialTheme.typography.bodySmall,
             )
+            if (libraryProperties != null) {
+                Text(stringResource(R.string.library_instance_parameters), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.library_instance_only), style = MaterialTheme.typography.bodySmall)
+                LibraryPropertyFields(libraryFields, { index, value ->
+                    libraryFields = libraryFields.toMutableList().also { it[index] = value }
+                    applied = false
+                }, mountingHeight == null, libraryColour == null, units,
+                    enabled = !fullyLocked, mountingEnabled = !fullyLocked && lockMode != LockMode.POSITION_ONLY)
+                if (onUpdateAllOfType != null) TextButton(
+                    onClick = {
+                        if (!fullyLocked && errors.none { it } && !libraryInvalid) {
+                            applied = true
+                            onUpdateAllOfType(transformDraft(), libraryDraft())
+                        }
+                    }, enabled = !fullyLocked && errors.none { it } && !libraryInvalid,
+                    modifier = Modifier.fillMaxWidth().testTag("properties_update_all_type"),
+                ) { Text(stringResource(R.string.library_update_all_type)) }
+                if (onResetToLibraryDefault != null) TextButton(
+                    onClick = onResetToLibraryDefault, enabled = !fullyLocked,
+                    modifier = Modifier.fillMaxWidth().testTag("properties_reset_library"),
+                ) { Text(stringResource(R.string.library_reset_default)) }
+            }
         }
     }
     val applyButton: @Composable () -> Unit = {
         TextButton(
             onClick = {
-                if (!fullyLocked && !applied && errors.none { it }) {
+                if (!fullyLocked && !applied && errors.none { it } && !libraryInvalid) {
                     applied = true
-                    onApply(ElementProperties(
-                        Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
-                        Rotation3(parsed[3]!!, parsed[4]!!, parsed[5]!!),
-                        Point3(parsed[6]!!, parsed[7]!!, parsed[8]!!),
-                    ))
+                    if (libraryProperties != null && onApplyLibrary != null) {
+                        onApplyLibrary(transformDraft(), libraryDraft())
+                    } else onApply(transformDraft())
                 }
-            }, enabled = !fullyLocked && !applied && errors.none { it }, modifier = Modifier.testTag("properties_apply"),
+            }, enabled = !fullyLocked && !applied && errors.none { it } && !libraryInvalid,
+            modifier = Modifier.testTag("properties_apply"),
         ) { Text(stringResource(R.string.editing_apply)) }
     }
     val cancelButton: @Composable () -> Unit = {

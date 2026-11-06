@@ -156,7 +156,7 @@ class CleanSelectionPlacementFlowTest {
         reopen(document.copy(libraryItems = listOf(socket)))
         fun chooseSocket() {
             compose.onNodeWithTag("toolbar_library").performClick()
-            compose.onNodeWithTag("library_insert_socket").performClick()
+            compose.onNodeWithTag("library_insert_socket").performScrollTo().performClick()
             compose.onNodeWithTag("library_panel").assertIsDisplayed()
             compose.onNodeWithTag("panel_library_collapse").performClick()
             compose.onNodeWithTag("library_panel").assertDoesNotExist()
@@ -180,7 +180,10 @@ class CleanSelectionPlacementFlowTest {
         selectionAction("undo")
         awaitElements(0)
         compose.onNodeWithTag("panel_view_expand").performClick()
-        compose.runOnIdle { assertFalse(model.state.value.dirty) }
+        compose.runOnIdle {
+            assertEquals(listOf(socket.id), checkNotNull(model.state.value.document).libraryState.recentIds)
+            assertTrue("Recently used persists independently of geometry undo", model.state.value.dirty)
+        }
     }
 
     @Test

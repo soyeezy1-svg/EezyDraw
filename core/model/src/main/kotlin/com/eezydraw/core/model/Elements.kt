@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 /**
  * IDs reference the same project; repositories will enforce referential integrity.
  * Transform translation is project-space. Level ownership does not implicitly add level elevation;
- * a future placement service will resolve AFFL/ceiling settings to canonical project coordinates.
+ * library placement resolves floor/wall/ceiling constraints to canonical project coordinates.
  */
 @Serializable
 data class Element(

@@ -60,6 +60,7 @@ internal fun PrecisionPointerOverlay(
     onPlace: () -> Unit, onCancel: () -> Unit, onNudge: (Int, Int) -> Unit, enabled: Boolean,
     modifier: Modifier = Modifier, pickContext: PointPickContext? = null,
     viewMode: ViewMode = ViewMode.WIREFRAME, levelId: String? = null,
+    canPlace:Boolean=true,
 ) {
     val density = LocalDensity.current.density
     val accent = MaterialTheme.colorScheme.primary
@@ -169,7 +170,7 @@ internal fun PrecisionPointerOverlay(
                     OutlinedButton(onCancel,Modifier.defaultMinSize(minWidth=64.dp,minHeight=56.dp).testTag("precision_cancel")) {
                         Text(stringResource(R.string.precision_cancel))
                     }
-                    Button(onPlace,Modifier.defaultMinSize(minWidth=64.dp,minHeight=56.dp).testTag("precision_place"),enabled=enabled && pick!=null) {
+                    Button(onPlace,Modifier.defaultMinSize(minWidth=64.dp,minHeight=56.dp).testTag("precision_place"),enabled=enabled && pick!=null && canPlace) {
                         Text(stringResource(R.string.precision_place))
                     }
                 }
@@ -207,7 +208,7 @@ internal fun precisionLoupeColour(colour:Color,dark:Boolean,surface:Boolean=fals
         (colour.blue+addition).coerceIn(0f,1f),colour.alpha)
 }
 
-private fun unitSuffix(unit:LengthUnit)=when(unit) {
+internal fun unitSuffix(unit:LengthUnit)=when(unit) {
     LengthUnit.MILLIMETRES->"mm";LengthUnit.CENTIMETRES->"cm";LengthUnit.METRES->"m";LengthUnit.INCHES->"in";LengthUnit.FEET->"ft"
 }
 

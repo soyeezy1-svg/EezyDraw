@@ -14,31 +14,37 @@ import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.Viewport2D
 import com.eezydraw.core.geometry.buildDrawingScene
+import com.eezydraw.core.editing.LibraryPlacement
+import com.eezydraw.core.editing.previewLibraryPlacement
 import com.eezydraw.core.model.*
 
 /** The actual library definition is previewed at its SI size without issuing an edit. */
-internal fun buildLibraryPreview(document: ProjectDocument, id: LibraryItemId, at: Point3?): DrawingScene? {
+internal fun libraryPreviewDocument(document: ProjectDocument): ProjectDocument =
+    if(document.layers.any {it.visible && !it.locked}) document else document.copy(layers=document.layers+
+        Layer(LayerId("library-preview-layer"),document.project.id,"Preview"))
+
+internal fun buildLibraryPreview(document: ProjectDocument, id: LibraryItemId, at: Point3?,
+    levelId:LevelId?=null,planSymbols:Boolean=false): DrawingScene? {
     if (at == null) return null
-    val item = document.libraryItems.find { it.id == id } ?: return null
-    val layer = document.layers.firstOrNull()?.id ?: LayerId("library-preview")
-    val element = Element(ElementId("library-preview"), document.project.id, layer,
-        ElementBody.Component(item.id, item.defaultSize, item.parameters),
-        name = item.name, transform = Transform3(translation = at), materialId = item.materialId)
-    return runCatching {
-        buildDrawingScene(document.copy(elements = listOf(element),
-            layers = document.layers.map { it.copy(visible = true) }))
-    }.getOrNull()
+    val item = document.libraryItems.find { it.id == id } ?: BuiltInLibrary.find(id) ?: return null
+    return runCatching {buildLibraryPreview(document,
+        previewLibraryPlacement(libraryPreviewDocument(document),item,at,levelId),planSymbols)}.getOrNull()
 }
+
+internal fun buildLibraryPreview(document:ProjectDocument,placement:LibraryPlacement,planSymbols:Boolean):DrawingScene =
+    buildDrawingScene(libraryPreviewDocument(document).copy(elements=listOf(placement.element),
+        libraryItems=document.libraryItems.filterNot {it.id==placement.item.id}+placement.item),planSymbols=planSymbols)
 
 @Composable
 internal fun LibraryGhostPreview(
     document: ProjectDocument, id: LibraryItemId, at: Point3?, viewport: Viewport2D,
     orbit: OrbitCamera, is3D: Boolean, modifier: Modifier = Modifier,
+    placement:LibraryPlacement?=null,
 ) {
     val colour = MaterialTheme.colorScheme.primary.copy(alpha = .35f)
     val density = LocalDensity.current.density
-    val scene = remember(document.project.id, document.libraryItems, document.layers, document.materials, id, at) {
-        buildLibraryPreview(document, id, at)
+    val scene = remember(document,id,at,placement,is3D) {
+        placement?.let {buildLibraryPreview(document,it,!is3D)} ?: buildLibraryPreview(document,id,at,planSymbols=!is3D)
     }
     Canvas(modifier.fillMaxSize().testTag("library_ghost")) {
         fun screen(point: Point3): Offset? = if (is3D) orbit.project(point, size.width.toDouble(), size.height.toDouble())

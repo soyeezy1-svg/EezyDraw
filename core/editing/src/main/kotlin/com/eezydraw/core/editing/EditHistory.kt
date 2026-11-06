@@ -9,6 +9,8 @@ import com.eezydraw.core.model.ProjectDocument
 import com.eezydraw.core.model.ProjectId
 import com.eezydraw.core.model.ProjectSettings
 import com.eezydraw.core.model.BuildingSystem
+import com.eezydraw.core.model.LibraryItem
+import com.eezydraw.core.model.Material
 import java.util.ArrayDeque
 
 internal data class ElementPatch(
@@ -35,13 +37,15 @@ class EditCommand internal constructor(
     private val groups: LinkPatch<ElementGroup>? = null,
     private val issues: LinkPatch<Issue>? = null,
     private val systems: LinkPatch<BuildingSystem>? = null,
+    private val libraryItems: LinkPatch<LibraryItem>? = null,
+    private val materials: LinkPatch<Material>? = null,
     private val settings: ValuePatch<ProjectSettings>? = null,
 ) {
     val changedElementCount: Int get() = patches.size
     val affectedElementIds: Set<ElementId> get() = patches.mapTo(linkedSetOf()) { it.id }
     val addedElementIds: Set<ElementId>
         get() = patches.filter { it.before == null && it.after != null }.mapTo(linkedSetOf()) { it.id }
-    val isEmpty: Boolean get() = patches.isEmpty() && layers == null && groups == null && issues == null && systems == null && settings == null
+    val isEmpty: Boolean get() = patches.isEmpty() && layers == null && groups == null && issues == null && systems == null && libraryItems == null && materials == null && settings == null
 
     /** Apply without adding history, for composing a validated multi-part transaction. */
     fun preview(document: ProjectDocument): ProjectDocument = apply(document, forward = true)
@@ -51,7 +55,9 @@ class EditCommand internal constructor(
         get() = patches.size + (layers?.let { it.before.size + it.after.size } ?: 0) +
             (groups?.let { it.before.size + it.after.size } ?: 0) +
             (issues?.let { it.before.size + it.after.size } ?: 0) +
-            (systems?.let { it.before.size + it.after.size } ?: 0) + (if(settings==null)0 else 2)
+            (systems?.let { it.before.size + it.after.size } ?: 0) +
+            (libraryItems?.let { it.before.size + it.after.size } ?: 0) +
+            (materials?.let { it.before.size + it.after.size } ?: 0) + (if(settings==null)0 else 2)
 
     internal fun apply(document: ProjectDocument, forward: Boolean): ProjectDocument {
         require(document.project.id == projectId) { "This edit belongs to another project" }
@@ -78,6 +84,12 @@ class EditCommand internal constructor(
         }
         require(systems == null || document.systems == (if(forward)systems.before else systems.after)) {
             "The drawing systems changed; this edit is stale"
+        }
+        require(libraryItems == null || document.libraryItems == (if(forward)libraryItems.before else libraryItems.after)) {
+            "The library definitions changed; this edit is stale"
+        }
+        require(materials == null || document.materials == (if(forward)materials.before else materials.after)) {
+            "The drawing materials changed; this edit is stale"
         }
         require(settings == null || document.project.settings ==
             (if(forward)settings.before else settings.after).copy(canvasLayout=document.project.settings.canvasLayout)) {
@@ -114,6 +126,8 @@ class EditCommand internal constructor(
             groups = groups?.let { if (forward) it.after else it.before } ?: document.groups,
             issues = issues?.let { if (forward) it.after else it.before } ?: document.issues,
             systems = systems?.let {if(forward)it.after else it.before} ?: document.systems,
+            libraryItems = libraryItems?.let {if(forward)it.after else it.before} ?: document.libraryItems,
+            materials = materials?.let {if(forward)it.after else it.before} ?: document.materials,
             project = settings?.let {document.project.copy(settings=(if(forward)it.after else it.before)
                 .copy(canvasLayout=document.project.settings.canvasLayout))} ?: document.project,
         )
