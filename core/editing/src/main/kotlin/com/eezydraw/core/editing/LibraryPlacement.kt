@@ -12,6 +12,10 @@ data class LibraryPlacement(
     val item: LibraryItem,
     val mountingHeight: Double,
     val wallSnapped: Boolean,
+    /** The input centreline remains the pointer target even when geometry starts beside it. */
+    val connectionPoint: Point3? = null,
+    val connectedRouteId: ElementId? = null,
+    val connectionSection: RouteSection? = null,
 )
 
 /**
@@ -28,9 +32,13 @@ fun previewLibraryPlacement(
     id: ElementId = ElementId("library-preview"),
 ): LibraryPlacement {
     val level = placementLevel(document, levelId, point.z)
+    require(level == null || level.id !in document.project.settings.hiddenLevelIds) {
+        "The selected level is hidden. Show it before placing this item."
+    }
     val layer = if (layerId == null) document.layers.firstOrNull { it.visible && !it.locked }
         else document.layers.find { it.id == layerId && it.visible && !it.locked }
     requireNotNull(layer) { "Choose a visible, unlocked layer to place this item." }
+    previewFittingRoutePlacement(document, item, point, level, layer, id)?.let { return it }
     val floor = level?.elevation ?: 0.0
     val defaults = item.defaultParameters()
     val requestedHeight = (defaults[LibraryParameterKeys.MOUNTING_HEIGHT] as? ParameterValue.Number)?.value
@@ -70,6 +78,14 @@ fun previewLibraryPlacement(
         transform = Transform3(translation, rotation, Scale3(z = if (item.mounting == MountingType.CEILING) -1.0 else 1.0)),
         properties = mapOf(ELEMENT_COLOUR_KEY to ParameterValue.Colour(colour)),
     )
+    val connection = libraryFittingConnectionPoint(item, element)
+    if (connection != null) {
+        val connectionHeight = connection.z - floor
+        val connectedElement = element.copy(body = (element.body as ElementBody.Component).copy(parameters =
+            params + (LibraryParameterKeys.MOUNTING_HEIGHT to ParameterValue.Number(connectionHeight, Quantity.LENGTH))))
+        return LibraryPlacement(connectedElement, item, connectionHeight, host != null,
+            connectionPoint = connection, connectionSection = item.fitting?.section)
+    }
     return LibraryPlacement(element, item, height, host != null)
 }
 

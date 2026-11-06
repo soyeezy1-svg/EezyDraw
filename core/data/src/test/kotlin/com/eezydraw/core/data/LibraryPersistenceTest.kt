@@ -93,6 +93,68 @@ class LibraryPersistenceTest {
         assertEquals(created.elements, repository.load(created.project.id.value).elements)
     }
 
+    @Test fun `sized fitting mesh ports route connection and parameters survive reopen and native archive`() = runBlocking {
+        val created = repository.create("Pipe fitting connections", ProjectTemplate.EMPTY, ProjectSettings())
+        projectIds += created.project.id.value
+        val catalogueItem = BuiltInLibrary.items.single {
+            it.fitting?.routeKind == RouteKind.PIPE && it.fitting?.kind == FittingKind.REDUCER
+        }
+        val inlet = RouteSection.Circular(.08)
+        val outlet = RouteSection.Circular(.05)
+        val adapted = requireNotNull(adaptedFittingItem(catalogueItem, inlet, outlet))
+        val definition = requireNotNull(adapted.fitting)
+        val meshes = adapted.geometry.filterIsInstance<Shape.Mesh>()
+        assertNotEquals(catalogueItem.id, adapted.id)
+        assertEquals(catalogueItem.id, definition.baseTypeId)
+        assertTrue(meshes.isNotEmpty())
+        assertEquals(listOf(inlet, outlet), definition.ports.map { it.section })
+        val parameters = adapted.defaultParameters() + mapOf(
+            LibraryParameterKeys.NAME_TAG to ParameterValue.Text("CHW-RD-04"),
+            LibraryParameterKeys.MANUFACTURER to ParameterValue.Text("Example fittings"),
+            LibraryParameterKeys.MODEL to ParameterValue.Text("R80-50"),
+            LibraryParameterKeys.MOUNTING_HEIGHT to ParameterValue.Number(2.7, Quantity.LENGTH),
+        )
+        val route = Element(ElementId("pipe-run"), created.project.id, created.layers.first().id,
+            ElementBody.Route(RouteKind.PIPE, listOf(Point3(), Point3(0.0, 4.0)), inlet,
+                ElevationSetting(2.7, ElevationReference.ABOVE_FINISHED_FLOOR),
+                fittings = listOf(RouteFitting(1, FittingKind.REDUCER, adapted.id, parameters))),
+            levelId = created.levels.single().id, transform = Transform3(Point3(2.0, 3.0, 2.7)))
+        val host = HostAttachment(route.id, HostMode.SURFACE, Point3(0.0, 4.0))
+        val input = definition.ports.first().position
+        val fitting = Element(ElementId("pipe-reducer"), created.project.id, created.layers.first().id,
+            ElementBody.Component(adapted.id, adapted.defaultSize, parameters, host),
+            levelId = created.levels.single().id, name = "CHW-RD-04",
+            transform = Transform3(Point3(2.0 - input.x, 7.0 - input.y, 2.7 - input.z)))
+        val state = LibraryState(setOf(catalogueItem.id, adapted.id), listOf(adapted.id), LibraryViewMode.LIST)
+        val saved = repository.save(created.copy(elements = listOf(route, fitting),
+            libraryItems = listOf(adapted), libraryState = state))
+
+        database.close()
+        reopen()
+        val loaded = repository.load(saved.project.id.value)
+        assertEquals(saved, loaded)
+        val loadedDefinition = loaded.libraryItems.single()
+        assertEquals(adapted, loadedDefinition)
+        assertEquals(definition.ports, loadedDefinition.fitting?.ports)
+        assertEquals(definition.centreline, loadedDefinition.fitting?.centreline)
+        assertEquals(meshes, loadedDefinition.geometry.filterIsInstance<Shape.Mesh>())
+        val loadedComponent = loaded.elements.last().body as ElementBody.Component
+        assertEquals(host, loadedComponent.host)
+        assertEquals(parameters, loadedComponent.parameters)
+        assertEquals(ParameterValue.Number(.08, Quantity.LENGTH), loadedComponent.parameters[LibraryParameterKeys.DIAMETER])
+        assertEquals(ParameterValue.Number(.05, Quantity.LENGTH), loadedComponent.parameters[LibraryParameterKeys.OUTLET_DIAMETER])
+        assertEquals(adapted.defaultSize, loadedComponent.size)
+
+        val archive = ByteArrayOutputStream().also { repository.exportProject(saved.project.id.value, it) }
+        val imported = repository.importProject(ByteArrayInputStream(archive.toByteArray()))
+        projectIds += imported.project.id.value
+        assertNotEquals(saved.project.id, imported.project.id)
+        assertEquals(listOf(adapted), imported.libraryItems)
+        assertEquals(state, imported.libraryState)
+        assertEquals(saved.elements, imported.elements.map { it.copy(projectId = saved.project.id) })
+        assertEquals(imported, repository.load(imported.project.id.value))
+    }
+
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {
         try {
             block()

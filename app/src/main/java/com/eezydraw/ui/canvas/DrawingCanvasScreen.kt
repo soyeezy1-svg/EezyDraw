@@ -246,15 +246,10 @@ fun DrawingCanvasScreen(
         }}
     }
     val libraryPlacement=libraryPlacementResult?.getOrNull()
-    // Keep the raw aim for recomputing the host attachment; display the resolved insertion point.
-    val displayedPrecisionPick=if(pendingLibraryItem!=null && libraryPlacement!=null)precisionPick?.let {pick->
-        val point=libraryPlacement.element.transform.translation
-        projectPrecisionPoint(point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())?.let {screen->
-            pick.copy(point=point,screen=screen,wallEdge=libraryPlacement.wallSnapped,
-                mode=pick.mode.takeIf {pick.point==point},
-                elementId=(libraryPlacement.element.body as ElementBody.Component).host?.hostElementId)
-        }
-    } else precisionPick
+    // Keep the raw aim for recomputing attachment; show the resolved insertion or fitting port.
+    val displayedPrecisionPick=if(pendingLibraryItem!=null && libraryPlacement!=null)
+        resolvedLibraryPrecisionPick(precisionPick,libraryPlacement,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())
+        else precisionPick
     val lockedSelection = remember(document.elements,document.layers,selectedIds) {
         val lockedLayers = document.layers.filter { it.locked }.mapTo(HashSet()) { it.id }
         document.elements.any { it.id in selectedIds && (it.layerId in lockedLayers || it.lockMode==LockMode.ALL) }
@@ -995,14 +990,8 @@ fun DrawingCanvasScreen(
                         onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout,
                         onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})
                 }
-                if(pendingLibraryItem!=null) Surface(Modifier.align(Alignment.TopCenter).padding(8.dp).testTag("library_mounting_height"),
-                    shape=MaterialTheme.shapes.small,tonalElevation=4.dp) {
-                    Text(if(libraryPlacement==null)libraryPlacementResult?.exceptionOrNull()?.message
-                        ?: stringResource(R.string.library_placement_needs_wall) else
-                        stringResource(R.string.library_placement_mounting_height,coordinate(libraryPlacement.mountingHeight,
-                            document.project.settings.lengthUnit,document.project.settings.decimalPlaces),unitSuffix(document.project.settings.lengthUnit)),
-                        Modifier.padding(horizontal=12.dp,vertical=8.dp),style=MaterialTheme.typography.labelLarge)
-                }
+                if(pendingLibraryItem!=null) LibraryPlacementFeedback(document,pendingLibraryItem,libraryPlacement,
+                    libraryPlacementResult?.exceptionOrNull()?.message,Modifier.align(Alignment.TopCenter).padding(8.dp))
                 if(precisionActive && !zoomWindow) PrecisionPointerOverlay(displayedPrecisionPick,precisionFinger,precisionDragging,
                     settings.precisionPointer,viewport,orbit,is3D,ready?.scene,ready?.surfaces,snapSettings.gridSpacing,grid,floorZ,
                     measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,

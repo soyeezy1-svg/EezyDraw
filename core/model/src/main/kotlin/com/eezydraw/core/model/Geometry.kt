@@ -150,6 +150,24 @@ sealed interface Shape {
     @Serializable @SerialName("pyramid")
     data class Pyramid(val base: Polygon2, val apex: Point3) : Shape
 
+    /** Indexed local-space faces; counterclockwise triangles define outward-facing normals. */
+    @Serializable @SerialName("mesh")
+    data class Mesh(val vertices: List<Point3>, val triangles: List<Int>) : Shape {
+        init {
+            require(vertices.size in 3..500_002) { "Mesh must contain between 3 and 500002 vertices." }
+            require(triangles.isNotEmpty() && triangles.size % 3 == 0 && triangles.size <= 1_500_000) {
+                "Mesh must contain complete index triples for at most 500000 triangles."
+            }
+            for (index in triangles.indices step 3) {
+                val a = triangles[index]; val b = triangles[index + 1]; val c = triangles[index + 2]
+                require(a in vertices.indices && b in vertices.indices && c in vertices.indices) {
+                    "Mesh triangle indices must reference existing vertices."
+                }
+                require(a != b && b != c && c != a) { "Mesh triangles must reference three distinct vertices." }
+            }
+        }
+    }
+
     @Serializable @SerialName("extrusion")
     data class Extrusion(val profile: Polygon2, val distance: Double) : Shape {
         init { require(distance.isFinite() && distance != 0.0) }

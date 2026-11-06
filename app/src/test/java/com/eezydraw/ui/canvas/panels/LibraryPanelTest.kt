@@ -93,4 +93,28 @@ class LibraryPanelTest {
         compose.onNodeWithTag("library_search").performTextReplacement("Device 499")
         compose.onNodeWithTag("library_insert_bulk-499").assertExists()
     }
+
+    @Test fun expandedCategoriesAndRouteFittingsCanBeSearchedFavoritedAndChosen() {
+        val categories = listOf("Fire alarm and safety", "Mechanical / HVAC", "Plumbing and drainage",
+            "Architecture", "Civil and structure")
+        val examples = categories.map { category -> BuiltInLibrary.items.first { it.category == category } } +
+            BuiltInLibrary.items.first { it.fitting?.routeKind == RouteKind.PIPE && it.fitting?.kind == FittingKind.REDUCER }
+        var state by mutableStateOf(LibraryState())
+        val selected = mutableListOf<LibraryItemId>()
+        var dismisses = 0
+        compose.setContent { EezyDrawTheme { LibraryPanel(emptyList(), selected::add, { dismisses++ },
+            state = state, onStateChange = { state = it }) } }
+
+        examples.forEach { item ->
+            compose.onNodeWithTag("library_search").performTextReplacement(item.name)
+            compose.onNodeWithTag("library_items").performScrollToNode(hasTestTag("library_insert_${item.id.value}"))
+            compose.onNodeWithTag("library_favorite_${item.id.value}").assertIsOff().performClick()
+            compose.onNodeWithTag("library_favorites_insert_${item.id.value}").performClick()
+        }
+        compose.runOnIdle {
+            assertEquals(examples.map { it.id }, selected)
+            assertEquals(examples.map { it.id }.toSet(), state.favoriteIds)
+            assertEquals(0, dismisses)
+        }
+    }
 }

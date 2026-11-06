@@ -52,7 +52,7 @@ fun LibraryPanel(
         listOf(
             LibraryFolder("favorites", null, state.favoriteIds.mapNotNull { byId[it] }.filter { it.id in matchedIds }.sortedBy { it.name }),
             LibraryFolder("recent", null, state.recentIds.mapNotNull { byId[it] }.filter { it.id in matchedIds }),
-        ) + matches.groupBy { it.category }.toSortedMap().map { (category, definitions) ->
+        ) + matches.groupBy { it.category }.map { (category, definitions) ->
             // Keep project-specific definitions immediately accessible alongside the built-ins.
             LibraryFolder("category_$category", category,
                 definitions.sortedWith(compareBy<LibraryItem> { it.id !in projectIds }.thenBy { it.name }))
@@ -141,6 +141,12 @@ private fun LibraryFolderHeader(folder: LibraryFolder, title: String, expanded: 
                 else -> when (folder.items.firstOrNull()?.discipline) {
                     Discipline.ELECTRICAL -> Icons.Outlined.ElectricalServices
                     Discipline.ICT -> Icons.Outlined.Router
+                    Discipline.HVAC -> Icons.Outlined.AcUnit
+                    Discipline.PLUMBING -> Icons.Outlined.Plumbing
+                    Discipline.FIRE_PROTECTION -> Icons.Outlined.LocalFireDepartment
+                    Discipline.ARCHITECTURE -> Icons.Outlined.Apartment
+                    Discipline.STRUCTURE -> Icons.Outlined.Foundation
+                    Discipline.CIVIL -> Icons.Outlined.Terrain
                     else -> Icons.Outlined.Folder
                 }
             }

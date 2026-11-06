@@ -98,6 +98,15 @@ fun PropertiesEditor(
     var libraryFields by rememberSaveable(libraryProperties, units, precision, stateSaver = StringFieldsSaver) {
         mutableStateOf(libraryInitial)
     }
+    val connectionValues = remember(libraryProperties) {
+        fittingSectionValues(libraryProperties?.section, libraryProperties?.outletSection)
+    }
+    val connectionInitial = remember(libraryProperties, units, precision) { connectionValues.map {
+        String.format(Locale.ROOT, "%.${precision.coerceIn(0, 8)}f", it / factor)
+    } }
+    var connectionFields by rememberSaveable(libraryProperties, units, precision, stateSaver = StringFieldsSaver) {
+        mutableStateOf(connectionInitial)
+    }
     val fullyLocked=layerLocked || lockMode==LockMode.ALL
     LaunchedEffect(lockMode,layerLocked,initial) {
         if(fullyLocked || lockMode==LockMode.POSITION_ONLY)fields=fields.mapIndexed {index,value->
@@ -105,9 +114,10 @@ fun PropertiesEditor(
         }
     }
     LaunchedEffect(lockMode, layerLocked, libraryInitial) {
-        if (fullyLocked) libraryFields = libraryInitial
+        if (fullyLocked) { libraryFields = libraryInitial; connectionFields = connectionInitial }
         else if (lockMode == LockMode.POSITION_ONLY && libraryFields.isNotEmpty()) {
             libraryFields = libraryFields.toMutableList().also { it[0] = libraryInitial[0] }
+            connectionFields = connectionInitial
         }
     }
     // An untouched rounded field retains its original canonical value, including tiny dimensions.
@@ -121,10 +131,19 @@ fun PropertiesEditor(
     }
     val mountingHeight = libraryProperties?.let { library ->
         if (libraryFields[0] == libraryInitial[0]) library.mountingHeight
-        else libraryFields[0].toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it >= 0.0 }
+        else libraryFields[0].toDoubleOrNull()?.times(factor)?.takeIf {
+            it.isFinite() && (library.section != null || it >= 0.0)
+        }
     }
+    val connectionParsed = connectionFields.mapIndexed { index, value ->
+        if (value == connectionInitial[index]) connectionValues[index]
+        else value.toDoubleOrNull()?.times(factor)?.takeIf { it.isFinite() && it > 0.0 }
+    }
+    val connectionErrors = connectionParsed.map { it == null }
+    val connectionEdited = connectionParsed.indices.any { connectionParsed[it] != connectionValues[it] }
     val libraryColour = libraryProperties?.let { parseLibraryColour(libraryFields[2]) }
-    val libraryInvalid = libraryProperties != null && (mountingHeight == null || libraryColour == null)
+    val libraryInvalid = libraryProperties != null && (mountingHeight == null || libraryColour == null || connectionErrors.any { it } ||
+        (!libraryProperties.connectionProfileRepresentable && !connectionEdited))
     var applied by remember(properties, libraryProperties) { mutableStateOf(false) }
     fun transformDraft() = ElementProperties(
         Point3(parsed[0]!!, parsed[1]!!, parsed[2]!!),
@@ -133,12 +152,16 @@ fun PropertiesEditor(
     )
     fun libraryDraft() = libraryProperties!!.copy(
         // Legacy project definitions may use a flat symbol; keep its positive catalog axis.
-        size = Size3(parsed[6]!!.takeIf { it > 0.0 } ?: libraryProperties.size.width,
+        size = if (libraryProperties.section != null) libraryProperties.size else Size3(parsed[6]!!.takeIf { it > 0.0 } ?: libraryProperties.size.width,
             parsed[7]!!.takeIf { it > 0.0 } ?: libraryProperties.size.depth,
             parsed[8]!!.takeIf { it > 0.0 } ?: libraryProperties.size.height),
         mountingHeight = mountingHeight!!, material = libraryFields[1], colourArgb = libraryColour!!,
         system = libraryFields[3], manufacturer = libraryFields[4], model = libraryFields[5],
         nameTag = libraryFields[6],
+        section = fittingSectionFromValues(libraryProperties.section, connectionParsed.filterNotNull()),
+        outletSection = fittingSectionFromValues(libraryProperties.outletSection,
+            connectionParsed.filterNotNull().drop(fittingSectionValues(libraryProperties.section, null).size)),
+        connectionProfileRepresentable = libraryProperties.connectionProfileRepresentable || connectionEdited,
     )
     val labels = listOf(R.string.editing_property_x, R.string.editing_property_y, R.string.editing_property_z,
         R.string.editing_property_x, R.string.editing_property_y, R.string.editing_property_z,
@@ -163,21 +186,37 @@ fun PropertiesEditor(
                 val flat = index >= 6 && source[index] == 0.0
                 EditingNumberField(
                     value, { next -> fields = fields.toMutableList().also { it[index] = next }; applied=false },
-                    stringResource(labels[index]), tags[index], errors[index], enabled = !flat && !fullyLocked && !(lockMode==LockMode.POSITION_ONLY && index<3),
+                    stringResource(labels[index]), tags[index], errors[index], enabled = !flat && !fullyLocked &&
+                        !(lockMode==LockMode.POSITION_ONLY && index<3) && !(index >= 6 && libraryProperties?.section != null),
                     error = stringResource(if (index >= 6) R.string.editing_positive_error else R.string.editing_finite_error),
                 )
             }
             if (source.drop(6).any { it == 0.0 }) Text(
                 stringResource(R.string.editing_property_flat_hint), style = MaterialTheme.typography.bodySmall,
             )
+            if (libraryProperties?.section != null) Text(
+                stringResource(R.string.fitting_connection_size_hint), style = MaterialTheme.typography.bodySmall,
+            )
+            if (libraryProperties?.section != null && lockMode == LockMode.POSITION_ONLY) Text(
+                stringResource(R.string.fitting_connection_position_locked), style = MaterialTheme.typography.bodySmall,
+            )
+            if (libraryProperties?.connectionProfileRepresentable == false) Text(
+                stringResource(R.string.fitting_elliptical_connection_hint), style = MaterialTheme.typography.bodySmall,
+            )
             if (libraryProperties != null) {
                 Text(stringResource(R.string.library_instance_parameters), style = MaterialTheme.typography.titleSmall)
                 Text(stringResource(R.string.library_instance_only), style = MaterialTheme.typography.bodySmall)
+                FittingConnectionFields(libraryProperties.section, libraryProperties.outletSection,
+                    connectionFields, connectionErrors, units, !fullyLocked && lockMode != LockMode.POSITION_ONLY) { index, value ->
+                    connectionFields = connectionFields.toMutableList().also { it[index] = value }
+                    applied = false
+                }
                 LibraryPropertyFields(libraryFields, { index, value ->
                     libraryFields = libraryFields.toMutableList().also { it[index] = value }
                     applied = false
                 }, mountingHeight == null, libraryColour == null, units,
-                    enabled = !fullyLocked, mountingEnabled = !fullyLocked && lockMode != LockMode.POSITION_ONLY)
+                    enabled = !fullyLocked, mountingEnabled = !fullyLocked && lockMode != LockMode.POSITION_ONLY,
+                    signedMountingHeight = libraryProperties.section != null)
                 if (onUpdateAllOfType != null) TextButton(
                     onClick = {
                         if (!fullyLocked && errors.none { it } && !libraryInvalid) {
@@ -188,7 +227,8 @@ fun PropertiesEditor(
                     modifier = Modifier.fillMaxWidth().testTag("properties_update_all_type"),
                 ) { Text(stringResource(R.string.library_update_all_type)) }
                 if (onResetToLibraryDefault != null) TextButton(
-                    onClick = onResetToLibraryDefault, enabled = !fullyLocked,
+                    onClick = onResetToLibraryDefault, enabled = !fullyLocked &&
+                        !(libraryProperties.section != null && lockMode == LockMode.POSITION_ONLY),
                     modifier = Modifier.fillMaxWidth().testTag("properties_reset_library"),
                 ) { Text(stringResource(R.string.library_reset_default)) }
             }

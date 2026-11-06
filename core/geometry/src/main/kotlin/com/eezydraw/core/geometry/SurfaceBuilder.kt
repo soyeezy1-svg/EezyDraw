@@ -100,6 +100,10 @@ private fun surfaceShape(shape: Shape, emit: SurfaceEmitter) {
         is Shape.Cylinder -> surfaceCone(shape.radius, shape.radius, shape.height, emit)
         is Shape.Cone -> surfaceCone(shape.baseRadius, shape.topRadius, shape.height, emit)
         is Shape.Pyramid -> surfacePyramid(shape, emit)
+        is Shape.Mesh -> for (index in shape.triangles.indices step 3) {
+            emit.triangle(shape.vertices[shape.triangles[index]], shape.vertices[shape.triangles[index + 1]],
+                shape.vertices[shape.triangles[index + 2]])
+        }
         is Shape.Extrusion -> surfaceExtrusion(shape.profile, 0.0, shape.distance, emit)
         is Shape.Revolution -> surfaceRevolution(shape, emit)
         is Shape.Line, is Shape.Arc, is Shape.Spline, is Shape.Text, is Shape.Dimension,

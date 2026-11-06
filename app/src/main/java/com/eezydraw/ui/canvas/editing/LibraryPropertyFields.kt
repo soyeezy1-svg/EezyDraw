@@ -20,11 +20,12 @@ internal fun LibraryPropertyFields(
     units: LengthUnit,
     enabled: Boolean,
     mountingEnabled: Boolean,
+    signedMountingHeight: Boolean = false,
 ) {
     EditingNumberField(fields[0], { onChange(0, it) },
         stringResource(R.string.library_mounting_height, stringResource(editingUnitLabel(units))),
         "property_mounting_height", mountingInvalid, mountingEnabled,
-        stringResource(R.string.library_mounting_error))
+        stringResource(if (signedMountingHeight) R.string.editing_finite_error else R.string.library_mounting_error))
     val labels = listOf(R.string.library_property_material, R.string.library_property_colour,
         R.string.library_property_system, R.string.library_property_manufacturer,
         R.string.library_property_model, R.string.library_property_name_tag)
