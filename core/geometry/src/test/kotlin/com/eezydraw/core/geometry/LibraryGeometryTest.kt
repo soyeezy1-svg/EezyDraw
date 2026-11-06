@@ -123,8 +123,8 @@ class LibraryGeometryTest {
             val doc = document(element).copy(libraryItems = listOf(item))
             val physical = buildDrawingScene(doc)
             val plan = buildDrawingScene(doc, planSymbols = true)
-            assertPoint(Point3(), physical.bounds.min)
-            assertPoint(Point3(resized.width, resized.depth, resized.height), physical.bounds.max)
+            assertPoint(Point3(), physical.bounds.min, item.name)
+            assertPoint(Point3(resized.width, resized.depth, resized.height), physical.bounds.max, item.name)
             assertBounds(physical.bounds, plan.bounds)
             assertBounds(physical.bounds, buildSurfaceScene(doc).bounds)
             assertTrue("${item.name} needs a plan symbol", plan.segments.size > physical.segments.size)
@@ -133,7 +133,8 @@ class LibraryGeometryTest {
 
     @Test fun hundredsOfInstancesCompileWithoutDuplicatingDefinitionsOrLosingLateSymbols() {
         val types = BuiltInLibrary.items
-        val elements = List(384) { index ->
+        val instanceCount = maxOf(384, types.size * 2)
+        val elements = List(instanceCount) { index ->
             val item = types[index % types.size]
             component(item.defaultSize, Transform3(Point3(index * 4.0, 0.0, 3.0))).copy(
                 id = ElementId("equipment-$index"), body = ElementBody.Component(item.id, item.defaultSize))
@@ -142,15 +143,16 @@ class LibraryGeometryTest {
         val scene = buildDrawingScene(doc, planSymbols = true)
         assertEquals(elements.map { it.id.value }.toSet(), scene.segments.map { it.elementId }.toSet())
         assertEquals(types.size, doc.libraryItems.size)
+        assertEquals(types.map { it.id }.toSet(), elements.map { (it.body as ElementBody.Component).libraryItemId }.toSet())
         assertTrue(scene.chunks.all { chunk -> chunk.vertices.all(Float::isFinite) })
-        assertTrue(scene.segments.any { it.elementId == "equipment-383" })
-        assertTrue(scene.bounds.max.x > 383 * 4.0)
+        assertTrue(scene.segments.any { it.elementId == "equipment-${instanceCount - 1}" })
+        assertTrue(scene.bounds.max.x > (instanceCount - 1) * 4.0)
     }
 
-    private fun assertPoint(expected: Point3, actual: Point3) {
-        assertEquals(expected.x, actual.x, 1e-7)
-        assertEquals(expected.y, actual.y, 1e-7)
-        assertEquals(expected.z, actual.z, 1e-7)
+    private fun assertPoint(expected: Point3, actual: Point3, message: String = "") {
+        assertEquals(message, expected.x, actual.x, 1e-7)
+        assertEquals(message, expected.y, actual.y, 1e-7)
+        assertEquals(message, expected.z, actual.z, 1e-7)
     }
 
     private fun assertBounds(expected: Bounds3, actual: Bounds3) {

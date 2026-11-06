@@ -246,8 +246,21 @@ private fun drawShape(
             ring(vertices, 0.0, emit)
             vertices.forEach { emit(point(it.x, it.y), shape.apex) }
         }
+        is Shape.Mesh -> meshEdges(shape, emit)
         is Shape.Extrusion -> extrude(shape.profile, 0.0, shape.distance, emit)
         is Shape.Revolution -> revolution(shape, emit)
+    }
+}
+
+private fun meshEdges(shape: Shape.Mesh, emit: (Point3, Point3) -> Unit) {
+    val seen = HashSet<Long>()
+    fun edge(a: Int, b: Int) {
+        val key = (minOf(a, b).toLong() shl 32) or maxOf(a, b).toLong()
+        if (seen.add(key)) emit(shape.vertices[a], shape.vertices[b])
+    }
+    for (index in shape.triangles.indices step 3) {
+        val a = shape.triangles[index]; val b = shape.triangles[index + 1]; val c = shape.triangles[index + 2]
+        edge(a, b); edge(b, c); edge(c, a)
     }
 }
 

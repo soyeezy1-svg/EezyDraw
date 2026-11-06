@@ -1,0 +1,12 @@
+<resources>
+    <string name="fitting_connection_size_hint">Edit connection sizes below to resize this fitting.</string>
+    <string name="fitting_connection_position_locked">Unlock position to change fitting connection sizes.</string>
+    <string name="fitting_elliptical_connection_hint">This scale makes the connection elliptical. Edit connection sizes or reset to restore a circular profile.</string>
+    <string name="fitting_connection_parameters">Connection sizes</string>
+    <string name="fitting_diameter">Diameter (%1$s)</string>
+    <string name="fitting_section_width">Section width (%1$s)</string>
+    <string name="fitting_section_height">Section height (%1$s)</string>
+    <string name="fitting_outlet_diameter">Outlet diameter (%1$s)</string>
+    <string name="fitting_outlet_width">Outlet width (%1$s)</string>
+    <string name="fitting_outlet_height">Outlet height (%1$s)</string>
+</resources>

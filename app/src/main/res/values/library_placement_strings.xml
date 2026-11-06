@@ -2,4 +2,11 @@
 <resources>
     <string name="library_placement_mounting_height">Mounting height: %1$s %2$s AFFL</string>
     <string name="library_placement_needs_wall">Choose a visible wall on this level to mount this item.</string>
+    <string name="library_fitting_connection_point">Connection point</string>
+    <string name="library_fitting_needs_route">Choose a visible matching route end to connect this fitting.</string>
+    <string name="library_fitting_seek_route">Move near a matching route end to connect.</string>
+    <string name="library_fitting_connected_route">Connected to route: %1$s</string>
+    <string name="library_fitting_route">Route</string>
+    <string name="library_fitting_section_circular">Diameter: %1$s %2$s</string>
+    <string name="library_fitting_section_rectangular">Section: %1$s × %2$s %3$s</string>
 </resources>

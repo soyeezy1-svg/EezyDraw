@@ -1,6 +1,6 @@
 # EEZY DRAW
 
-Native Android project for the tablet-first MEP coordination app described in [SPEC.md](SPEC.md). It includes vector branding/startup, a durable local project catalogue, a built-in Electrical/ICT component library, native project save/load/import/export, Settings and Help, plus a floating-origin 2D drawing canvas and orbit 3D views with wireframe, hidden-line, shaded and lit surfaces. Drawing tools with shared precision pointing, object selection, handle transforms, numeric Properties and session undo/redo are implemented; coordination engines and external CAD codecs remain future work.
+Native Android project for the tablet-first MEP coordination app described in [SPEC.md](SPEC.md). It includes vector branding/startup, a durable local project catalogue, a built-in multidisciplinary component and fittings library, native project save/load/import/export, Settings and Help, plus a floating-origin 2D drawing canvas and orbit 3D views with wireframe, hidden-line, shaded and lit surfaces. Drawing tools with shared precision pointing, object selection, handle transforms, numeric Properties and session undo/redo are implemented; coordination engines and external CAD codecs remain future work.
 
 ## Project
 
@@ -26,6 +26,7 @@ EezyDraw/
 │       │   ├── Elements.kt
 │       │   ├── Library.kt
 │       │   ├── BuiltInLibrary.kt
+│       │   ├── ExpandedLibrary.kt
 │       │   ├── Views.kt
 │       │   ├── Coordination.kt
 │       │   └── Settings.kt
@@ -139,7 +140,22 @@ Tools include line, polyline, three-point arc, circle, ellipse, rectangle, polyg
 
 Draw by points retains the alternative construction sequences: rectangles and boxes use opposite corners; circles/spheres use a centre and radius point; an arc uses start, middle and end. Text has editable content/height. A leader starts at its arrow tip and ends at its text. Dimensions use two measurement anchors plus a label point, or vertex/two arms/label for angular dimensions. Box/cylinder/cone/pyramid height is entered in Tools before placing or drawing the base; Z and full XYZ rotations remain editable in Properties. The selected level supplies the default construction floor. Precision picks can retain actual 3D snap elevations; individual tool factories still enforce their geometry rules, and no arbitrary workplane editor is implied. An empty plan opens with a useful 4m XY span, and first entry into 3D fits the current geometry rather than reusing a pre-placement empty extent.
 
-The built-in component library has 32 types in Electrical and ICT / low current. Electrical includes single/double switches, dimmer, socket, floor box, isolator, distribution board, downlight/linear/emergency lights, exit sign, junction/pull boxes, tray, ladder, trunking, conduit and earth bar/rod. ICT includes 42U/24U/12U racks, patch panel, basket, data outlet, fibre box, Wi-Fi AP, CCTV camera, access reader, intercom, PA speaker and TV outlet. Every entry has nominal dimensions, a 2D vector symbol and a physical 3D shape. Visible rows and vector thumbnails are composed lazily, with no bitmap or asset downloads. Favorites, the last 24 unique used types and grid/list preference save with the project; browsing changes remain outside geometry undo history.
+The built-in component library includes the following categories. Every entry has nominal dimensions, a 2D vector symbol and a physical 3D shape.
+
+| Category | Built-in items |
+| --- | --- |
+| Electrical | Single/double switches, dimmer, socket, floor box, isolator, distribution board, downlight/linear/emergency lights, exit sign, junction/pull boxes, tray, ladder, trunking, conduit, earth bar/rod |
+| ICT / low current | 42U/24U/12U racks, patch panel, basket, data outlet, fibre box, Wi-Fi AP, CCTV camera, access reader, intercom, PA speaker, TV outlet |
+| Fire alarm and safety | Smoke/heat detectors, manual call point, sounder, fire alarm panel, sprinkler, hose reel, extinguisher |
+| Mechanical / HVAC | AHU, FCU, split AC indoor/outdoor units, VAV, exhaust fan, supply/return diffusers, grille, volume/fire dampers, rectangular/round/flexible ducts, chiller, pump |
+| Plumbing and drainage | DN15–DN200 pipe stock, gate/ball/check valves, pump, tank, water heater, sink, basin, water closet, urinal, shower, floor drain, cleanout, manhole |
+| Architecture | Single/double/sliding doors, single/double/fixed windows, stairs, ramp, column, ceiling, floor, desk, chair, table, cabinet, counter |
+| Civil and structure | I/H/rectangular beams, square/round columns, slab, footing, shear wall, opening, sleeve |
+| Fittings and accessories | Trunking, cable tray, cable ladder, conduit, duct and pipe connections and supports |
+
+Visible rows and vector thumbnails are composed lazily, with no bitmap or asset downloads. Favorites, the last 24 unique used types and grid/list preference save with the project; browsing changes remain outside geometry undo history.
+
+Fittings include 45° bends, horizontal/vertical inside/outside 90° bends, tees, crosses, reducers, up/down risers, offsets, couplers, end caps, flexible connectors, expansion joints, saddles, supports, hangers, brackets and trapezes; pipe also has elbows, unions and flanges. Choose a fitting in Library and aim near a compatible visible route endpoint. The preview aligns its input connection with the endpoint, matches the route's section dimensions and shows a connection marker before Place commits it. Cancel discards the preview, and successful placement returns to Select. Independent placement remains available away from compatible endpoints. Section dimensions and connection metadata persist with the component for later automatic insertion at route bends; automatic route drawing/insertion remains future work.
 
 Floor items sit at the active level's finished floor. Wall items snap to the nearest eligible visible wall finish face, including implicit room sides, face outward and use the definition's mounting default (1,200mm AFFL for a single switch). Ceiling items attach to a containing room's ceiling or the level ceiling below the next slab and hang downward. The shared ghost and committed object resolve the same constraint, and the hint shows actual mounting AFFL in project units. Wall placement requires a face large enough for the item; invalid placement keeps the tool active with a message. Move/rotate remain available afterward; continuous host-following and wall recess/chase cuts are not implemented.
 
@@ -155,7 +171,7 @@ View modes use actual triangle faces with object overrides or system/material/la
 
 ## Validation
 
-The suite contains **450 passing tests**: model 23, geometry 75, editing 142, storage 13 and app 197. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
+The suite contains **564 passing tests**: model 45, geometry 86, editing 190, storage 16 and app 227. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
 
 Precision-pointer regressions cover offset distance and edge flips, loupe placement/content, confirm-only placement, retained targets, nudge steps, snapping and Settings defaults/restoration. Existing regressions cover axis-isolated snapped movement/rotation, mode-exclusive selection controls, manual-only Properties, placement previews/reset/cancellation, distance-only measurement defaults, cube face/corner/drag/Home navigation and undoable style/settings changes. Existing regressions cover all six view modes, surface triangulation and holes, move snapping/body-drag preferences, associative measurements/AFFL, visibility persistence, nonmodal panel drafts/full-screen controls, and PNG/PDF output. The editing suite also covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
@@ -193,7 +209,8 @@ The following remain device/emulator checks, not claims of completed testing:
 - Open, collapse, hide and drag each panel, then select, move, rotate, measure and place objects without changing the saved layout. Verify full-screen restore, app/project reopen with autosave off, and the optional auto-hide preference. Keep an unfinished Properties draft through collapse and check finger, stylus and TalkBack targets.
 - Lock everything and verify move/rotate/scale/delete are blocked while selection, measurement, snaps and readonly Properties work. Unlock and repeat; test position-only mode, per-level Lock all/Unlock all, generated-wall defaults and undo.
 - Hide, X-ray and wireframe shapes, library items, rooms and individual outer/hole room walls. Verify hidden targets are excluded until faint outlines are enabled, Show all restores visibility, front-wall X-ray follows orbit without changing geometry, and save/reopen/export retains the chosen display.
-- Browse all Electrical/ICT folders in grid/list views; search Wi-Fi/wifi and multiword queries, toggle favorites, place several types and verify recent order. Check each thumbnail, name and W/D/H, then load hundreds of project definitions and inspect scrolling/memory on the target tablet. Save/reopen/import and verify favorites, recents and view preference.
+- Browse all library folders in grid/list views; search Wi-Fi/wifi, detectors, DN pipe stock and multiword queries, toggle favorites, place several types and verify recent order. Check each thumbnail, name and W/D/H, then load hundreds of project definitions and inspect scrolling/memory on the target tablet. Save/reopen/import and verify favorites, recents and view preference.
+- Place fittings at both ends of rectangular and round routes, including rotated/mirrored routes and different levels; verify the connection marker, orientation, section-size matching and saved endpoint reference. Check incompatible or hidden targets, independent placement, Cancel, undo/redo, instance edits, bulk update/reset and save/reopen. Confirm bends, branches, reducers and supports retain distinct 2D/3D shapes.
 - Place a switch on both sides of rotated/mirrored walls and implicit room walls, with hidden/linked/too-small faces and multiple levels. Check outward orientation, default 1,200mm AFFL, floor contact, room/level ceiling attachment, ghost/commit agreement, mounting-height readout, Cancel and Place. Edit every library parameter, resize in plan/3D, test system visibility and real material association, then bulk update/reset with locked instances and undo/redo/save/reopen. Verify Library never auto-hides/reappears, including when Auto-hide panels while drawing is enabled.
 - Review Help sections and feedback sharing, including cancellation and missing-handler behavior.
 

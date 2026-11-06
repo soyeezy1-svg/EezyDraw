@@ -1,21 +1,21 @@
-# Library and drawing editor validation
+# Expanded library and fitting validation
 
-Validated on 2026-11-06 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
+Validated on 2026-11-07 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
 
 ## Results
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 27 passed |
-| `:core:geometry:test` | 83 passed |
-| `:core:editing:test` | 168 passed |
-| `:core:data:testDebugUnitTest` | 15 passed |
-| `:app:testDebugUnitTest` | 217 passed |
+| `:core:model:test` | 45 passed |
+| `:core:geometry:test` | 86 passed |
+| `:core:editing:test` | 190 passed |
+| `:core:data:testDebugUnitTest` | 16 passed |
+| `:app:testDebugUnitTest` | 227 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **510 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **564 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -26,7 +26,10 @@ The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It read
 
 ## Coverage and corrected issues
 
-- Library regressions cover all 32 Electrical/ICT definitions, stable IDs, physical sizes, vector symbols and 3D geometry; case/punctuation search (including Wi-Fi aliases), favorites, bounded recents, grid/list switching and lazy composition with 500 definitions. Scene tests compile 384 instances and retain physical bounds, signed transforms, visibility and colours with plan symbols enabled.
+- Expanded catalogue checks cover 75 new stock items and 171 fitting definitions, including all requested disciplines, DN15–DN200 pipes, rectangular/round duct families, each accessory kind, unique IDs, SI sizes, plan symbols and physical geometry. The original 32 types remain stable. Search regressions distinguish rack/bracket and Wi-Fi/fixed-window matches; panel tests preserve the original category order and exercise new-type search, favorites and selection.
+- Fitting tests verify input/output planes and exact sections, reducer outlet dimensions, deterministic size variants, start/end capture, transformed/mirrored/vertical routes, circular scaling and skew rejection, hidden levels/targets, capture distance and nearest-end ties. Stale route changes reject a captured placement without choosing another host. Signed below-floor AFFL, free-placement markers, precision/ghost agreement, section edits, reset, bulk locks and sparse undo/redo are covered. Metadata-only edits retain scaled geometry; reset preserves reserved route endpoint/port bindings. A real Room/native archive round trip retains meshes, ports, sections, centrelines, instance values, endpoint host references and browsing state.
+- Mesh tests cover serialized compatibility, index/budget validation, true inclined surfaces, closed ramp/furniture parts, unique indexed edges, normal handling under signed transforms and component sizing near distant origins. Geometry regressions compile hundreds of instances across the enlarged catalogue. Fitting section controls derive effective scaled sizes; an elliptical circular profile needs an explicit connection-size edit or reset before metadata Apply.
+- Library regressions cover all 32 Electrical/ICT definitions, stable IDs, physical sizes, vector symbols and 3D geometry; case/punctuation search (including Wi-Fi aliases), favorites, bounded recents, grid/list switching and lazy composition with 500 definitions. Scene tests compile hundreds of instances and retain physical bounds, signed transforms, visibility and colours with plan symbols enabled.
 - Placement checks cover both finish faces and all wall references, outward orientation, rotated/scaled/mirrored walls, implicit room and hole faces, linked-wall suppression, per-level floors, room/level ceilings and hanging ceiling geometry. Ghost and precision confirmation share the resolved insertion and AFFL; missing walls and hidden target systems cannot commit. Whole-canvas checks keep Library open/collapsed/hidden as explicitly chosen even with panel auto-hide enabled, and return library placement to Select despite the repeat-tool preference.
 - Instance Properties tests apply physical size, mounting height, material, colour, system, manufacturer, model and name tag atomically. Update-all tests preserve other types and each instance's X/Y/orientation, use each floor, include hidden instances and reject locked bulk edits without partial changes. Reset restores library/custom defaults, including legacy material references, while preserving position locks. Metadata-only edits on legacy items retain their rendered layer/material/system colours. Real Room/archive and ViewModel tests retain used definitions, hosts, edited parameters and browsing state across save/reopen/import. Browsing preferences survive geometry undo/redo; placement and associated definition/system/material additions undo together.
 - Panel integration checks retain exact user layout across selection, move, rotation, Measure and placement. Collapse/expand/hide and drag-end edits are explicit; changing panel contents preserves its viewport anchor, and context actions avoid occupied panel bounds. Fullscreen keeps one restore control. Project saves, a per-project Room-settings cache and late-settings cold-start tests restore layout with autosave off; layout stays outside drawing undo.
