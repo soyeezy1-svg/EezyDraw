@@ -208,6 +208,9 @@ fun SettingsScreen(
             }
             RouteKind.entries.forEach { kind ->
                 item(key = "height_${kind.name}") {
+                    com.eezydraw.ui.canvas.RoutingSettingsBar(kind,defaults.routeDefaults[kind] ?: com.eezydraw.core.model.defaultRoutingSettings(kind),{ value->
+                        draft=draft.copy(settings=draft.settings.copy(projectDefaults=draft.settings.projectDefaults.copy(routeDefaults=draft.settings.projectDefaults.routeDefaults+(kind to value))))
+                    },showElevation=false)
                     NumericField(
                         "height_${kind.name}", R.string.settings_height, draft, errors, input,
                         label = stringResource(R.string.settings_height, stringResource(routeLabel(kind)), unit),
@@ -486,4 +489,6 @@ private fun referenceLabel(value: ElevationReference): Int = when (value) {
     ElevationReference.ABOVE_FINISHED_FLOOR -> R.string.settings_reference_floor
     ElevationReference.ABOVE_CEILING -> R.string.settings_reference_ceiling
     ElevationReference.PROJECT_DATUM -> R.string.settings_reference_datum
+    ElevationReference.BELOW_CEILING -> R.string.routing_below_ceiling
+    ElevationReference.BELOW_SLAB -> R.string.routing_below_slab
 }

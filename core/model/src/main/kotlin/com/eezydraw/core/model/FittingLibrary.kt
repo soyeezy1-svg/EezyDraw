@@ -191,7 +191,7 @@ private fun buildFitting(item: LibraryItem, section: RouteSection, explicitOutle
     when (kind) {
         FittingKind.ELBOW_45, FittingKind.ELBOW_90, FittingKind.ELBOW,
         FittingKind.BEND_90_HORIZONTAL_INSIDE, FittingKind.BEND_90_HORIZONTAL_OUTSIDE -> {
-            val angle = if (kind == FittingKind.ELBOW_45) PI / 4 else PI / 2
+            val angle = (item.parameters["routingAngleRadians"] as? ParameterValue.Number)?.value ?: if (kind == FittingKind.ELBOW_45) PI / 4 else PI / 2
             val side = if (kind == FittingKind.BEND_90_HORIZONTAL_OUTSIDE) -1 else 1
             val points = List(9) { i ->
                 val a = angle * i / 8
@@ -203,13 +203,14 @@ private fun buildFitting(item: LibraryItem, section: RouteSection, explicitOutle
         }
         FittingKind.BEND_90_VERTICAL_INSIDE, FittingKind.BEND_90_VERTICAL_OUTSIDE -> {
             val up = kind == FittingKind.BEND_90_VERTICAL_INSIDE
+            val angle=(item.parameters["routingAngleRadians"] as? ParameterValue.Number)?.value ?: PI/2
             val points = List(9) { i ->
-                val a = PI / 2 * i / 8
+                val a = angle * i / 8
                 Point3(0.0, radius * sin(a), if (up) z + radius * (1 - cos(a)) else z + radius * cos(a))
             }
             path(points)
             port("input", points.first(), Point3(y = -1.0))
-            port("output", points.last(), Point3(z = if (up) 1.0 else -1.0))
+            port("output", points.last(), Point3(y=cos(angle),z=if(up)sin(angle)else -sin(angle)))
         }
         FittingKind.TEE, FittingKind.CROSS -> {
             val centre = Point3(y = length / 2, z = z)
@@ -236,8 +237,10 @@ private fun buildFitting(item: LibraryItem, section: RouteSection, explicitOutle
             port("output", points.last(), Point3(y = 1.0))
         }
         FittingKind.OFFSET -> {
-            val points = listOf(Point3(z = z), Point3(y = length / 3, z = z),
-                Point3(w, length * 2 / 3, z), Point3(w, length, z))
+            val offsetX=(item.parameters["routingOffsetX"] as? ParameterValue.Number)?.value ?: w
+            val offsetLength=(item.parameters["routingOffsetLength"] as? ParameterValue.Number)?.value ?: length
+            val points = listOf(Point3(z = z), Point3(y = offsetLength / 3, z = z),
+                Point3(offsetX, offsetLength * 2 / 3, z), Point3(offsetX, offsetLength, z))
             path(points)
             port("input", points.first(), Point3(y = -1.0))
             port("output", points.last(), Point3(y = 1.0))
@@ -302,8 +305,9 @@ private fun buildFitting(item: LibraryItem, section: RouteSection, explicitOutle
     val nominal = if (definition.routeKind == RouteKind.DUCT && section is RouteSection.Circular)
         RouteSection.Circular(.315) else nominalSection(definition.routeKind)
     val nominalOutlet = if (kind == FittingKind.REDUCER) nominal.half() else null
-    val id = if (section == nominal && outlet == nominalOutlet) definition.baseTypeId else
-        LibraryItemId("${definition.baseTypeId.value}@${section.signature()}${outlet?.let { "~${it.signature()}" } ?: ""}")
+    val angleSignature=listOf("routingAngleRadians","routingOffsetX","routingOffsetLength").mapNotNull {key->(item.parameters[key] as? ParameterValue.Number)?.value?.let {"@$key-${it.toBits().toULong().toString(16)}"}}.joinToString("")
+    val id = if (section == nominal && outlet == nominalOutlet && angleSignature.isEmpty()) definition.baseTypeId else
+        LibraryItemId("${definition.baseTypeId.value}@${section.signature()}${outlet?.let { "~${it.signature()}" } ?: ""}$angleSignature")
     return item.copy(
         id = id, defaultSize = size, geometrySize = null, geometry = geometry, symbolGeometry = symbols,
         parameters = item.parameters.filterKeys { it !in sectionKeys } + sectionParameters(section, outlet),

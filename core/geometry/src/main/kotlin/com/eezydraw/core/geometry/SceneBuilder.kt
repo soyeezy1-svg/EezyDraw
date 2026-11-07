@@ -105,7 +105,7 @@ fun buildDrawingScene(
             }
             is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
             is ElementBody.Wall -> wall(body, emit)
-            is ElementBody.Route -> polyline(body.path, false, emit)
+            is ElementBody.Route -> polyline(body.fabricationPath ?: body.path, false, emit)
             is ElementBody.Component -> {
                 val definition = library[body.libraryItemId]
                 if (definition == null || definition.geometry.isEmpty()) {

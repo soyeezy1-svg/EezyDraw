@@ -213,7 +213,7 @@ private fun negate(a: Point3) = times(a, -1.0)
 private fun subtract(a: Point3, b: Point3) = Point3(a.x - b.x, a.y - b.y, a.z - b.z)
 private fun cross(a: Point3, b: Point3) = Point3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
 
-private fun basisRotation(a: Point3, b: Point3, c: Point3, x: Point3, y: Point3, z: Point3): DoubleArray = doubleArrayOf(
+internal fun basisRotation(a: Point3, b: Point3, c: Point3, x: Point3, y: Point3, z: Point3): DoubleArray = doubleArrayOf(
     x.x * a.x + y.x * b.x + z.x * c.x, x.x * a.y + y.x * b.y + z.x * c.y, x.x * a.z + y.x * b.z + z.x * c.z,
     x.y * a.x + y.y * b.x + z.y * c.x, x.y * a.y + y.y * b.y + z.y * c.y, x.y * a.z + y.y * b.z + z.y * c.z,
     x.z * a.x + y.z * b.x + z.z * c.x, x.z * a.y + y.z * b.y + z.z * c.y, x.z * a.z + y.z * b.z + z.z * c.z,
@@ -226,7 +226,7 @@ private fun matrixPoint(m: DoubleArray, p: Point3) = Point3(
 )
 
 /** Same intrinsic XYZ decomposition as editing transforms, including the vertical case. */
-private fun matrixRotation(m: DoubleArray): Rotation3 {
+internal fun matrixRotation(m: DoubleArray): Rotation3 {
     val sy = m[2].coerceIn(-1.0, 1.0)
     val cy = hypot(m[0], m[1])
     val y = atan2(sy, cy)

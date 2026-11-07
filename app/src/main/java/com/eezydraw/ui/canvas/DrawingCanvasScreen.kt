@@ -109,7 +109,7 @@ private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean 
 
 private enum class MeasurementMode { NONE, DISTANCE, REFERENCE }
 private data class MeasurementPick(val point: Point3,val elementId: ElementId? = null)
-private data class PointInputSnapshot(val points:List<Point3>,val measurements:List<MeasurementPick>,val anchor:Point2?,val candidate:PrecisionPick?)
+private data class PointInputSnapshot(val points:List<Point3>,val measurements:List<MeasurementPick>,val anchor:Point2?,val candidate:PrecisionPick?,val routes:List<RoutePick> = emptyList())
 private data class PrecisionSnapKey(val mode:SnapMode?,val element:ElementId?,val wallEdge:Boolean,val discretePoint:Point3?)
 private fun SurfaceScene.partition(ids: Set<ElementId>,selected: Boolean): SurfaceScene {
     val matching=chunks.filter { (ElementId(it.elementId) in ids)==selected }
@@ -158,6 +158,9 @@ fun DrawingCanvasScreen(
     var size by remember { mutableStateOf(IntSize.Zero) }
     var loading: SceneLoad by remember(document.project.id.value) { mutableStateOf(SceneLoad.Loading) }
     var prepared: SceneLoad.Ready? by remember(document.project.id.value) { mutableStateOf(null) }
+    var routeKind by remember(document.project.id) {mutableStateOf<RouteKind?>(null)}
+    var routeDraft by remember(document.project.id) {mutableStateOf(emptyList<RoutePick>())}
+    var routeConfig by remember(document.project.id) {mutableStateOf(RoutingSettings())}
     var tool by rememberSaveable(document.project.id.value) { mutableStateOf(DrawingTool.SELECT) }
     var options by rememberSaveable(document.project.id.value, stateSaver = listSaver(
         save = { listOf(it.text, it.textHeight, it.height, it.closed,it.width,it.depth,it.useDefaultDimensions,it.keepProportions) },
@@ -214,6 +217,7 @@ fun DrawingCanvasScreen(
     val haptics=LocalHapticFeedback.current
     val selectedLevel = if (is3D) orbitLevel else level
     val floorZ = document.levels.find { it.id.value == selectedLevel }?.elevation ?: 0.0
+    val constructionZ=if(routeKind!=null)routingElevationAt(document,routeConfig.elevation,selectedLevel?.let(::LevelId),pointerWorld ?: Point3())else floorZ
     val snapSettings = document.project.settings.snap
     val anchor = if (anchorX != null && anchorY != null) Point2(anchorX!!, anchorY!!) else null
     val latestReady = rememberUpdatedState(ready)
@@ -272,7 +276,7 @@ fun DrawingCanvasScreen(
     val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
         document.project.settings.autoXrayFrontWalls || document.elements.any {element->element.objectDisplay==ObjectDisplay.XRAY ||
             element.properties.any {(key,value)->key.startsWith(ROOM_SIDE_DISPLAY_PREFIX) && (value as? ParameterValue.Text)?.value==ObjectDisplay.XRAY.name}}
-    val placementActive=tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
+    val placementActive=routeKind!=null || tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
     val floatingPanelsVisible=!panelsHidden && !(settings.autoHidePanelsWhileDrawing && (placementActive || selectedIds.isNotEmpty()))
     val latestPlacementActive=rememberUpdatedState(placementActive)
     val precisionActive=placementActive && settings.precisionPointer.enabled
@@ -345,13 +349,19 @@ fun DrawingCanvasScreen(
         // Commands are synchronous. A rejected or numerically unchanged drag has no new scene.
         if (latestDocument.value == before) { preview = null; waitingForCommit = null }
     }
-    fun inputSnapshot()=PointInputSnapshot(points,measurementPicks,anchor,precisionPick)
+    fun inputSnapshot()=PointInputSnapshot(points,measurementPicks,anchor,precisionPick,routeDraft)
     fun clearPrecisionCandidate() {precisionPick=null;precisionFinger=null;precisionDragging=false;precisionSnap=null}
     fun retainInput(before:PointInputSnapshot) {
         pointUndo=(pointUndo+before).takeLast(settings.undoLimit);pointRedo=emptyList()
     }
     fun applyPrecisionPick(pick:PrecisionPick,feedback:Boolean=true) {
-        precisionPick=pick;pointerWorld=pick.point
+        val resolved=if(routeKind!=null) {
+            val next=appendRoutingPick(document,routeKind!!,routeDraft,pick.point,routeConfig,document.levels.find {it.id.value==selectedLevel}).last().point
+            val snap=snapRoute(document,routeKind!!,next)
+            val screen=projectPrecisionPoint(snap.point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble()) ?: pick.screen
+            pick.copy(point=snap.point,screen=screen)
+        } else pick
+        precisionPick=resolved;pointerWorld=resolved.point
         cursor.value=SnapResult(Point2(pick.point.x,pick.point.y),pick.mode,pick.elementId?.value)
         val key=if(pick.mode==null && !pick.wallEdge && pick.elementId==null)null else PrecisionSnapKey(pick.mode,pick.elementId,pick.wallEdge,
             pick.point.takeIf {pick.mode in setOf(SnapMode.GRID,SnapMode.ENDPOINT,SnapMode.MIDPOINT,SnapMode.INTERSECTION) || pick.elementId!=null && !pick.wallEdge && pick.mode==null})
@@ -360,7 +370,7 @@ fun DrawingCanvasScreen(
         precisionSnap=key
     }
     fun restoreInput(snapshot:PointInputSnapshot) {
-        points=snapshot.points;measurementPicks=snapshot.measurements
+        routeDraft=snapshot.routes;points=snapshot.points;measurementPicks=snapshot.measurements
         anchorX=snapshot.anchor?.x;anchorY=snapshot.anchor?.y
         clearPrecisionCandidate()
         snapshot.candidate?.let {candidate->
@@ -371,7 +381,7 @@ fun DrawingCanvasScreen(
         pointerWorld=precisionPick?.point ?: snapshot.points.lastOrNull() ?: snapshot.measurements.lastOrNull()?.point
     }
     fun cancelConstruction() {
-        points = emptyList(); preview = null; waitingForCommit = null
+        routeKind=null;routeDraft=emptyList();points = emptyList(); preview = null; waitingForCommit = null
         pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         measurementPicks=emptyList();measurementMode=MeasurementMode.NONE
         pendingLibrary=null;tool=DrawingTool.SELECT;rotationAngle=null
@@ -379,10 +389,10 @@ fun DrawingCanvasScreen(
     }
     fun placed(library:Boolean=false) {
         pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
-        points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
+        routeDraft=emptyList();points=emptyList();measurementPicks=emptyList();anchorX=null;anchorY=null
         gizmoMode=GizmoMode.MOVE
         placedToken++
-        if(library || !settings.keepToolActiveAfterPlacing) {tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
+        if(library || !settings.keepToolActiveAfterPlacing) {routeKind=null;tool=DrawingTool.SELECT;measurementMode=MeasurementMode.NONE;pendingLibrary=null}
     }
     fun commitMeasurement(picks:List<MeasurementPick>,label:Point3):Boolean {
         if(picks.size<2 || busy)return false
@@ -408,6 +418,10 @@ fun DrawingCanvasScreen(
     }
     fun finishConstruction(picks: List<Point3> = points) {
         if (busy) return
+        if(routeKind!=null) {
+            if(editor?.onCreateRoute?.invoke(routeKind!!,routeDraft)==true)placed()
+            return
+        }
         try {
             val sketch = if (options.useDefaultDimensions && supportsDefaultPlacement(tool))
                 createDefaultSketch(tool,picks.first(),options) else createSketch(tool, picks, options)
@@ -422,7 +436,18 @@ fun DrawingCanvasScreen(
     val onCanvasTap = rememberUpdatedState<(Offset) -> Unit>({ position ->
         val actions = latestEditor.value
         val confirmed=if(precisionActive)precisionPick else null
-        if(actions!=null && !busy && pendingLibrary!=null) {
+        if(actions!=null && !busy && routeKind!=null) {
+            val raw=confirmed?.point ?: pointerWorld
+            val prior=inputSnapshot()
+            if(raw!=null)try {
+                val next=appendRoutingPick(document,routeKind!!,routeDraft,raw,routeConfig,document.levels.find {it.id.value==selectedLevel})
+                val last=next.last()
+                val captured=snapRoute(document,routeKind!!,last.point)
+                routeDraft=next.dropLast(1)+last.copy(point=captured.point)
+                points=routeDraft.map {it.point};anchorX=points.last().x;anchorY=points.last().y
+                if(!precisionActive && prior.points!=points)retainInput(prior)
+            } catch(error:IllegalArgumentException){toolError=error.message}
+        } else if(actions!=null && !busy && pendingLibrary!=null) {
             val at=confirmed?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
             if((!precisionActive || libraryPlacement!=null) && actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed(library=true)
         } else if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
@@ -500,11 +525,11 @@ fun DrawingCanvasScreen(
                 point, latestSnaps.value, max(latestSnaps.value.tolerance, 14.0 * density / viewport.pixelsPerMetre),
                 latestAnchor.value, latestLevel.value,
             )
-            pointerWorld=cursor.value?.point?.let {Point3(it.x,it.y,floorZ)}
+            pointerWorld=cursor.value?.point?.let {Point3(it.x,it.y,constructionZ)}
         } else if(size.width>0 && size.height>0 && placementActive) {
-            val point=orbit.rayToPlaneZ(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),floorZ)
+            val point=orbit.rayToPlaneZ(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),constructionZ)
                 ?: viewPlanePoint(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble())
-            pointerWorld=if(measurementMode==MeasurementMode.NONE)point.copy(z=floorZ) else point
+            pointerWorld=if(measurementMode==MeasurementMode.NONE)point.copy(z=constructionZ) else point
         }
     })
     val updatePrecisionPointer=rememberUpdatedState<(Offset,Boolean)->Unit>({position,stylus->
@@ -515,7 +540,7 @@ fun DrawingCanvasScreen(
                 val target=offsetCrosshair(finger,size.width.toDouble(),size.height.toDouble(),density.toDouble(),latestSettings.value.precisionPointer,stylus)
                 precisionFinger=finger
                 val reference=measurementPicks.firstOrNull()?.point ?: points.lastOrNull()
-                var picked=context.pick(target,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),floorZ,
+                var picked=context.pick(target,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),constructionZ,
                     selectedLevel,snapSettings,reference,14.0*density)
                 if(measurementMode==MeasurementMode.REFERENCE && measurementPicks.size<2 && picked.elementId==null) {
                     val picker=latestReady.value?.picker
@@ -608,11 +633,17 @@ fun DrawingCanvasScreen(
         orbitShown=true
     }
     fun finishTool() {
-        if(tool!=DrawingTool.SELECT && points.size>=tool.minimumPoints && points.isNotEmpty())finishConstruction()
+        if(routeKind!=null && routeDraft.size>=2)finishConstruction()
+        else if(tool!=DrawingTool.SELECT && points.size>=tool.minimumPoints && points.isNotEmpty())finishConstruction()
         else if(!precisionActive && measurementPicks.size>=2)commitMeasurement(measurementPicks,pointerWorld ?: measurementPicks.last().point)
         else cancelConstruction()
     }
+    val liveRoutePicks=if(routeKind!=null)pointerWorld?.let {runCatching {appendRoutingPick(document,routeKind!!,routeDraft,it,routeConfig,document.levels.find {l->l.id.value==selectedLevel})}.getOrNull()} ?: routeDraft else emptyList()
+    val liveRouteDocument=remember(document,routeKind,liveRoutePicks) {routeKind?.let {kind->runCatching {ServiceRouting.create(document,kind,liveRoutePicks).preview(document)}.getOrNull()}}
+    val liveRouteLength=liveRoutePicks.map {it.point}.zipWithNext().sumOf {(a,b)->kotlin.math.sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z))}
+    val liveFittingCount=liveRouteDocument?.elements?.count {e->ROUTING_OWNER in e.properties && document.elements.none {it.id==e.id && it==e}} ?: 0
     val activeLabel=when {
+        routeKind!=null->routeKind!!.name.replace('_',' ')
         pendingLibrary!=null->pendingLibraryItem?.name ?: "Library item"
         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.panel_measure_distance)
         measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.panel_reference_dimension)
@@ -679,7 +710,7 @@ fun DrawingCanvasScreen(
         },
         bottomBar = {
             CanvasStatus(document, is3D, orbit, cursor, selectedLevel, onUnitsChange,
-                onLevel = { cancelConstruction(); editor?.onSelect?.invoke(emptySet()); if (is3D) orbitLevel = it else level = it }, onSnaps = { snapsOpen = true })
+                onLevel = { if(routeKind==null)cancelConstruction()else clearPrecisionCandidate(); editor?.onSelect?.invoke(emptySet()); if (is3D) orbitLevel = it else level = it }, onSnaps = { snapsOpen = true })
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -692,6 +723,15 @@ fun DrawingCanvasScreen(
                     activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
                     libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
                     onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
+                if(routeKind!=null) {
+                    RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()})
+                    Text("${coordinate(routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
+                        liveRouteLength,liveFittingCount),Modifier.testTag("route_live_label"))
+                }
+                if(editor!=null && !placementActive) {
+                    RoutingRouteList(document,editor.onSelect)
+                    selectedElement?.let {RoutingSelectionActions(document,it,editor)}
+                }
                 if(placementActive) PlacementBanner(activeLabel,
                     when {
                         precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
@@ -703,7 +743,7 @@ fun DrawingCanvasScreen(
                         measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.canvas_reference_place_label)
                         points.isEmpty()->stringResource(R.string.placement_tap_to_start,activeLabel)
                         else->stringResource(R.string.placement_add_points)
-                    },canDone=true,onCancel={cancelConstruction()},onDone={finishTool()},showCancel=!precisionActive)
+                    },canDone=routeKind==null || routeDraft.size>=2,onCancel={cancelConstruction()},onDone={finishTool()},showCancel=!precisionActive)
                 if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
             }
             Box(
@@ -822,6 +862,14 @@ fun DrawingCanvasScreen(
                         }
                     }
                 }
+                if(routeKind!=null) {
+                    RouteGhost(document,routeKind!!,liveRoutePicks,viewport,orbit,is3D,preview=liveRouteDocument)
+                }
+                if(editor!=null && !placementActive && !panelsHidden && !zoomWindow)selectedElement?.let {e->
+                    if(document.layers.none {it.id==e.layerId && it.locked})RouteEndHandles(e,viewport,orbit,is3D,size.width,size.height) {a,b->
+                        (e.body as? ElementBody.Route)?.routing?.let {editor.onEditRoute(e.id,it.settings,a,b)}
+                    }
+                }
                 if (editor != null && tool != DrawingTool.SELECT) {
                     ConstructionPreview(document,tool,options,points,cursor.value?.point,floorZ,viewport,
                         orbit=orbit,is3D=is3D,cursorWorld=pointerWorld)
@@ -933,7 +981,12 @@ fun DrawingCanvasScreen(
                                         onUndo={undoInputOrDocument()},onRedo={redoInputOrDocument()},onCopy=actions.onCopy,
                                         onPaste={cancelConstruction();actions.onPaste()},onMirrorX={actions.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
                                         onMirrorY={actions.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},onArray={arrayOpen=true},
-                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true)
+                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true,onRoute={kind->
+                                            cancelConstruction();routeKind=kind
+                                            val defaults=settings.projectDefaults
+                                            routeConfig=settings.lastRoutingSettings[kind] ?: (defaults.routeDefaults[kind] ?: defaultRoutingSettings(kind)).let {it.copy(elevation=defaults.defaultRouteElevations[kind] ?: it.elevation)}
+                                            actions.onSelect(emptySet());probe=false;zoomWindow=false
+                                        })
                                 }
                             }
                         }

@@ -251,7 +251,7 @@ private fun surfaceRevolution(shape: Shape.Revolution, emit: SurfaceEmitter) {
 }
 
 private fun surfaceRoute(body: ElementBody.Route, emit: SurfaceEmitter) {
-    for ((a, b) in body.path.zipWithNext()) {
+    for ((a, b) in (body.fabricationPath ?: body.path).zipWithNext()) {
         val direction = minus(b, a)
         val length = magnitude(direction)
         if (length == 0.0) continue

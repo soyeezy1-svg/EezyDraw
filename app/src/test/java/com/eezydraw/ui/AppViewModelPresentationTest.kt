@@ -127,7 +127,7 @@ class AppViewModelPresentationTest {
             override suspend fun save(settings:AppSettings) {values.emit(settings)}
         }
         val model=AppViewModel(context,store.projects,preferences,SavedStateHandle(mapOf(
-            "screen" to AppScreen.PROJECT.name,"projectId" to id)))
+            "screen" to AppScreen.PROJECT.name,"projectId" to id)),store.library)
         val owner=ViewModelStore().apply {put("cold-restored",model)}
         try {
             runCurrent()

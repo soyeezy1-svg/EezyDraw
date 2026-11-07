@@ -86,9 +86,14 @@ sealed interface ElementBody {
         val elevation: ElevationSetting,
         val fittings: List<RouteFitting> = emptyList(),
         val host: HostAttachment? = null,
+        val routing: RouteTopology? = null,
+        /** Trimmed physical section endpoints; path retains the editable node centerline. */
+        val fabricationPath: List<Point3>? = null,
     ) : ElementBody {
         init {
             require(path.size >= 2)
+            require(routing==null || path.size==2)
+            require(fabricationPath==null || fabricationPath.size==path.size)
             require(fittings.all { it.pathVertexIndex in path.indices })
         }
     }

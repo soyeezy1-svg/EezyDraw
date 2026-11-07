@@ -3,6 +3,8 @@ package com.eezydraw.core.data
 import android.content.Context
 import androidx.room.Room
 import com.eezydraw.core.model.*
+import com.eezydraw.core.editing.RoutePick
+import com.eezydraw.core.editing.ServiceRouting
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -157,6 +159,46 @@ class LibraryPersistenceTest {
         assertEquals(state, imported.libraryState)
         assertEquals(saved.elements, imported.elements.map { it.copy(projectId = saved.project.id) })
         assertEquals(imported, repository.load(imported.project.id.value))
+    }
+
+    @Test fun `routing graph defaults risers overrides and supports survive save and archive import`() = runBlocking {
+        val created=repository.create("Connected routing",ProjectTemplate.EMPTY,ProjectSettings())
+        projectIds+=created.project.id.value
+        val config=defaultRoutingSettings(RouteKind.PIPE).copy(elevation=ElevationSetting(.4,ElevationReference.BELOW_SLAB))
+        val topology=RouteTopology("network","a","b",config,fittingOverrides=mapOf("a" to FittingKind.OFFSET),suppressedFittings=setOf("b"),supportSpacing=1.2,supportKind=FittingKind.HANGER)
+        val section=Element(ElementId("pipe"),created.project.id,created.layers.first().id,
+            ElementBody.Route(RouteKind.PIPE,listOf(Point3(),Point3(z=3.0)),RouteSection.Circular(.08),config.elevation,routing=topology),levelId=created.levels.first().id)
+        val item=BuiltInLibrary.items.first {it.fitting?.kind==FittingKind.HANGER && it.fitting?.routeKind==RouteKind.PIPE}
+        val support=section.copy(id=ElementId("hanger"),body=ElementBody.Component(item.id,item.defaultSize,host=HostAttachment(section.id,HostMode.SURFACE,Point3(z=1.2))),properties=mapOf("routingOwner" to ParameterValue.Text(section.id.value)))
+        val saved=repository.save(created.copy(elements=listOf(section,support),libraryItems=listOf(item),project=created.project.copy(settings=created.project.settings.copy(routeDefaults=mapOf(RouteKind.PIPE to config)))))
+        database.close();reopen()
+        assertEquals(saved,repository.load(saved.project.id.value))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(topology,(imported.elements.first().body as ElementBody.Route).routing)
+        assertEquals(saved.project.settings.routeDefaults,imported.project.settings.routeDefaults)
+    }
+
+    @Test fun `engine generated junctions reducers trims and supports round trip through real project storage`() = runBlocking {
+        val base=repository.create("HVAC graph",ProjectTemplate.EMPTY,ProjectSettings());projectIds+=base.project.id.value
+        val config=defaultRoutingSettings(RouteKind.DUCT)
+        val level=base.levels.first().id
+        fun point(x:Double,y:Double,settings:RoutingSettings=config)=RoutePick(Point3(x,y,2.5),settings,level)
+        val main=ServiceRouting.create(base,RouteKind.DUCT,listOf(point(0.0,0.0),point(8.0,0.0),point(8.0,6.0))).preview(base)
+        val branch=ServiceRouting.create(main,RouteKind.DUCT,listOf(point(4.0,0.0,config.copy(width=.6)),point(4.0,-4.0,config.copy(width=.6)))).preview(main)
+        val section=branch.elements.first {it.body is ElementBody.Route}
+        val supported=ServiceRouting.supports(branch,section.id,1.0).preview(branch)
+        val saved=repository.save(supported)
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(loaded,ServiceRouting.reconcile(loaded,loaded))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(saved.libraryItems,imported.libraryItems)
+        assertTrue(imported.elements.filter {it.body is ElementBody.Route}.all {(it.body as ElementBody.Route).fabricationPath!=null})
     }
 
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {

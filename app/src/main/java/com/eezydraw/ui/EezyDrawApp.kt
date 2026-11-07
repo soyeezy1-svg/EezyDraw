@@ -163,6 +163,8 @@ fun EezyDrawApp(
                                             viewModel::addSketch,viewModel::select,viewModel::transformSelection,viewModel::updateProperties,
                                             viewModel::copySelection,viewModel::pasteSelection,viewModel::deleteSelection,viewModel::undo,viewModel::redo,
                                             viewModel::mirrorSelection,viewModel::arraySelection,
+                                            onCreateRoute=viewModel::createRoute,onRoutingSettings=viewModel::rememberRoutingSettings,
+                                            onEditRoute=viewModel::editRoute,onRouteFitting=viewModel::routeFitting,onRouteSupports=viewModel::routeSupports,
                                             onViewMode=viewModel::changeViewMode,onLayerVisibility=viewModel::setLayerVisibility,
                                             onSystemVisibility=viewModel::setSystemVisibility,onMeasurementsVisibility=viewModel::showMeasurements,
                                             onUpdateMeasurement=viewModel::updateSavedMeasurement,onDeleteElements=viewModel::deleteElements,
