@@ -175,7 +175,7 @@ View modes use actual triangle faces with object overrides or system/material/la
 
 ## Validation
 
-The suite contains **623 passing tests**: model 51, geometry 93, editing 215, storage 24 and app 240. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
+The suite contains **630 passing tests**: model 51, geometry 93, editing 218, storage 25 and app 243. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
 
 Precision-pointer regressions cover offset distance and edge flips, loupe placement/content, confirm-only placement, retained targets, nudge steps, snapping and Settings defaults/restoration. Existing regressions cover axis-isolated snapped movement/rotation, mode-exclusive selection controls, manual-only Properties, placement previews/reset/cancellation, distance-only measurement defaults, cube face/corner/drag/Home navigation and undoable style/settings changes. Existing regressions cover all six view modes, surface triangulation and holes, move snapping/body-drag preferences, associative measurements/AFFL, visibility persistence, nonmodal panel drafts/full-screen controls, and PNG/PDF output. The editing suite also covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
@@ -241,4 +241,6 @@ Wall devices offer surface/recess/opening mounting, depth/clearance and a nearby
 
 Visibility can show/hide all wall cuts and open the Wall services schedule. The schedule lists source cuts, faces, sizes and positions, flags depths over 50% of nominal thickness by default, and controls the threshold and wall-section height. Section, X-ray and other views share the derived cut geometry. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for host conventions, bounds and engineering/device QA limitations.
 
-See [wall-service validation](docs/WALL_SERVICES_TEST_REPORT.md) for current checks and device QA boundaries.
+See [wall-service validation](docs/WALL_SERVICES_TEST_REPORT.md) and [room/wall validation](docs/WALL_CREATION_TEST_REPORT.md) for checks and device QA boundaries.
+
+Draw includes **Room**, **Room polygon** and a chained **Wall** tool. Rooms create walls automatically by default; the Room tool and Settings can turn this off. Select a room for the visible **Generate walls** action. See [the quick room → walls → socket test](docs/WALL_CREATION_QUICK_TEST.md).

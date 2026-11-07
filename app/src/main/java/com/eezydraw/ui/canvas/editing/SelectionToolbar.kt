@@ -82,6 +82,7 @@ fun SelectionToolbar(
     onRoomSide: (RoomSideRef?) -> Unit = {},
     onHideRoomSide: (RoomSideRef) -> Unit = {},
     onShowRoomWalls: () -> Unit = {},
+    onGenerateWalls:(()->Unit)?=null,
     layout: CanvasLayout = CanvasLayout(),
     onPanelVisibility: (CanvasPanelId, PanelVisibility) -> Unit = { _, _ -> },
     onHideAllPanels: (Boolean) -> Unit = {},
@@ -98,6 +99,7 @@ fun SelectionToolbar(
         shape = RoundedCornerShape(12.dp), tonalElevation = 5.dp, shadowElevation = 4.dp,
     ) {
         Row {
+            if(onGenerateWalls!=null) androidx.compose.material3.TextButton(onGenerateWalls,Modifier.testTag("selection_generate_walls")){Text("Generate walls")}
             CanvasActionButton(
                 if (mode == GizmoMode.ROTATE) Icons.AutoMirrored.Outlined.RotateRight else Icons.Outlined.OpenWith,
                 stringResource(if (mode == GizmoMode.MOVE) R.string.selection_switch_rotate else R.string.selection_switch_move),

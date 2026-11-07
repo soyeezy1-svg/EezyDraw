@@ -325,6 +325,7 @@ private fun extrude(boundary: Polygon2, bottom: Double, top: Double, emit: (Poin
 }
 
 private fun wall(wall: ElementBody.Wall, emit: (Point3, Point3) -> Unit) {
+    wall.joinProfile?.let {extrude(it,0.0,wall.height,emit);return}
     val dx = wall.end.x - wall.start.x
     val dy = wall.end.y - wall.start.y
     val length = hypot(dx, dy)

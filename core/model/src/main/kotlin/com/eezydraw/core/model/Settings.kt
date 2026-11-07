@@ -28,6 +28,7 @@ data class ProjectSettings(
     val angleFormat: AngleFormat = AngleFormat.DEGREES,
     val decimalPlaces: Int = 2,
     val snap: SnapSettings = SnapSettings(),
+    val autoCreateWalls:Boolean=true,
     val defaultWallThickness: Double = 0.2,
     val defaultWallHeight: Double = 3.0,
     val routeDefaults: Map<RouteKind, RoutingSettings> = emptyMap(),

@@ -187,6 +187,11 @@ class AppViewModel(
         require(name.isNotBlank() && name.trim().length <= 120)
         val settings = state.value.settings
         var document = projects.create(name.trim(), template, settings.projectDefaults.copy(lengthUnit = unit))
+        if(settings.projectDefaults.autoCreateWalls) {
+            val marked=document.copy(elements=document.elements.map {e->val room=e.body as? ElementBody.Room
+                if(room==null)e else e.copy(body=room.copy(wallOptions=RoomWallOptions(document.project.settings.defaultWallThickness,document.project.settings.defaultWallHeight)))})
+            document=RoomWalls.reconcile(document,marked).let {if(it==document)it else projects.save(it,backupEnabled=false)}
+        }
         val generated=lockGeneratedWalls(document.copy(elements=emptyList()),document,settings.lockWallsByDefault)
         if(generated!=document)document=projects.save(generated,backupEnabled=false)
         if (document.layers.any { it.lineWeightMm != settings.defaultLineWeightMm }) {
@@ -528,6 +533,12 @@ class AppViewModel(
         EditCommands.between(document,changed,"Change wall service mounting")
     }}
     fun wallServiceSettings(settings:WallServiceSettings)=updateProjectSettings("Wall cut visibility and warnings") {it.copy(wallServices=settings)}
+    fun roomCorner(id:ElementId,index:Int,point:Point3) {drawingEdit {_,doc->
+        val e=doc.elements.first {it.id==id};val room=e.body as ElementBody.Room;val local=measurementToLocal(e.transform,point)
+        EditCommands.replace(doc,listOf(e.copy(body=room.copy(boundary=room.boundary.copy(outer=room.boundary.outer.mapIndexed {i,p->if(i==index)Point2(local.x,local.y)else p})))),"Edit room corner")
+    }}
+    fun generateRoomWalls(ids:Set<ElementId>,options:RoomWallOptions) {drawingEdit {_,doc->RoomWalls.generate(doc,ids,options)}}
+    fun createBuilding(kind:String,points:List<Point3>,level:String?,options:RoomWallOptions,automatic:Boolean):Boolean=drawingEdit {_,doc->RoomWalls.create(doc,kind,points,level?.let(::LevelId),options,automatic)}
     fun createRoute(kind:RouteKind,picks:List<RoutePick>):Boolean = drawingEdit(selectAdded=false) {_,doc->ServiceRouting.create(doc,kind,picks)}
     fun rememberRoutingSettings(kind:RouteKind,value:RoutingSettings) {
         mutableState.update {it.copy(settings=it.settings.copy(lastRoutingSettings=it.settings.lastRoutingSettings+(kind to value)))}
@@ -551,7 +562,8 @@ class AppViewModel(
         return try {
             val prepared = build(current, document)
             val preview=prepared.preview(document)
-            val attached=WallServices.reconcile(document,preview)
+            val roomWalls=RoomWalls.reconcile(document,preview)
+            val attached=WallServices.reconcile(document,roomWalls)
             val connected=ServiceRouting.reconcile(document,attached)
             val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
             val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
