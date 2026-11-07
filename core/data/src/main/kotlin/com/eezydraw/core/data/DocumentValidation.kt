@@ -30,6 +30,7 @@ internal fun validateDocument(document: ProjectDocument) {
         "The recently used library items are invalid.")
     val elementIds = unique(document.elements.map { it.id } + document.underlays.map { it.id }, "element")
     val elements = document.elements.associateBy { it.id }
+    val wallFaces=wallFrames(document).mapTo(hashSetOf()){it.host.id to it.roomSide}
     val views = unique(document.views.map { it.id }, "view")
     unique(document.groups.map { it.id }, "group")
     unique(document.issues.map { it.id }, "issue")
@@ -63,11 +64,13 @@ internal fun validateDocument(document: ProjectDocument) {
                     "A measurement refers to a missing floor level.")
             }
             is ElementBody.Component -> {
+                valid(body.wallService?.let {mount->(mount.wallId to mount.roomSide) in wallFaces} ?: true,"A wall service host is missing.")
                 valid(body.libraryItemId in libraryItems, "A component definition is missing.")
                 val host = body.host
                 valid(host == null || host.hostElementId in elements, "A component host is missing.")
             }
             is ElementBody.Route -> {
+                valid(body.wallService?.let {mount->(mount.wallId to mount.roomSide) in wallFaces} ?: true,"A wall route host is missing.")
                 val host = body.host
                 valid(host == null || host.hostElementId in elements, "A route host is missing.")
                 valid(listOfNotNull(body.routing?.startAnchor,body.routing?.endAnchor).all {it.elementId in elements && it.elementId!=element.id},"A routing connection is missing.")

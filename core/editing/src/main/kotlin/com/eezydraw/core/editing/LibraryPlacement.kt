@@ -30,6 +30,7 @@ fun previewLibraryPlacement(
     levelId: LevelId? = null,
     layerId: LayerId? = null,
     id: ElementId = ElementId("library-preview"),
+    wallOptions:WallServiceOptions? = null,
 ): LibraryPlacement {
     val level = placementLevel(document, levelId, point.z)
     require(level == null || level.id !in document.project.settings.hiddenLevelIds) {
@@ -70,7 +71,7 @@ fun previewLibraryPlacement(
     val system = requireVisiblePlacementSystem(document, systemName)
     val materialName = (params[LibraryParameterKeys.MATERIAL] as? ParameterValue.Text)?.value.orEmpty()
     val colour = (params[LibraryParameterKeys.COLOUR] as? ParameterValue.Colour)?.argb ?: item.defaultColourArgb
-    val element = Element(
+    var element = Element(
         id = id,
         projectId = document.project.id,
         layerId = layer.id,
@@ -83,6 +84,7 @@ fun previewLibraryPlacement(
         transform = Transform3(translation, rotation, Scale3(z = if (item.mounting == MountingType.CEILING) -1.0 else 1.0)),
         properties = mapOf(ELEMENT_COLOUR_KEY to ParameterValue.Colour(colour)),
     )
+    if(item.mounting==MountingType.WALL)element=WallServices.attach(document,element,wallOptions ?: defaultWallDeviceOptions(item))
     val connection = libraryFittingConnectionPoint(item, element)
     if (connection != null) {
         val connectionHeight = connection.z - floor

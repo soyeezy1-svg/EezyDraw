@@ -84,7 +84,8 @@ class AppViewModelLibraryTest {
         val switch = placed.elements.single { it.id in model.state.value.selectedIds }
         val body = switch.body as ElementBody.Component
         assertEquals(wall.id, body.host?.hostElementId)
-        assertEquals(.1, switch.transform.translation.y, 1e-9)
+        assertEquals(.1, switch.transform.translation.y + body.size.depth, 1e-9)
+        assertEquals(HostMode.RECESSED,body.host?.mode)
         assertEquals(5.2, switch.transform.translation.z, 1e-9)
         assertEquals(0.0, switch.transform.rotation.z, 1e-9)
         assertEquals(1.2, readLibraryProperties(placed, switch).mountingHeight, 1e-9)

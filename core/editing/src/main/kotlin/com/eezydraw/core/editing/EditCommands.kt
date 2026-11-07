@@ -248,12 +248,14 @@ object EditCommands {
                         startAnchor=r.startAnchor?.takeIf {it.elementId in ids.values},endAnchor=r.endAnchor?.takeIf {it.elementId in ids.values},
                         fittingOverrides=r.fittingOverrides.mapKeys {(k,_)->nodeIds[k] ?: k},suppressedFittings=r.suppressedFittings.map {nodeIds[it] ?: it}.toSet()))
                 }},
-                properties=element.properties.filterKeys {it!="routingOwner" && it!="routingNode"},
+                properties=element.properties.filterKeys {it!="routingOwner" && it!="routingNode" && it!=WALL_DEVICE_FEED}+
+                    ((element.properties[WALL_DEVICE_FEED] as? ParameterValue.Text)?.value?.let {ids[ElementId(it)]}?.let {mapOf(WALL_DEVICE_FEED to ParameterValue.Text(it.value))} ?: emptyMap()),
             )
         }
     }
 
     private fun remap(body: ElementBody, ids: Map<ElementId, ElementId>): ElementBody {
+        fun mount(m:WallServiceAttachment?):WallServiceAttachment?=m?.copy(wallId=ids[m.wallId] ?: m.wallId,roomSide=m.roomSide?.let {it.copy(roomId=ids[it.roomId] ?: it.roomId)})
         fun host(host: HostAttachment?): HostAttachment? = host?.let {
             it.copy(hostElementId = ids[it.hostElementId] ?: it.hostElementId)
         }
@@ -268,8 +270,8 @@ object EditCommands {
                 ))
             }
             is ElementBody.Room -> body.copy(wallFaces = body.wallFaces.map { it.copy(wallId = ids[it.wallId] ?: it.wallId) })
-            is ElementBody.Component -> body.copy(host = host(body.host))
-            is ElementBody.Route -> body.copy(host = host(body.host),routing=body.routing?.let {r->r.copy(
+            is ElementBody.Component -> body.copy(host = host(body.host),wallService=mount(body.wallService))
+            is ElementBody.Route -> body.copy(host = host(body.host),wallService=mount(body.wallService),routing=body.routing?.let {r->r.copy(
                 startAnchor=r.startAnchor?.let {it.copy(elementId=ids[it.elementId] ?: it.elementId)},endAnchor=r.endAnchor?.let {it.copy(elementId=ids[it.elementId] ?: it.elementId)})})
             else -> body
         }
@@ -279,8 +281,8 @@ object EditCommands {
         is ElementBody.Room -> if (body.wallFaces.any { it.wallId in ids }) {
             body.copy(wallFaces = body.wallFaces.filterNot { it.wallId in ids })
         } else body
-        is ElementBody.Component -> if (body.host?.hostElementId in ids) body.copy(host = null) else body
-        is ElementBody.Route -> body.copy(host=body.host?.takeUnless {it.hostElementId in ids},routing=body.routing?.let {r->r.copy(startAnchor=r.startAnchor?.takeUnless {it.elementId in ids},endAnchor=r.endAnchor?.takeUnless {it.elementId in ids})})
+        is ElementBody.Component -> body.copy(host=body.host?.takeUnless {it.hostElementId in ids},wallService=body.wallService?.takeUnless {it.wallId in ids})
+        is ElementBody.Route -> body.copy(host=body.host?.takeUnless {it.hostElementId in ids},wallService=body.wallService?.takeUnless {it.wallId in ids},routing=body.routing?.let {r->r.copy(startAnchor=r.startAnchor?.takeUnless {it.elementId in ids},endAnchor=r.endAnchor?.takeUnless {it.elementId in ids})})
         else -> body
     }
 
@@ -368,7 +370,9 @@ object EditCommands {
                 "The host object no longer exists"
             }
         }
+        val faces=wallFrames(document.copy(elements=all)).mapTo(hashSetOf()){it.host.id to it.roomSide}
         for (element in changed) {
+            element.wallService()?.let {require(it.wallId to it.roomSide in faces){"The wall service host no longer exists"}}
             require(element.levelId == null || element.levelId in levels) { "Object level no longer exists" }
             require(element.systemId == null || element.systemId in systems) { "Object system no longer exists" }
             require(element.materialId == null || element.materialId in materials) { "Object material no longer exists" }

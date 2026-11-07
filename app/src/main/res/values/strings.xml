@@ -24,4 +24,5 @@
     <string name="theme_dark">Dark</string>
 <string name="routing_below_ceiling">Below ceiling</string>
     <string name="routing_below_slab">Below slab</string>
+<string name="panel_mode_wall_section">Wall section</string>
 </resources>

@@ -374,7 +374,8 @@ class AppViewModel(
         drawingEdit { _, document -> EditCommands.delete(document,ids) }
     }
 
-    fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?):Boolean {
+    fun insertLibraryItem(id:LibraryItemId,at:Point3,levelId:String?):Boolean=insertWallLibraryItem(id,at,levelId,null)
+    fun insertWallLibraryItem(id: LibraryItemId, at: Point3, levelId: String?,options:WallServiceOptions?):Boolean {
         val placed = drawingEdit(selectAdded = true) { current, document ->
             val source = requireNotNull(current.libraryCatalog.find(id,document.libraryItems)) {
                 "The library item is no longer available."
@@ -382,8 +383,9 @@ class AppViewModel(
             val item = libraryPlacementDefinition(document, source)
             val (prepared, layer) = drawingLayer(document,current.settings.defaultLineWeightMm)
             val placement = previewLibraryPlacement(prepared,item,at,levelId?.let(::LevelId),layer.id,
-                ElementId(UUID.randomUUID().toString()))
-            EditCommands.between(document,LibraryCommands.place(prepared,placement).preview(prepared),"Insert library item")
+                ElementId(UUID.randomUUID().toString()),wallOptions=options)
+            val placed=LibraryCommands.place(prepared,placement).preview(prepared)
+            EditCommands.between(document,WallServices.connectDevice(placed,placement.element.id),"Insert library item")
         }
         if (placed) state.value.document?.libraryState?.recordUsed(id)?.let(::setLibraryState)
         return placed
@@ -515,6 +517,17 @@ class AppViewModel(
         }
     }
 
+    fun editWallService(id:ElementId,options:WallServiceOptions?) {drawingEdit {_,document->
+        val old=document.elements.first {it.id==id}.wallService()?.options
+        var changed=WallServices.edit(document,id,options).preview(document)
+        if(old?.drop!=options?.drop) {
+            val feeds=changed.elements.filter {(it.properties[WALL_DEVICE_FEED] as? ParameterValue.Text)?.value==id.value}.mapTo(hashSetOf()){it.id}
+            if(feeds.isNotEmpty())changed=EditCommands.delete(changed,feeds).preview(changed)
+            if(options!=null)changed=WallServices.connectDevice(changed,id)
+        }
+        EditCommands.between(document,changed,"Change wall service mounting")
+    }}
+    fun wallServiceSettings(settings:WallServiceSettings)=updateProjectSettings("Wall cut visibility and warnings") {it.copy(wallServices=settings)}
     fun createRoute(kind:RouteKind,picks:List<RoutePick>):Boolean = drawingEdit(selectAdded=false) {_,doc->ServiceRouting.create(doc,kind,picks)}
     fun rememberRoutingSettings(kind:RouteKind,value:RoutingSettings) {
         mutableState.update {it.copy(settings=it.settings.copy(lastRoutingSettings=it.settings.lastRoutingSettings+(kind to value)))}
@@ -538,7 +551,8 @@ class AppViewModel(
         return try {
             val prepared = build(current, document)
             val preview=prepared.preview(document)
-            val connected=ServiceRouting.reconcile(document,preview)
+            val attached=WallServices.reconcile(document,preview)
+            val connected=ServiceRouting.reconcile(document,attached)
             val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
             val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
             val changed = history.execute(document, command)
@@ -571,7 +585,7 @@ class AppViewModel(
             canRedo = history.canRedo,
             canPaste = clipboard.isNotEmpty(),
             error = null,
-            notice = null,noticeUndo=false,
+            notice = wallDepthWarnings(document).firstOrNull(),noticeUndo=false,
         )
     }
 

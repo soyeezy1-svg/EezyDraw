@@ -175,7 +175,7 @@ View modes use actual triangle faces with object overrides or system/material/la
 
 ## Validation
 
-The suite contains **607 passing tests**: model 51, geometry 86, editing 209, storage 23 and app 238. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
+The suite contains **623 passing tests**: model 51, geometry 93, editing 215, storage 24 and app 240. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
 
 Precision-pointer regressions cover offset distance and edge flips, loupe placement/content, confirm-only placement, retained targets, nudge steps, snapping and Settings defaults/restoration. Existing regressions cover axis-isolated snapped movement/rotation, mode-exclusive selection controls, manual-only Properties, placement previews/reset/cancellation, distance-only measurement defaults, cube face/corner/drag/Home navigation and undoable style/settings changes. Existing regressions cover all six view modes, surface triangulation and holes, move snapping/body-drag preferences, associative measurements/AFFL, visibility persistence, nonmodal panel drafts/full-screen controls, and PNG/PDF output. The editing suite also covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
@@ -232,3 +232,13 @@ Open Draw and choose a service tool. Set its size, elevation/reference, system, 
 Select a section to move it with the ordinary gizmo, drag its A/B endpoints, or open Route properties. Connected endpoints and fittings follow in one undoable edit. More replaces/deletes a selected fitting or adds spaced supports, hangers, brackets, couplers and expansion joints. Expand Routes to select sections and review length, size, height and system. Settings supplies defaults for every service; the app remembers each tool's last configuration. See the connected-routing section of [ARCHITECTURE.md](docs/ARCHITECTURE.md) for topology, persistence, limits and equipment connection conventions.
 
 See [routing validation](docs/ROUTING_TEST_REPORT.md) for current checks and device QA boundaries.
+
+## Wall services
+
+Conduit and trunking can use Surface mounted or Concealed (chase) from the routing bar. In 3D or an orthographic elevation, aim at the wall face, confirm points with Place and finish with Done. Ortho follows the wall's horizontal/vertical axes. Set clearance before drawing; concealed routes produce visible grooves while the wall's nominal dimensions stay unchanged.
+
+Wall devices offer surface/recess/opening mounting, depth/clearance and a nearby-conduit or ceiling/floor feed choice. Switches, sockets and data outlets create back-box recesses by default. The Wall services library includes flush/surface boards, wall AC/thermostats/CCTV/fire equipment, cabinets, risers and sleeves/penetrations. Moving or deleting services updates their derived cuts through normal undo/redo and save/load.
+
+Visibility can show/hide all wall cuts and open the Wall services schedule. The schedule lists source cuts, faces, sizes and positions, flags depths over 50% of nominal thickness by default, and controls the threshold and wall-section height. Section, X-ray and other views share the derived cut geometry. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for host conventions, bounds and engineering/device QA limitations.
+
+See [wall-service validation](docs/WALL_SERVICES_TEST_REPORT.md) for current checks and device QA boundaries.

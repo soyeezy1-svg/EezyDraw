@@ -43,6 +43,10 @@ fun buildDrawingScene(
     val bounds = SceneBounds()
     val levelBounds = linkedMapOf<String?, SceneBounds>()
     val chunks = ChunkCollector()
+    val wallFrames=wallFrames(document).associateBy {it.host.id to it.roomSide}
+    val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
+    val wallCuts=if(document.project.settings.wallServices.showCuts)allWallCuts else emptyMap()
+    val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
     val presentation = ScenePresentation(document)
     for (element in document.elements) {
         if (elementIds != null && element.id !in elementIds) continue
@@ -58,8 +62,11 @@ fun buildDrawingScene(
             ?: layer?.colourArgb ?: 0xFF334455
         val partSide = if(element.body is ElementBody.Wall)presentation.wallSide(element) else null
         val roomCenter = presentation.roomCenter(element)
-        fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { a,b ->
-            if (a != b) {
+        fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { originalA,originalB ->
+            val plane=sectionHeight?.plus(document.levels.find {it.id==element.levelId}?.elevation ?: 0.0)
+            val clipped=clipWallSectionLine(originalA,originalB,plane)
+            val a=clipped?.first;val b=clipped?.second
+            if (a!=null && b!=null && a != b) {
                 require(segments.size < MAX_SEGMENTS) { "Drawing exceeds the $MAX_SEGMENTS wireframe edge limit." }
                 val edge = SceneSegment(a,b,element.id.value,levelId,color,mode,side,roomCenter)
                 segments.add(edge)
@@ -94,6 +101,11 @@ fun buildDrawingScene(
                         val mode=presentation.sideDisplay(element,side)
                         if(!presentation.shown(mode))continue
                         val output=localEmitter(mode,side)
+                        val frame=wallFrames[element.id to side]
+                        if(frame!=null && (allWallCuts[element.id to side].orEmpty().isNotEmpty() || sectionHeight!=null)) {
+                            wallCutMesh(frame,wallCuts[element.id to side].orEmpty(),sectionHeight)?.let {wallMeshEdges(it).forEach {(a,b)->output(a,b)}}
+                            continue
+                        }
                         output(point(a.x,a.y),point(b.x,b.y))
                         output(point(a.x,a.y,body.ceilingHeight),point(b.x,b.y,body.ceilingHeight))
                         output(point(a.x,a.y),point(a.x,a.y,body.ceilingHeight))
@@ -104,7 +116,11 @@ fun buildDrawingScene(
                 }
             }
             is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
-            is ElementBody.Wall -> wall(body, emit)
+            is ElementBody.Wall -> {
+                val frame=wallFrames[element.id to null]
+                if(frame!=null && (allWallCuts[element.id to null].orEmpty().isNotEmpty() || sectionHeight!=null))wallCutMesh(frame,wallCuts[element.id to null].orEmpty(),sectionHeight)?.let {wallMeshEdges(it).forEach {(a,b)->emit(a,b)}}
+                else wall(body,emit)
+            }
             is ElementBody.Route -> polyline(body.fabricationPath ?: body.path, false, emit)
             is ElementBody.Component -> {
                 val definition = library[body.libraryItemId]
@@ -656,4 +672,12 @@ private class ChunkBuffer(private val origin: Point3,private val levelId: String
         values[offset + 6] = ((color shr 24) and 255) / 255f
     }
     fun finish() = SceneChunk(origin,bounds.build(),levelId,values.copyOf(count*14),display,roomSide,roomCenter,elementId)
+}
+
+private fun clipWallSectionLine(a:Point3,b:Point3,height:Double?):Pair<Point3,Point3>? {
+    if(height==null || a.z<=height && b.z<=height)return a to b
+    if(a.z>height && b.z>height)return null
+    val t=(height-a.z)/(b.z-a.z)
+    val p=Point3(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,height)
+    return if(a.z<=height)a to p else p to b
 }
