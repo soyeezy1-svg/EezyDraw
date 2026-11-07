@@ -46,6 +46,18 @@ data class CanvasEditorActions(
     val onLibraryState:(LibraryState)->Unit={},
     val onLibraryProperties:(ElementProperties,LibraryInstanceProperties,Boolean)->Unit={_,_,_->},
     val onResetLibraryProperties:()->Unit={},
+    val libraryCatalog: LibraryCatalog = LibraryCatalog(),
+    val libraryReady: Boolean = true,
+    val onSaveLibraryItem:(LibraryItem)->Unit={},
+    val onRestoreLibraryItem:(LibraryItemId)->Unit={},
+    val onDeleteLibraryItem:(LibraryItemId)->Unit={},
+    val onDuplicateLibraryItem:(LibraryItemId)->Unit={},
+    val onImportLibrary:()->Unit={},
+    val onExportLibrary:()->Unit={},
+    val onUndoLibrary:()->Unit={},
+    val onRedoLibrary:()->Unit={},
+    val libraryCanUndo:Boolean=false,
+    val libraryCanRedo:Boolean=false,
 )
 
 internal fun Bounds3.center() = Point3(

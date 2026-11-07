@@ -8,6 +8,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.eezydraw.R
+import com.eezydraw.core.data.LibraryRepository
+import com.eezydraw.core.data.DeviceLibraryRepository
+import com.eezydraw.core.data.LibraryArchive
+import com.eezydraw.core.editing.libraryPlacementDefinition
 import com.eezydraw.core.data.ProjectRepository
 import com.eezydraw.core.data.ProjectStorageException
 import com.eezydraw.core.data.SettingsRepository
@@ -83,6 +87,10 @@ data class AppUiState(
     val canPaste: Boolean = false,
     val autosaving: Boolean = false,
     val noticeUndo: Boolean = false,
+    val libraryCatalog: LibraryCatalog = LibraryCatalog(),
+    val libraryReady: Boolean = false,
+    val libraryCanUndo: Boolean = false,
+    val libraryCanRedo: Boolean = false,
 )
 
 class AppViewModel(
@@ -90,6 +98,7 @@ class AppViewModel(
     private val projects: ProjectRepository,
     private val preferences: SettingsRepository,
     private val savedState: SavedStateHandle = SavedStateHandle(),
+    private val deviceLibrary: LibraryRepository = DeviceLibraryRepository(context.filesDir),
 ) : AndroidViewModel(context.applicationContext as Application) {
     private val application: Application = getApplication()
     private val exchange = ProjectExchange(application, projects)
@@ -99,6 +108,7 @@ class AppViewModel(
     private val mutableState = MutableStateFlow(AppUiState(screen = initialScreen))
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
 
+    private val libraryHistory = LibraryCatalogHistory()
     private var preferencesReady = false
     private var catalogueReady = false
     private val history = EditHistory()
@@ -110,6 +120,17 @@ class AppViewModel(
     private var pendingViewExport: Pair<ViewExportRequest, ViewExportFormat>? = null
 
     init {
+        viewModelScope.launch {
+            try {
+                storageMutex.withLock {
+                    val catalog = deviceLibrary.load()
+                    mutableState.update { it.copy(libraryCatalog = catalog, libraryReady = true) }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                mutableState.update { it.copy(error = "Could not load device library: ${error.message}") }
+            }
+        }
         viewModelScope.launch {
             preferences.settings.catch { error ->
                 preferencesReady = true
@@ -354,9 +375,10 @@ class AppViewModel(
 
     fun insertLibraryItem(id: LibraryItemId, at: Point3, levelId: String?):Boolean {
         val placed = drawingEdit(selectAdded = true) { current, document ->
-            val item = requireNotNull(document.libraryItems.find { it.id == id } ?: BuiltInLibrary.find(id)) {
+            val source = requireNotNull(current.libraryCatalog.find(id,document.libraryItems)) {
                 "The library item is no longer available."
             }
+            val item = libraryPlacementDefinition(document, source)
             val (prepared, layer) = drawingLayer(document,current.settings.defaultLineWeightMm)
             val placement = previewLibraryPlacement(prepared,item,at,levelId?.let(::LevelId),layer.id,
                 ElementId(UUID.randomUUID().toString()))
@@ -367,7 +389,70 @@ class AppViewModel(
     }
 
     /** Browsing preferences persist with the project, independently of geometry undo. */
-    fun setLibraryState(libraryState: LibraryState) = edit { it.copy(libraryState=libraryState) }
+    fun setLibraryState(libraryState: LibraryState) = edit { document ->
+        val ids = libraryState.favoriteIds + libraryState.recentIds
+        val missing = ids.filter { id -> BuiltInLibrary.find(id) == null && document.libraryItems.none { it.id == id } }
+            .mapNotNull { state.value.libraryCatalog.find(it)?.copy(thumbnailBase64=null) }
+        document.copy(libraryState=libraryState,libraryItems=document.libraryItems+missing)
+    }
+
+    fun saveLibraryItem(item: LibraryItem) = libraryChange { it.save(item) }
+    fun restoreLibraryItem(id: LibraryItemId) = libraryChange { it.restore(id) }
+    fun deleteLibraryItem(id: LibraryItemId) = libraryChange { it.remove(id) }
+    fun duplicateLibraryItem(id: LibraryItemId) = libraryChange { catalog ->
+        val item = requireNotNull(catalog.find(id,state.value.document?.libraryItems.orEmpty()))
+        val newId = LibraryItemId(UUID.randomUUID().toString())
+        catalog.save(item.copy(id=newId,builtIn=false,version=1,catalogSourceId=null,
+            name=item.name.take(110)+" copy",fitting=item.fitting?.copy(baseTypeId=newId)))
+    }
+    private fun libraryChange(change: (LibraryCatalog) -> LibraryCatalog) = operation {
+        check(state.value.libraryReady) { "The device library has not loaded." }
+        val previous = state.value.libraryCatalog
+        val next = change(previous)
+        if (next != previous) {
+            deviceLibrary.save(next)
+            libraryHistory.record(previous)
+            publishLibrary(next)
+        }
+    }
+    private fun publishLibrary(catalog: LibraryCatalog) = mutableState.update {
+        it.copy(libraryCatalog=catalog,libraryReady=true,libraryCanUndo=libraryHistory.canUndo,libraryCanRedo=libraryHistory.canRedo)
+    }
+    fun undoLibrary() = operation {
+        libraryHistory.undoCandidate()?.let { next ->
+            deviceLibrary.save(next)
+            libraryHistory.acceptUndo(state.value.libraryCatalog)
+            publishLibrary(next)
+        }
+    }
+    fun redoLibrary() = operation {
+        libraryHistory.redoCandidate()?.let { next ->
+            deviceLibrary.save(next)
+            libraryHistory.acceptRedo(state.value.libraryCatalog)
+            publishLibrary(next)
+        }
+    }
+    fun importLibrary(uri: String) = operation {
+        val imported = withContext(Dispatchers.IO) {
+            requireNotNull(application.contentResolver.openInputStream(uri.toUri())).use(LibraryArchive::decode)
+        }
+        val previous = state.value.libraryCatalog
+        val next = previous.merge(imported)
+        if (next != previous || !state.value.libraryReady) {
+            deviceLibrary.save(next)
+            if (next != previous) libraryHistory.record(previous)
+            publishLibrary(next)
+        }
+        mutableState.update { it.copy(notice="Library imported") }
+    }
+    fun exportLibrary(uri: String) = operation {
+        check(state.value.libraryReady)
+        val catalog = state.value.libraryCatalog
+        withContext(Dispatchers.IO) {
+            requireNotNull(application.contentResolver.openOutputStream(uri.toUri(),"wt")).use { LibraryArchive.write(catalog,it) }
+        }
+        mutableState.update { it.copy(notice="Library exported") }
+    }
 
     fun updateLibraryProperties(transform: ElementProperties, properties: LibraryInstanceProperties, updateAll: Boolean = false) {
         drawingEdit { current, document ->
@@ -663,6 +748,8 @@ class AppViewModel(
 
     private fun userMessage(error: Throwable): String = when (error) {
         is ProjectStorageException -> error.message ?: application.getString(R.string.project_storage_error)
+        is IllegalArgumentException -> error.message ?: application.getString(R.string.project_storage_error)
+        is IllegalStateException -> error.message ?: application.getString(R.string.project_storage_error)
         is SecurityException -> application.getString(R.string.folder_permission_error)
         else -> application.getString(R.string.project_storage_error)
     }

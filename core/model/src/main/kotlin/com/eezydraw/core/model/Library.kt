@@ -25,15 +25,22 @@ data class LibraryItem(
     val defaultMaterial: String = "",
     val defaultColourArgb: Long = 0xFF777777,
     val fitting: FittingDefinition? = null,
+    /** Geometry keeps its original coordinate envelope when defaults are edited. */
+    val geometrySize: Size3? = null,
+    /** Project-only snapshots retain their source without becoming new reusable entries. */
+    val catalogSourceId: LibraryItemId? = null,
+    /** Small PNG/JPEG thumbnail copied into the library, never an external URI. */
+    val thumbnailBase64: String? = null,
 ) {
     init {
         require(name.isNotBlank() && category.isNotBlank() && version > 0)
+        require(thumbnailBase64 == null || thumbnailBase64.length <= 350_000)
         require(defaultMountingHeight.isFinite() && defaultMountingHeight >= 0)
     }
 }
 
 /** Local +Y is the outward face of a wall-mounted item; local Z=0 is its base. */
-@Serializable enum class MountingType { FLOOR, WALL, CEILING }
+@Serializable enum class MountingType { FLOOR, WALL, CEILING, FREE }
 
 @Serializable enum class LibrarySymbol {
     SWITCH, DOUBLE_SWITCH, DIMMER, SOCKET, FLOOR_BOX, ISOLATOR, PANEL, LIGHT,
@@ -72,7 +79,7 @@ fun LibraryItem.defaultParameters(): Map<String, ParameterValue> = mapOf(
 
 @Serializable enum class LibraryViewMode { GRID, LIST }
 
-/** Project browsing preferences refer to both built-in and project-carried definitions by stable ID. */
+/** Project browsing preferences refer to built-in, device and project-carried definitions by stable ID. */
 @Serializable
 data class LibraryState(
     val favoriteIds: Set<LibraryItemId> = emptySet(),

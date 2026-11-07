@@ -83,6 +83,8 @@ fun EezyDrawApp(
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importProject(it.toString()) }
     }
+    val importLibrary = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let {viewModel.importLibrary(it.toString())} }
+    val exportLibrary = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let {viewModel.exportLibrary(it.toString())} }
     val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { viewModel.exportProject(it.toString()) }
     }
@@ -175,6 +177,13 @@ fun EezyDrawApp(
                                             onShowAll=viewModel::showAllObjects,onShowHidden=viewModel::showHiddenObjects,onAutoXray=viewModel::autoXrayFrontWalls,
                                             onLibraryState=viewModel::setLibraryState,onLibraryProperties=viewModel::updateLibraryProperties,
                                             onResetLibraryProperties=viewModel::resetLibraryProperties,
+                                            libraryCatalog=state.libraryCatalog,libraryReady=state.libraryReady,
+                                            onSaveLibraryItem=viewModel::saveLibraryItem,onRestoreLibraryItem=viewModel::restoreLibraryItem,
+                                            onDeleteLibraryItem=viewModel::deleteLibraryItem,onDuplicateLibraryItem=viewModel::duplicateLibraryItem,
+                                            onImportLibrary={importLibrary.launch(arrayOf("*/*"))},
+                                            onExportLibrary={exportLibrary.launch("EEZY-DRAW-library.eezy-library")},
+                                            onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
+                                            libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
                                         onExportView={request,format->
                                             viewModel.prepareViewExport(request,format)

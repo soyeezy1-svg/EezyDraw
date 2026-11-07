@@ -22,9 +22,9 @@ fun libraryFittingConnectionPoint(item: LibraryItem, element: Element): Point3? 
     val fitting = item.fitting ?: return null
     val port = fitting.ports.find { it.id == "input" } ?: fitting.ports.firstOrNull() ?: return null
     return measurementToWorld(element.transform, Point3(
-        port.position.x * body.size.width / item.defaultSize.width,
-        port.position.y * body.size.depth / item.defaultSize.depth,
-        port.position.z * body.size.height / item.defaultSize.height,
+        port.position.x * body.size.width / (item.geometrySize ?: item.defaultSize).width,
+        port.position.y * body.size.depth / (item.geometrySize ?: item.defaultSize).depth,
+        port.position.z * body.size.height / (item.geometrySize ?: item.defaultSize).height,
     ))
 }
 

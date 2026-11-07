@@ -26,10 +26,11 @@ internal class TestAppRepositories(
 ) : AutoCloseable {
     val projects = TestProjectRepository()
     val settings = TestSettingsRepository(initialSettings)
+    val library = TestLibraryRepository()
     private val stores = mutableListOf<ViewModelStore>()
 
     fun newViewModel(savedState: SavedStateHandle = SavedStateHandle()): AppViewModel {
-        val model = AppViewModel(context, projects, settings, savedState)
+        val model = AppViewModel(context, projects, settings, savedState, library)
         stores += ViewModelStore().apply { put("app", model) }
         return model
     }
@@ -120,5 +121,15 @@ internal class TestProjectRepository : ProjectRepository {
                 document.project.updatedAtEpochMillis, openedAt[id] ?: 0L, thumbnailUri = null,
             )
         }.sortedByDescending { it.lastOpenedAtEpochMillis }
+    }
+}
+
+internal class TestLibraryRepository : com.eezydraw.core.data.LibraryRepository {
+    var catalog = com.eezydraw.core.model.LibraryCatalog()
+    var failSave = false
+    override suspend fun load() = catalog
+    override suspend fun save(catalog: com.eezydraw.core.model.LibraryCatalog) {
+        if(failSave) throw ProjectStorageException("Device library could not be saved")
+        this.catalog=catalog
     }
 }

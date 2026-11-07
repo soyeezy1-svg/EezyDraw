@@ -305,7 +305,7 @@ private fun buildFitting(item: LibraryItem, section: RouteSection, explicitOutle
     val id = if (section == nominal && outlet == nominalOutlet) definition.baseTypeId else
         LibraryItemId("${definition.baseTypeId.value}@${section.signature()}${outlet?.let { "~${it.signature()}" } ?: ""}")
     return item.copy(
-        id = id, defaultSize = size, geometry = geometry, symbolGeometry = symbols,
+        id = id, defaultSize = size, geometrySize = null, geometry = geometry, symbolGeometry = symbols,
         parameters = item.parameters.filterKeys { it !in sectionKeys } + sectionParameters(section, outlet),
         fitting = FittingDefinition(definition.baseTypeId, definition.routeKind, kind, section, shiftedPorts,
             paths.first().points.map(::shift), outlet),

@@ -22,6 +22,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.eezydraw.core.editing.*
+import java.util.UUID
 import com.eezydraw.R
 import com.eezydraw.core.model.*
 import com.eezydraw.ui.canvas.coordinate
@@ -40,13 +42,35 @@ fun LibraryPanel(
     units: LengthUnit = LengthUnit.MILLIMETRES,
     decimalPlaces: Int = 0,
     activeItemId: LibraryItemId? = null,
+    onSaveItem: (LibraryItem) -> Unit = {},
+    onRestoreItem: (LibraryItemId) -> Unit = {},
+    onDeleteItem: (LibraryItemId) -> Unit = {},
+    onDuplicateItem: (LibraryItemId) -> Unit = {},
+    onFromDrawing: () -> LibraryItem? = { null },
+    onImportLibrary: () -> Unit = {},
+    onExportLibrary: () -> Unit = {},
+    onUndoLibrary: () -> Unit = {},
+    onRedoLibrary: () -> Unit = {},
+    canUndoLibrary: Boolean = false,
+    canRedoLibrary: Boolean = false,
+    authoringEnabled: Boolean = true,
+    projectItemIds: Set<LibraryItemId> = items.mapTo(HashSet()) {it.id},
 ) {
+    var editingItem by remember { mutableStateOf<LibraryItem?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var managing by remember { mutableStateOf(false) }
+    var drawingError by remember { mutableStateOf(false) }
+    editingItem?.let { item -> LibraryItemEditor(item,creating,onSaveItem,{editingItem=null}) }
+    if(drawingError) AlertDialog(onDismissRequest={drawingError=false},title={Text("Create from drawing")},
+        text={Text("Use the drawing tools to draw your item, select its shapes, then choose From selected drawing.")},
+        confirmButton={TextButton({drawingError=false}) {Text("OK")}})
+    val editItem: (LibraryItem) -> Unit = { creating=false;editingItem=it }
     var query by rememberSaveable { mutableStateOf("") }
     var collapsedFolders by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val catalog = remember(items) { (BuiltInLibrary.items + items).associateBy { it.id }.values.toList() }
     val matches = remember(catalog, query) { librarySearch(catalog, query) }
     val matchedIds = remember(matches) { matches.mapTo(HashSet()) { it.id } }
-    val projectIds = remember(items) { items.mapTo(HashSet()) { it.id } }
+    val projectIds = projectItemIds
     val byId = remember(catalog) { catalog.associateBy { it.id } }
     val folders = remember(matches, state.favoriteIds, state.recentIds, projectIds) {
         listOf(
@@ -77,6 +101,17 @@ fun LibraryPanel(
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(pluralStringResource(R.plurals.library_result_count,matches.size,matches.size), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                Box {
+                    IconButton({managing=true},modifier=Modifier.testTag("library_manage")) {Icon(Icons.Outlined.MoreVert,"Manage library")}
+                    DropdownMenu(managing,{managing=false}) {
+                        DropdownMenuItem(text={Text("Create custom item")},enabled=authoringEnabled,onClick={managing=false;creating=true;editingItem=createLibraryItem(LibraryItemId(UUID.randomUUID().toString()),LibraryBaseShape.BOX)},modifier=Modifier.testTag("library_create"))
+                        DropdownMenuItem(text={Text("From selected drawing")},enabled=authoringEnabled,onClick={managing=false;val item=onFromDrawing();if(item==null)drawingError=true else {creating=true;editingItem=item}},modifier=Modifier.testTag("library_from_drawing"))
+                        DropdownMenuItem(text={Text("Import library")},onClick={managing=false;onImportLibrary()},modifier=Modifier.testTag("library_import"))
+                        DropdownMenuItem(text={Text("Export library")},enabled=authoringEnabled,onClick={managing=false;onExportLibrary()},modifier=Modifier.testTag("library_export"))
+                        DropdownMenuItem(text={Text("Undo library edit")},enabled=canUndoLibrary,onClick={managing=false;onUndoLibrary()},modifier=Modifier.testTag("library_undo"))
+                        DropdownMenuItem(text={Text("Redo library edit")},enabled=canRedoLibrary,onClick={managing=false;onRedoLibrary()},modifier=Modifier.testTag("library_redo"))
+                    }
+                }
                 IconToggleButton(state.viewMode == LibraryViewMode.GRID,
                     { onStateChange(state.copy(viewMode = LibraryViewMode.GRID)) }, Modifier.size(48.dp).testTag("library_grid")) {
                     Icon(Icons.Outlined.GridView, stringResource(R.string.library_grid))
@@ -103,6 +138,7 @@ fun LibraryPanel(
                         if (state.viewMode == LibraryViewMode.LIST) {
                             items(folder.items, key = { "${folder.key}_${it.id.value}" }, contentType = { "library_list_item" }) { item ->
                                 LibraryEntry(item, folder.key, item.id in state.favoriteIds, units, decimalPlaces, false, item.id == activeItemId,
+                                    onEdit={editItem(item)},onRestore={onRestoreItem(item.id)},onDelete={onDeleteItem(item.id)},onDuplicate={onDuplicateItem(item.id)},authoringEnabled=authoringEnabled,
                                     onInsert = { onInsert(item.id) }, onFavorite = { onStateChange(state.toggledFavorite(item.id)) },
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp))
                             }
@@ -111,7 +147,8 @@ fun LibraryPanel(
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     row.forEach { item ->
                                         LibraryEntry(item, folder.key, item.id in state.favoriteIds, units, decimalPlaces, true, item.id == activeItemId,
-                                            onInsert = { onInsert(item.id) }, onFavorite = { onStateChange(state.toggledFavorite(item.id)) }, modifier = Modifier.weight(1f))
+                                            onEdit={editItem(item)},onRestore={onRestoreItem(item.id)},onDelete={onDeleteItem(item.id)},onDuplicate={onDuplicateItem(item.id)},authoringEnabled=authoringEnabled,
+                                    onInsert = { onInsert(item.id) }, onFavorite = { onStateChange(state.toggledFavorite(item.id)) }, modifier = Modifier.weight(1f))
                                     }
                                     if (row.size == 1) Spacer(Modifier.weight(1f))
                                 }
@@ -161,7 +198,7 @@ private fun LibraryFolderHeader(folder: LibraryFolder, title: String, expanded: 
 
 @Composable
 private fun LibraryEntry(item: LibraryItem, folder: String, favorite: Boolean, units: LengthUnit, decimalPlaces: Int, grid: Boolean, active: Boolean,
-    onInsert: () -> Unit, onFavorite: () -> Unit, modifier: Modifier = Modifier) {
+    onInsert: () -> Unit, onFavorite: () -> Unit, onEdit:()->Unit,onRestore:()->Unit,onDelete:()->Unit,onDuplicate:()->Unit,authoringEnabled:Boolean, modifier: Modifier = Modifier) {
     val tagPrefix = if (folder.startsWith("category_")) "library" else "library_$folder"
     val dimensions = remember(item.defaultSize, units, decimalPlaces) {
         listOf(item.defaultSize.width, item.defaultSize.depth, item.defaultSize.height)
@@ -180,6 +217,7 @@ private fun LibraryEntry(item: LibraryItem, folder: String, favorite: Boolean, u
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     LibraryThumbnail(item, Modifier.weight(1f).height(48.dp))
                     FavoriteButton(item, favorite, onFavorite, tagPrefix)
+                    LibraryItemMenu(item,onEdit,onRestore,onDelete,onDuplicate,authoringEnabled,tagPrefix)
                 }
                 Text(item.name, style = MaterialTheme.typography.labelLarge, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("$dimensions $unit", style = MaterialTheme.typography.labelSmall, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
@@ -192,6 +230,7 @@ private fun LibraryEntry(item: LibraryItem, folder: String, favorite: Boolean, u
                     Text("$dimensions $unit", style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 FavoriteButton(item, favorite, onFavorite, tagPrefix)
+                    LibraryItemMenu(item,onEdit,onRestore,onDelete,onDuplicate,authoringEnabled,tagPrefix)
             }
         }
     }
@@ -203,5 +242,19 @@ private fun FavoriteButton(item: LibraryItem, favorite: Boolean, onFavorite: () 
         Icon(if (favorite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
             stringResource(if (favorite) R.string.library_remove_favorite else R.string.library_add_favorite, item.name),
             tint = if (favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun LibraryItemMenu(item:LibraryItem,onEdit:()->Unit,onRestore:()->Unit,onDelete:()->Unit,onDuplicate:()->Unit,enabled:Boolean,prefix:String) {
+    var expanded by remember(item.id) {mutableStateOf(false)}
+    Box {
+        IconButton({expanded=true},enabled=enabled,modifier=Modifier.size(40.dp).testTag("${prefix}_edit_${item.id.value}")) {Icon(Icons.Outlined.MoreVert,"Edit ${item.name}")}
+        DropdownMenu(expanded,{expanded=false}) {
+            DropdownMenuItem(text={Text("Edit item")},onClick={expanded=false;onEdit()},modifier=Modifier.testTag("library_edit_item"))
+            DropdownMenuItem(text={Text("Duplicate")},onClick={expanded=false;onDuplicate()},modifier=Modifier.testTag("library_duplicate_item"))
+            if(BuiltInLibrary.find(item.id)!=null) DropdownMenuItem(text={Text("Restore default")},onClick={expanded=false;onRestore()},modifier=Modifier.testTag("library_restore_item"))
+            else DropdownMenuItem(text={Text("Delete item")},onClick={expanded=false;onDelete()},modifier=Modifier.testTag("library_delete_item"))
+        }
     }
 }

@@ -236,8 +236,9 @@ fun DrawingCanvasScreen(
     val selectedLibraryProperties=remember(document,selectedElement) {
         selectedElement?.takeIf {it.body is ElementBody.Component}?.let {readLibraryProperties(document,it)}
     }
-    val pendingLibraryItem=remember(document.libraryItems,pendingLibrary) {
-        pendingLibrary?.let {id->document.libraryItems.find {it.id.value==id} ?: BuiltInLibrary.find(LibraryItemId(id))}
+    val deviceCatalog=editor?.libraryCatalog ?: LibraryCatalog()
+    val pendingLibraryItem=remember(document.libraryItems,pendingLibrary,deviceCatalog) {
+        pendingLibrary?.let {id->deviceCatalog.find(LibraryItemId(id),document.libraryItems)?.let {libraryPlacementDefinition(document,it)}}
     }
     val libraryAim=precisionPick?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
     val libraryPlacementResult=remember(document,pendingLibraryItem,libraryAim,selectedLevel) {
@@ -574,6 +575,9 @@ fun DrawingCanvasScreen(
             else precisionPick=pick.copy(screen=screen)
         }
     }
+    LaunchedEffect(deviceCatalog) {
+        if(pendingLibrary?.let {deviceCatalog.find(LibraryItemId(it),document.libraryItems)==null}==true) cancelConstruction()
+    }
     LaunchedEffect(document.elements,document.layers,document.systems,document.libraryItems,selectedLevel,snapSettings,settings.precisionPointer.enabled) {
         // A pending snap must never confirm a host that was hidden/removed while the tool stayed active.
         clearPrecisionCandidate()
@@ -896,13 +900,21 @@ fun DrawingCanvasScreen(
                     PersistentPanel(CanvasPanelId.LIBRARY,stringResource(R.string.panel_library),canvasLayout.panel(CanvasPanelId.LIBRARY),
                         {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
                         panelStates.SaveableStateProvider("library") {
-                        LibraryPanel(document.libraryItems,onInsert={id->
+                        LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->
                             cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet());probe=false;zoomWindow=false
                             pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
                         },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true,
                             state=document.libraryState,onStateChange=actions.onLibraryState,
                             units=document.project.settings.lengthUnit,decimalPlaces=document.project.settings.decimalPlaces,
-                            activeItemId=pendingLibraryItem?.id)
+                            activeItemId=pendingLibrary?.let(::LibraryItemId),
+                            onSaveItem=actions.onSaveLibraryItem,onRestoreItem=actions.onRestoreLibraryItem,
+                            onDeleteItem=actions.onDeleteLibraryItem,onDuplicateItem=actions.onDuplicateLibraryItem,
+                            onFromDrawing={runCatching {libraryItemFromDrawing(document,actions.selectedIds,LibraryItemId(java.util.UUID.randomUUID().toString()))}.getOrNull()},
+                            onImportLibrary=actions.onImportLibrary,onExportLibrary=actions.onExportLibrary,
+                            onUndoLibrary=actions.onUndoLibrary,onRedoLibrary=actions.onRedoLibrary,
+                            canUndoLibrary=actions.libraryCanUndo,canRedoLibrary=actions.libraryCanRedo,
+                            authoringEnabled=actions.libraryReady && !busy,
+                            projectItemIds=document.libraryItems.mapTo(HashSet()) {it.id})
                         }
                     }
                 }

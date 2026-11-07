@@ -132,7 +132,7 @@ fun PropertiesEditor(
     val mountingHeight = libraryProperties?.let { library ->
         if (libraryFields[0] == libraryInitial[0]) library.mountingHeight
         else libraryFields[0].toDoubleOrNull()?.times(factor)?.takeIf {
-            it.isFinite() && (library.section != null || it >= 0.0)
+            it.isFinite() && (library.freeMounting || library.section != null || it >= 0.0)
         }
     }
     val connectionParsed = connectionFields.mapIndexed { index, value ->
