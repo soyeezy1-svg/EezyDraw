@@ -56,6 +56,11 @@ data class CanvasEditorActions(
     val onExportLibrary:()->Unit={},
     val onUndoLibrary:()->Unit={},
     val onRedoLibrary:()->Unit={},
+    val onCreateRoute:(RouteKind,List<RoutePick>)->Boolean={_,_->false},
+    val onRoutingSettings:(RouteKind,RoutingSettings)->Unit={_,_->},
+    val onEditRoute:(ElementId,RoutingSettings,Point3?,Point3?)->Unit={_,_,_,_->},
+    val onRouteFitting:(ElementId,FittingKind?)->Unit={_,_->},
+    val onRouteSupports:(ElementId,Double,FittingKind)->Unit={_,_,_->},
     val libraryCanUndo:Boolean=false,
     val libraryCanRedo:Boolean=false,
 )

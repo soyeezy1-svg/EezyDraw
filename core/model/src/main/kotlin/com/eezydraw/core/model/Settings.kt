@@ -30,6 +30,7 @@ data class ProjectSettings(
     val snap: SnapSettings = SnapSettings(),
     val defaultWallThickness: Double = 0.2,
     val defaultWallHeight: Double = 3.0,
+    val routeDefaults: Map<RouteKind, RoutingSettings> = emptyMap(),
     val defaultRouteElevations: Map<RouteKind, ElevationSetting> = emptyMap(),
     val viewMode: ViewMode = ViewMode.WIREFRAME,
     val showMeasurements: Boolean = true,
@@ -96,6 +97,7 @@ data class AppSettings(
     val autoHidePanelsWhileDrawing: Boolean = false,
     val lockWallsByDefault: Boolean = false,
     /** Immediate device recovery for project panel layouts; portable documents also retain layout. */
+    val lastRoutingSettings: Map<RouteKind, RoutingSettings> = emptyMap(),
     val canvasLayouts: Map<String,CanvasLayout> = emptyMap(),
 ) {
     init {

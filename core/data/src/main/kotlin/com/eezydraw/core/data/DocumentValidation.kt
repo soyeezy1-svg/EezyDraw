@@ -70,6 +70,7 @@ internal fun validateDocument(document: ProjectDocument) {
             is ElementBody.Route -> {
                 val host = body.host
                 valid(host == null || host.hostElementId in elements, "A route host is missing.")
+                valid(listOfNotNull(body.routing?.startAnchor,body.routing?.endAnchor).all {it.elementId in elements && it.elementId!=element.id},"A routing connection is missing.")
                 valid(body.fittings.all { it.libraryItemId == null || it.libraryItemId in libraryItems },
                     "A fitting definition is missing.")
             }

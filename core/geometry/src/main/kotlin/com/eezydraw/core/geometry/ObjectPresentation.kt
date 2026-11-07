@@ -19,6 +19,11 @@ class ScenePresentation(private val document: ProjectDocument) {
 
     fun display(element: Element): ObjectDisplay {
         if (hierarchyHidden(element) || element.objectDisplay == ObjectDisplay.HIDDEN) return ObjectDisplay.HIDDEN
+        val owner=(element.properties["routingOwner"] as? ParameterValue.Text)?.value?.let {elements[ElementId(it)]}
+        if(owner!=null) {
+            if(hierarchyHidden(owner) || owner.objectDisplay==ObjectDisplay.HIDDEN)return ObjectDisplay.HIDDEN
+            if(element.objectDisplay==ObjectDisplay.NORMAL)return owner.objectDisplay
+        }
         if (element.body !is ElementBody.Wall) return element.objectDisplay
         val links=wallLinks[element.id].orEmpty()
         val visibleOwners=links.mapNotNull {ref->rooms[ref.roomId]?.takeIf {!hierarchyHidden(it) && it.objectDisplay!=ObjectDisplay.HIDDEN}?.let {it to ref}}

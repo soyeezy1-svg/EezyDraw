@@ -128,7 +128,7 @@ sealed interface ParameterValue {
 
 @Serializable enum class Quantity { SCALAR, LENGTH, AREA, VOLUME, ANGLE }
 @Serializable enum class RouteKind { TRUNKING, CABLE_TRAY, CABLE_LADDER, CABLE_BASKET, CONDUIT, DUCT, PIPE }
-@Serializable enum class ElevationReference { ABOVE_FINISHED_FLOOR, ABOVE_CEILING, PROJECT_DATUM }
+@Serializable enum class ElevationReference { ABOVE_FINISHED_FLOOR, ABOVE_CEILING, PROJECT_DATUM, BELOW_CEILING, BELOW_SLAB }
 
 @Serializable
 data class ElevationSetting(val value: Double, val reference: ElevationReference) {

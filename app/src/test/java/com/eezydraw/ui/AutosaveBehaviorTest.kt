@@ -197,7 +197,7 @@ class AutosaveBehaviorTest {
         TestAppRepositories(context, settings).also(fixtures::add)
 
     private fun model(store: TestAppRepositories, projects: ProjectRepository): AppViewModel =
-        AppViewModel(context, projects, store.settings).also { model ->
+        AppViewModel(context, projects, store.settings, deviceLibrary=store.library).also { model ->
             models += ViewModelStore().apply { put("autosave", model) }
         }
 }

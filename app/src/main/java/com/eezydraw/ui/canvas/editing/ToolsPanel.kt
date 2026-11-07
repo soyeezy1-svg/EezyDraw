@@ -103,6 +103,7 @@ fun ToolsPanel(
     onExpandedChange: ((Boolean) -> Unit)? = null,
     focusGroup: CanvasToolGroup? = null,
     embedded: Boolean = false,
+    onRoute: (com.eezydraw.core.model.RouteKind)->Unit = {},
 ) {
     var localExpanded by rememberSaveable { mutableStateOf(false) }
     var drawExpanded by rememberSaveable { mutableStateOf(true) }
@@ -170,6 +171,10 @@ fun ToolsPanel(
                     if(!embedded || focusGroup!=CanvasToolGroup.EDIT) {
                     if(!embedded) ToolGroupHeader(R.string.panel_draw, drawExpanded, { drawExpanded = !drawExpanded }, "tools_draw_group")
                     if (embedded || drawExpanded) {
+                        Text("Services", style=MaterialTheme.typography.titleSmall)
+                        FlowRow { com.eezydraw.core.model.RouteKind.entries.forEach {kind->
+                            TextButton({onRoute(kind)},Modifier.testTag("tool_route_${kind.name}")) {Text(kind.name.replace('_',' '))}
+                        }}
                         ToolSection(R.string.editing_shapes, listOf(DrawingTool.LINE, DrawingTool.POLYLINE,
                         DrawingTool.ARC, DrawingTool.CIRCLE, DrawingTool.ELLIPSE, DrawingTool.RECTANGLE,
                         DrawingTool.POLYGON, DrawingTool.TRIANGLE, DrawingTool.SPLINE), tool, onTool)

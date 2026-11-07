@@ -11,6 +11,7 @@ import com.eezydraw.R
 import com.eezydraw.core.data.LibraryRepository
 import com.eezydraw.core.data.DeviceLibraryRepository
 import com.eezydraw.core.data.LibraryArchive
+import com.eezydraw.core.editing.*
 import com.eezydraw.core.editing.libraryPlacementDefinition
 import com.eezydraw.core.data.ProjectRepository
 import com.eezydraw.core.data.ProjectStorageException
@@ -504,8 +505,24 @@ class AppViewModel(
     }
 
     fun deleteSelection() {
-        drawingEdit { current, document -> EditCommands.delete(document, current.selectedIds) }
+        drawingEdit { current, document ->
+            var after=document
+            val managed=current.selectedIds.filter {id->document.elements.any {it.id==id && ROUTING_OWNER in it.properties}}
+            for(id in managed)after=ServiceRouting.fitting(after,id,null).preview(after)
+            val rest=current.selectedIds-managed.toSet()
+            if(rest.isNotEmpty())after=EditCommands.delete(after,rest).preview(after)
+            EditCommands.between(document,ServiceRouting.reconcile(document,after),"Delete objects")
+        }
     }
+
+    fun createRoute(kind:RouteKind,picks:List<RoutePick>):Boolean = drawingEdit(selectAdded=false) {_,doc->ServiceRouting.create(doc,kind,picks)}
+    fun rememberRoutingSettings(kind:RouteKind,value:RoutingSettings) {
+        mutableState.update {it.copy(settings=it.settings.copy(lastRoutingSettings=it.settings.lastRoutingSettings+(kind to value)))}
+        viewModelScope.launch {try {preferences.save(state.value.settings)}catch(error:Exception){mutableState.update {it.copy(error=error.message)}}}
+    }
+    fun editRoute(id:ElementId,value:RoutingSettings,start:Point3?,end:Point3?) {drawingEdit {_,doc->ServiceRouting.edit(doc,id,value,start,end)}}
+    fun routeFitting(id:ElementId,kind:FittingKind?) {drawingEdit {_,doc->ServiceRouting.fitting(doc,id,kind)}}
+    fun routeSupports(id:ElementId,spacing:Double,kind:FittingKind) {drawingEdit {_,doc->ServiceRouting.supports(doc,id,spacing,kind)}}
 
     fun undo() = restoreDrawing(redo = false)
     fun redo() = restoreDrawing(redo = true)
@@ -521,7 +538,8 @@ class AppViewModel(
         return try {
             val prepared = build(current, document)
             val preview=prepared.preview(document)
-            val generated=lockGeneratedWalls(document,preview,current.settings.lockWallsByDefault)
+            val connected=ServiceRouting.reconcile(document,preview)
+            val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
             val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
             val changed = history.execute(document, command)
             publishDrawing(current, changed, if (selectAdded && !command.isEmpty) command.addedElementIds else current.selectedIds)
@@ -623,7 +641,9 @@ class AppViewModel(
     }
 
     fun saveSettings(settings: AppSettings) = operation {
-        val merged=settings.copy(canvasLayouts=state.value.settings.canvasLayouts)
+        val oldDefaults=state.value.settings.projectDefaults
+        val changed=RouteKind.entries.filter {oldDefaults.routeDefaults[it]!=settings.projectDefaults.routeDefaults[it] || oldDefaults.defaultRouteElevations[it]!=settings.projectDefaults.defaultRouteElevations[it]}.toSet()
+        val merged=settings.copy(canvasLayouts=state.value.settings.canvasLayouts,lastRoutingSettings=settings.lastRoutingSettings-changed)
         preferences.save(merged)
         mutableState.update { it.copy(settings = merged, notice = application.getString(R.string.settings_saved_notice),noticeUndo=false) }
         navigate(AppScreen.MENU)

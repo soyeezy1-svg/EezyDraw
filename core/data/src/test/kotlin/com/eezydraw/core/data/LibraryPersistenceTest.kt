@@ -159,6 +159,25 @@ class LibraryPersistenceTest {
         assertEquals(imported, repository.load(imported.project.id.value))
     }
 
+    @Test fun `routing graph defaults risers overrides and supports survive save and archive import`() = runBlocking {
+        val created=repository.create("Connected routing",ProjectTemplate.EMPTY,ProjectSettings())
+        projectIds+=created.project.id.value
+        val config=defaultRoutingSettings(RouteKind.PIPE).copy(elevation=ElevationSetting(.4,ElevationReference.BELOW_SLAB))
+        val topology=RouteTopology("network","a","b",config,fittingOverrides=mapOf("a" to FittingKind.OFFSET),suppressedFittings=setOf("b"),supportSpacing=1.2,supportKind=FittingKind.HANGER)
+        val section=Element(ElementId("pipe"),created.project.id,created.layers.first().id,
+            ElementBody.Route(RouteKind.PIPE,listOf(Point3(),Point3(z=3.0)),RouteSection.Circular(.08),config.elevation,routing=topology),levelId=created.levels.first().id)
+        val item=BuiltInLibrary.items.first {it.fitting?.kind==FittingKind.HANGER && it.fitting?.routeKind==RouteKind.PIPE}
+        val support=section.copy(id=ElementId("hanger"),body=ElementBody.Component(item.id,item.defaultSize,host=HostAttachment(section.id,HostMode.SURFACE,Point3(z=1.2))),properties=mapOf("routingOwner" to ParameterValue.Text(section.id.value)))
+        val saved=repository.save(created.copy(elements=listOf(section,support),libraryItems=listOf(item),project=created.project.copy(settings=created.project.settings.copy(routeDefaults=mapOf(RouteKind.PIPE to config)))))
+        database.close();reopen()
+        assertEquals(saved,repository.load(saved.project.id.value))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(topology,(imported.elements.first().body as ElementBody.Route).routing)
+        assertEquals(saved.project.settings.routeDefaults,imported.project.settings.routeDefaults)
+    }
+
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {
         try {
             block()

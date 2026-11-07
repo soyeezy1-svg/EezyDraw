@@ -231,15 +231,24 @@ object EditCommands {
         offset: Point3,
         layerId: LayerId?,
     ): List<Element> {
-        val ids = elements.associate { it.id to ElementId(UUID.randomUUID().toString()) }
-        return elements.map { element ->
+        val selectedIds=elements.mapTo(hashSetOf()){it.id.value}
+        val source=elements.filterNot {(it.properties["routingOwner"] as? ParameterValue.Text)?.value in selectedIds}
+        val ids = source.associate { it.id to ElementId(UUID.randomUUID().toString()) }
+        val nodeIds=source.flatMap {e->(e.body as? ElementBody.Route)?.routing?.let {listOf(it.startNode,it.endNode,it.networkId)}.orEmpty()}.distinct().associateWith {UUID.randomUUID().toString()}
+        return source.map { element ->
             val t = element.transform.translation
             element.copy(
                 id = ids.getValue(element.id),
                 projectId = document.project.id,
                 layerId = layerId ?: element.layerId,
                 transform = element.transform.copy(translation = Point3(t.x + offset.x, t.y + offset.y, t.z + offset.z)),
-                body = remap(element.body, ids),
+                body = remap(element.body, ids).let {b->if(b !is ElementBody.Route || b.routing==null)b else {
+                    val r=b.routing!!
+                    b.copy(routing=r.copy(networkId=nodeIds.getValue(r.networkId),startNode=nodeIds.getValue(r.startNode),endNode=nodeIds.getValue(r.endNode),
+                        startAnchor=r.startAnchor?.takeIf {it.elementId in ids.values},endAnchor=r.endAnchor?.takeIf {it.elementId in ids.values},
+                        fittingOverrides=r.fittingOverrides.mapKeys {(k,_)->nodeIds[k] ?: k},suppressedFittings=r.suppressedFittings.map {nodeIds[it] ?: it}.toSet()))
+                }},
+                properties=element.properties.filterKeys {it!="routingOwner" && it!="routingNode"},
             )
         }
     }
@@ -260,7 +269,8 @@ object EditCommands {
             }
             is ElementBody.Room -> body.copy(wallFaces = body.wallFaces.map { it.copy(wallId = ids[it.wallId] ?: it.wallId) })
             is ElementBody.Component -> body.copy(host = host(body.host))
-            is ElementBody.Route -> body.copy(host = host(body.host))
+            is ElementBody.Route -> body.copy(host = host(body.host),routing=body.routing?.let {r->r.copy(
+                startAnchor=r.startAnchor?.let {it.copy(elementId=ids[it.elementId] ?: it.elementId)},endAnchor=r.endAnchor?.let {it.copy(elementId=ids[it.elementId] ?: it.elementId)})})
             else -> body
         }
     }
@@ -270,7 +280,7 @@ object EditCommands {
             body.copy(wallFaces = body.wallFaces.filterNot { it.wallId in ids })
         } else body
         is ElementBody.Component -> if (body.host?.hostElementId in ids) body.copy(host = null) else body
-        is ElementBody.Route -> if (body.host?.hostElementId in ids) body.copy(host = null) else body
+        is ElementBody.Route -> body.copy(host=body.host?.takeUnless {it.hostElementId in ids},routing=body.routing?.let {r->r.copy(startAnchor=r.startAnchor?.takeUnless {it.elementId in ids},endAnchor=r.endAnchor?.takeUnless {it.elementId in ids})})
         else -> body
     }
 
