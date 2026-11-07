@@ -112,9 +112,9 @@ fun buildDrawingScene(
                     box(body.size, emit)
                 }
                 if (definition != null) {
-                    val sx = body.size.width / definition.defaultSize.width
-                    val sy = body.size.depth / definition.defaultSize.depth
-                    val sz = body.size.height / definition.defaultSize.height
+                    val sx = body.size.width / (definition.geometrySize ?: definition.defaultSize).width
+                    val sy = body.size.depth / (definition.geometrySize ?: definition.defaultSize).depth
+                    val sz = body.size.height / (definition.geometrySize ?: definition.defaultSize).height
                     val instance: (Point3, Point3) -> Unit = { a, b ->
                         emit(point(a.x * sx, a.y * sy, a.z * sz), point(b.x * sx, b.y * sy, b.z * sz))
                     }

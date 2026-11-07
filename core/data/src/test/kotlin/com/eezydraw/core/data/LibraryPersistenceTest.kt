@@ -84,11 +84,15 @@ class LibraryPersistenceTest {
         assertEquals(imported, repository.load(imported.project.id.value))
     }
 
-    @Test fun `storage rejects dangling or repeated library preferences`() = runBlocking {
+    @Test fun `device catalogue browsing IDs survive save without placed definitions while repeated recents are rejected`() = runBlocking {
         val created = repository.create("Library validation", ProjectTemplate.EMPTY, ProjectSettings())
         projectIds += created.project.id.value
         val item = BuiltInLibrary.items.first()
-        assertFailsStorage { repository.save(created.copy(libraryState = LibraryState(favoriteIds = setOf(LibraryItemId("missing"))))) }
+        val deviceId = LibraryItemId("device-only-item")
+        val browsing = LibraryState(favoriteIds=setOf(deviceId),recentIds=listOf(deviceId))
+        val saved = repository.save(created.copy(libraryState=browsing))
+        assertEquals(browsing,repository.load(created.project.id.value).libraryState)
+        assertTrue(saved.libraryItems.isEmpty())
         assertFailsStorage { repository.save(created.copy(libraryState = LibraryState(recentIds = listOf(item.id, item.id)))) }
         assertEquals(created.elements, repository.load(created.project.id.value).elements)
     }

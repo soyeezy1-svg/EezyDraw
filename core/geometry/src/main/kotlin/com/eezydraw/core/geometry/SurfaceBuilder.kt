@@ -75,9 +75,9 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
             is ElementBody.Component -> if (definition == null || definition.geometry.isEmpty()) {
                 surfaceBox(body.size, requireNotNull(emit))
             } else {
-                val scale = Scale3(element.transform.scale.x * body.size.width / definition.defaultSize.width,
-                    element.transform.scale.y * body.size.depth / definition.defaultSize.depth,
-                    element.transform.scale.z * body.size.height / definition.defaultSize.height)
+                val scale = Scale3(element.transform.scale.x * body.size.width / (definition.geometrySize ?: definition.defaultSize).width,
+                    element.transform.scale.y * body.size.depth / (definition.geometrySize ?: definition.defaultSize).depth,
+                    element.transform.scale.z * body.size.height / (definition.geometrySize ?: definition.defaultSize).height)
                 val instance=requireNotNull(emitter(display,partSide,SurfaceTransform(element.transform.copy(scale=scale))))
                 definition.geometry.forEach { surfaceShape(it, instance) }
             }

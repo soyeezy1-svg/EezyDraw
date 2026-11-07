@@ -2,6 +2,14 @@ package com.eezydraw.ui.canvas.panels
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.material3.MaterialTheme
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -20,10 +28,25 @@ import kotlin.math.sin
 /** Only visible lazy-list entries compile a tiny vector thumbnail; no bitmap/GL/I/O work is needed. */
 @Composable
 internal fun LibraryThumbnail(item: LibraryItem, modifier: Modifier = Modifier) {
-    val lines = remember(item.symbolGeometry, item.geometry, item.defaultSize) {
-        thumbnailLines(item.symbolGeometry.ifEmpty { item.geometry }).ifEmpty {
-            rectangle(0.0, 0.0, item.defaultSize.width, item.defaultSize.depth)
-        }
+    val photo by produceState<ImageBitmap?>(null,item.thumbnailBase64) {
+        value=withContext(Dispatchers.Default) {runCatching {
+            item.thumbnailBase64?.let {encoded->
+                val bytes=Base64.decode(encoded,Base64.DEFAULT)
+                val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
+                BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+                var sample=1
+                while(maxOf(bounds.outWidth,bounds.outHeight)/sample>256)sample*=2
+                BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply {inSampleSize=sample})?.asImageBitmap()
+            }
+        }.getOrNull()}
+    }
+    if(photo!=null) {Image(photo!!,"Preview of ${item.name}",modifier);return}
+    val lines = remember(item.symbolGeometry, item.geometry, item.defaultSize, item.geometrySize) {
+        val envelope = item.geometrySize ?: item.defaultSize
+        thumbnailLines(item.symbolGeometry.ifEmpty { item.geometry }).map { (a,b) ->
+            fun scaled(p:Point2)=Point2(p.x*item.defaultSize.width/envelope.width,p.y*item.defaultSize.depth/envelope.depth)
+            scaled(a) to scaled(b)
+        }.ifEmpty { rectangle(0.0, 0.0, item.defaultSize.width, item.defaultSize.depth) }
     }
     val bounds = remember(lines) {
         val points = lines.flatMap { listOf(it.first, it.second) }

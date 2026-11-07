@@ -1,4 +1,4 @@
-# Expanded library and fitting validation
+# Library authoring and custom-item validation
 
 Validated on 2026-11-07 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned project dependencies.
 
@@ -6,16 +6,16 @@ Validated on 2026-11-07 with JDK 21, Android SDK 35, Gradle 8.13 and the pinned 
 
 | Suite/check | Result |
 | --- | --- |
-| `:core:model:test` | 45 passed |
+| `:core:model:test` | 51 passed |
 | `:core:geometry:test` | 86 passed |
-| `:core:editing:test` | 190 passed |
-| `:core:data:testDebugUnitTest` | 16 passed |
-| `:app:testDebugUnitTest` | 227 passed |
+| `:core:editing:test` | 198 passed |
+| `:core:data:testDebugUnitTest` | 21 passed |
+| `:app:testDebugUnitTest` | 236 passed |
 | `assembleDebug` | Passed; `app/build/outputs/apk/debug/app-debug.apk` |
 | `lintDebug` | Passed; app and storage report zero issues |
 | Production GLES 2 shader smoke | Passed; no GL errors |
 
-Total: **564 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
+Total: **592 passed, zero failed, zero skipped**. Reproduce the Gradle checks from the repository root:
 
 ```sh
 ./gradlew testDebugUnitTest :core:model:test :core:geometry:test :core:editing:test assembleDebug lintDebug
@@ -25,6 +25,11 @@ python3 scripts/gles_shader_smoke.py
 The Python check requires Linux, Python 3 and Mesa EGL/GLES 2 libraries. It reads the actual Kotlin shader sources and uses a surfaceless software GL context. Gradle XML/HTML reports are generated under each module's `build/test-results` and `build/reports`; lint reports are under `app/build/reports` and `core/data/build/reports`.
 
 ## Coverage and corrected issues
+
+- Library authoring tests cover immutable shipped defaults, edited names/categories/dimensions, restore, Save as new, duplicate/delete, stable merge identities and independent library undo/redo. Compose tests edit actual fields, preserve the source when saving as new, reject invalid dimensions, cancel drafts and invoke the library management/import/export/history controls.
+- Drawing capture tests bake transforms, generate local meshes and plan symbols, extrude closed 2D profiles, retain open drawing strokes and cover all base shapes. Placement checks cover negative free elevation, physical 2D/3D resizing, fitting connection markers, adapted fitting snapshot collisions, and preserving old placements after default changes. Project snapshots omit library-only photos.
+- Real atomic-file tests reopen the device repository, preserve built-in overrides, custom definitions, geometry and embedded photo bytes, round-trip a single library backup, persist restore/duplicate/delete/undo results and reject invalid or oversized archives. Failed serialization and corrupt-file loads leave the previous bytes intact. ViewModel tests verify failed save/undo history retention, custom favorites, new-default placement, deletion without removing project objects, device restart, file-provider import/export and reversible import. Export does not change history.
+
 
 - Expanded catalogue checks cover 75 new stock items and 171 fitting definitions, including all requested disciplines, DN15–DN200 pipes, rectangular/round duct families, each accessory kind, unique IDs, SI sizes, plan symbols and physical geometry. The original 32 types remain stable. Search regressions distinguish rack/bracket and Wi-Fi/fixed-window matches; panel tests preserve the original category order and exercise new-type search, favorites and selection.
 - Fitting tests verify input/output planes and exact sections, reducer outlet dimensions, deterministic size variants, start/end capture, transformed/mirrored/vertical routes, circular scaling and skew rejection, hidden levels/targets, capture distance and nearest-end ties. Stale route changes reject a captured placement without choosing another host. Signed below-floor AFFL, free-placement markers, precision/ghost agreement, section edits, reset, bulk locks and sparse undo/redo are covered. Metadata-only edits retain scaled geometry; reset preserves reserved route endpoint/port bindings. A real Room/native archive round trip retains meshes, ports, sections, centrelines, instance values, endpoint host references and browsing state.

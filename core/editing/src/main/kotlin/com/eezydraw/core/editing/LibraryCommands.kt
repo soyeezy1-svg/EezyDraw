@@ -17,10 +17,11 @@ data class LibraryInstanceProperties(
     val section: RouteSection? = null,
     val outletSection: RouteSection? = null,
     val connectionProfileRepresentable: Boolean = true,
+    val freeMounting: Boolean = false,
 ) {
     init {
         require(mountingHeight.isFinite()) { "Mounting height must be finite." }
-        require(section != null || mountingHeight >= 0.0) { "Mounting height must be nonnegative." }
+        require(freeMounting || section != null || mountingHeight >= 0.0) { "Mounting height must be nonnegative." }
         require(colourArgb in 0..0xFFFFFFFFL) { "Colour must be an ARGB value." }
     }
 }
@@ -39,7 +40,7 @@ fun readLibraryProperties(document: ProjectDocument, element: Element): LibraryI
     return LibraryInstanceProperties(
         size = Size3(body.size.width * abs(scale.x), body.size.depth * abs(scale.y), body.size.height * abs(scale.z)),
         mountingHeight = libraryFittingConnectionPoint(item, element)?.let { it.z - floor }
-            ?: (element.transform.translation.z - floor).coerceAtLeast(0.0),
+            ?: (element.transform.translation.z - floor).let { if (item.mounting == MountingType.FREE) it else it.coerceAtLeast(0.0) },
         material = material?.name ?: text(LibraryParameterKeys.MATERIAL),
         colourArgb = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb
             ?: (params[LibraryParameterKeys.COLOUR] as? ParameterValue.Colour)?.argb
@@ -51,6 +52,7 @@ fun readLibraryProperties(document: ProjectDocument, element: Element): LibraryI
         section = connection.section,
         outletSection = connection.outletSection,
         connectionProfileRepresentable = connection.representable,
+        freeMounting = item.mounting == MountingType.FREE,
     )
 }
 
@@ -62,8 +64,8 @@ private data class EffectiveFittingSections(
 private fun effectiveFittingSections(item: LibraryItem, element: Element): EffectiveFittingSections {
     val fitting = item.fitting ?: return EffectiveFittingSections(null, null, true)
     val body = element.body as ElementBody.Component
-    val widthFactor = body.size.width / item.defaultSize.width * abs(element.transform.scale.x)
-    val heightFactor = body.size.height / item.defaultSize.height * abs(element.transform.scale.z)
+    val widthFactor = body.size.width / (item.geometrySize ?: item.defaultSize).width * abs(element.transform.scale.x)
+    val heightFactor = body.size.height / (item.geometrySize ?: item.defaultSize).height * abs(element.transform.scale.z)
     val circularRepresentable = abs(widthFactor - heightFactor) <= maxOf(widthFactor, heightFactor) * 1e-8
     fun scaled(section: RouteSection?): RouteSection? = when (section) {
         is RouteSection.Rectangular -> RouteSection.Rectangular(section.width * widthFactor, section.height * heightFactor)
@@ -215,6 +217,7 @@ object LibraryCommands {
         val level = placementLevel(document, element.levelId, element.transform.translation.z)
         val height = if (element.lockMode == LockMode.POSITION_ONLY || currentItem.fitting != null)
             readLibraryProperties(document, element).mountingHeight else when (item.mounting) {
+            MountingType.FREE -> readLibraryProperties(document, element).mountingHeight
             MountingType.FLOOR -> 0.0
             MountingType.CEILING -> libraryCeilingHeight(document, element.transform.translation, level)
             MountingType.WALL -> (defaults[LibraryParameterKeys.MOUNTING_HEIGHT] as? ParameterValue.Number)?.value ?: item.defaultMountingHeight
@@ -227,6 +230,7 @@ object LibraryCommands {
             text(LibraryParameterKeys.SYSTEM), text(LibraryParameterKeys.MANUFACTURER),
             text(LibraryParameterKeys.MODEL), text(LibraryParameterKeys.NAME_TAG),
             section = item.fitting?.section, outletSection = item.fitting?.outletSection,
+            freeMounting = item.mounting == MountingType.FREE,
         )
         val reset = edit(document, id, parameters).preview(document)
         val connectionBindings = if (currentItem.fitting == null) emptyMap() else body.parameters.filterKeys {
@@ -261,7 +265,7 @@ object LibraryCommands {
             }
             return document to (element to properties)
         }
-        val adapted = requireNotNull(adaptedFittingItem(item, section, outlet)) { "This connection profile is incompatible with the fitting." }
+        val adapted = libraryPlacementDefinition(document, requireNotNull(adaptedFittingItem(item, section, outlet)) { "This connection profile is incompatible with the fitting." })
         val existing = document.libraryItems.find { it.id == adapted.id }
         require(existing == null || existing == adapted) { "The fitting definition changed; choose the item again." }
         val prepared = if (existing == null) document.copy(libraryItems = document.libraryItems + adapted) else document

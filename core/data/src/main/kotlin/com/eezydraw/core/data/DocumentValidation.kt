@@ -22,12 +22,11 @@ internal fun validateDocument(document: ProjectDocument) {
     val systems = unique(document.systems.map { it.id }, "system")
     val materials = unique(document.materials.map { it.id }, "material")
     val libraryItems = unique(document.libraryItems.map { it.id }, "library item")
-    val availableLibraryItems = libraryItems + BuiltInLibrary.items.map { it.id }
-    valid(document.libraryState.favoriteIds.all(availableLibraryItems::contains),
-        "A library favorite refers to a missing item.")
+    // Browsing IDs may refer to the separate device catalogue, including after geometry undo.
+    // Component definitions below remain mandatory project-owned records.
+    valid(document.libraryState.favoriteIds.size <= 10_000, "Too many library favorites.")
     valid(document.libraryState.recentIds.size <= 24 &&
-        document.libraryState.recentIds.distinct().size == document.libraryState.recentIds.size &&
-        document.libraryState.recentIds.all(availableLibraryItems::contains),
+        document.libraryState.recentIds.distinct().size == document.libraryState.recentIds.size,
         "The recently used library items are invalid.")
     val elementIds = unique(document.elements.map { it.id } + document.underlays.map { it.id }, "element")
     val elements = document.elements.associateBy { it.id }

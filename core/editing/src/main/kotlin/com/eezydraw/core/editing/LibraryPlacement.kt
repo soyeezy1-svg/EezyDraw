@@ -38,17 +38,22 @@ fun previewLibraryPlacement(
     val layer = if (layerId == null) document.layers.firstOrNull { it.visible && !it.locked }
         else document.layers.find { it.id == layerId && it.visible && !it.locked }
     requireNotNull(layer) { "Choose a visible, unlocked layer to place this item." }
-    previewFittingRoutePlacement(document, item, point, level, layer, id)?.let { return it }
+    previewFittingRoutePlacement(document, item, point, level, layer, id)?.let { placement ->
+        val carried = libraryPlacementDefinition(document, placement.item)
+        return placement.copy(item = carried, element = placement.element.copy(
+            body = (placement.element.body as ElementBody.Component).copy(libraryItemId = carried.id)))
+    }
     val floor = level?.elevation ?: 0.0
     val defaults = item.defaultParameters()
     val requestedHeight = (defaults[LibraryParameterKeys.MOUNTING_HEIGHT] as? ParameterValue.Number)?.value
         ?: item.defaultMountingHeight
     val height = when (item.mounting) {
+        MountingType.FREE -> point.z - floor
         MountingType.FLOOR -> 0.0
         MountingType.WALL -> requestedHeight
         MountingType.CEILING -> libraryCeilingHeight(document, point, level)
     }
-    require(height.isFinite() && height >= 0.0) { "Mounting height must be nonnegative." }
+    require(height.isFinite() && (item.mounting == MountingType.FREE || height >= 0.0)) { "Mounting height must be nonnegative." }
     var translation = Point3(point.x, point.y, floor + height)
     var rotation = Rotation3()
     var host: HostAttachment? = null
