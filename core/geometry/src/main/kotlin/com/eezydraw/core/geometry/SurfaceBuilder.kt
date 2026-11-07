@@ -29,6 +29,10 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
     val materials = document.materials.associateBy { it.id }
     val library = document.libraryItems.associateBy { it.id }
     val collector = SurfaceCollector()
+    val wallFrames=wallFrames(document).associateBy {it.host.id to it.roomSide}
+    val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
+    val wallCuts=if(document.project.settings.wallServices.showCuts)allWallCuts else emptyMap()
+    val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
     val presentation = ScenePresentation(document)
     for (element in document.elements) {
         if (elementIds != null && element.id !in elementIds) continue
@@ -46,7 +50,8 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         fun emitter(mode:ObjectDisplay,side:RoomSideRef?,surfaceTransform:SurfaceTransform=transform):SurfaceEmitter? {
             if(mode==ObjectDisplay.HIDDEN || mode==ObjectDisplay.WIREFRAME)return null
             return SurfaceEmitter(surfaceTransform) {a,b,c,na,nb,nc->
-                collector.triangle(a,b,c,na,nb,nc,element.id.value,element.levelId?.value,colour,mode,side,roomCenter)
+                val plane=sectionHeight?.plus(document.levels.find {it.id==element.levelId}?.elevation ?: 0.0)
+                clipSurfaceAtHeight(a,b,c,na,nb,nc,plane) {pa,pb,pc,pna,pnb,pnc->collector.triangle(pa,pb,pc,pna,pnb,pnc,element.id.value,element.levelId?.value,colour,mode,side,roomCenter)}
             }
         }
         val emit=emitter(display,partSide)
@@ -62,6 +67,11 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                         val side=RoomSideRef(element.id,i,if(ringIndex==0)null else ringIndex-1)
                         if(presentation.linkedWall(element,side)!=null)continue
                         val output=emitter(presentation.sideDisplay(element,side),side) ?: continue
+                        val frame=wallFrames[element.id to side]
+                        if(frame!=null && (allWallCuts[element.id to side].orEmpty().isNotEmpty() || sectionHeight!=null)) {
+                            wallCutMesh(frame,wallCuts[element.id to side].orEmpty(),sectionHeight)?.let {surfaceShape(it,output)}
+                            continue
+                        }
                         val a=vertices[i];val b=vertices[(i+1)%vertices.size]
                         val p=Point3(a.x,a.y,0.0);val q=Point3(b.x,b.y,0.0)
                         val r=Point3(b.x,b.y,body.ceilingHeight);val t=Point3(a.x,a.y,body.ceilingHeight)
@@ -70,8 +80,17 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                 }
             }
             is ElementBody.Slab -> surfaceExtrusion(body.boundary, -body.thickness, 0.0, requireNotNull(emit))
-            is ElementBody.Wall -> surfaceWall(body, requireNotNull(emit))
-            is ElementBody.Route -> surfaceRoute(body, requireNotNull(emit))
+            is ElementBody.Wall -> {
+                val frame=wallFrames[element.id to null]
+                if(frame!=null && (allWallCuts[element.id to null].orEmpty().isNotEmpty() || sectionHeight!=null))wallCutMesh(frame,wallCuts[element.id to null].orEmpty(),sectionHeight)?.let {surfaceShape(it,requireNotNull(emit))}
+                else surfaceWall(body,requireNotNull(emit))
+            }
+            is ElementBody.Route -> {
+                val mount=body.wallService
+                val frame=mount?.let {wallFrames[it.wallId to it.roomSide]}
+                val normal=frame?.normal?.let {n->measurementToLocal(element.transform,Point3(element.transform.translation.x+n.x,element.transform.translation.y+n.y,element.transform.translation.z))}
+                surfaceRoute(body,requireNotNull(emit),normal)
+            }
             is ElementBody.Component -> if (definition == null || definition.geometry.isEmpty()) {
                 surfaceBox(body.size, requireNotNull(emit))
             } else {
@@ -250,13 +269,13 @@ private fun surfaceRevolution(shape: Shape.Revolution, emit: SurfaceEmitter) {
     }
 }
 
-private fun surfaceRoute(body: ElementBody.Route, emit: SurfaceEmitter) {
+private fun surfaceRoute(body: ElementBody.Route, emit: SurfaceEmitter,wallNormal:Point3?=null) {
     for ((a, b) in (body.fabricationPath ?: body.path).zipWithNext()) {
         val direction = minus(b, a)
         val length = magnitude(direction)
         if (length == 0.0) continue
         val axis = times(direction, 1.0 / length)
-        val helper = if (abs(axis.z) < 0.9) Point3(z = 1.0) else Point3(y = 1.0)
+        val helper = wallNormal ?: if (abs(axis.z) < 0.9) Point3(z = 1.0) else Point3(y = 1.0)
         val right = unit(cross(helper, axis)); val up = unit(cross(axis, right))
         val mapped = emit.mapped { p -> plus(a, plus(times(right, p.x), plus(times(up, p.y), times(axis, p.z)))) }
         when (val section = body.section) {
@@ -406,4 +425,21 @@ private fun unit(point: Point3): Point3 {
     val length = magnitude(point)
     require(length.isFinite() && length > 0.0) { "Surface normal is degenerate." }
     return times(point, 1.0 / length)
+}
+
+/** Clip other service faces to the same AFFL section plane as the capped wall mesh. */
+private fun clipSurfaceAtHeight(a:Point3,b:Point3,c:Point3,na:Point3,nb:Point3,nc:Point3,height:Double?,sink:WorldTriangle) {
+    if(height==null){sink(a,b,c,na,nb,nc);return}
+    data class Vertex(val p:Point3,val n:Point3)
+    val input=listOf(Vertex(a,na),Vertex(b,nb),Vertex(c,nc));val output=mutableListOf<Vertex>()
+    for(i in input.indices) {
+        val x=input[i];val y=input[(i+1)%input.size];val inside=x.p.z<=height;val next=y.p.z<=height
+        if(inside)output+=x
+        if(inside!=next) {
+            val t=(height-x.p.z)/(y.p.z-x.p.z)
+            fun mix(a:Point3,b:Point3)=Point3(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t)
+            output+=Vertex(mix(x.p,y.p),mix(x.n,y.n))
+        }
+    }
+    for(i in 1 until output.lastIndex)sink(output[0].p,output[i].p,output[i+1].p,output[0].n,output[i].n,output[i+1].n)
 }

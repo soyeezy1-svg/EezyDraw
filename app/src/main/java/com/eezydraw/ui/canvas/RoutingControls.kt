@@ -36,7 +36,7 @@ internal fun <T> RouteChoice(label:String,value:T,values:List<T>,onChange:(T)->U
         DropdownMenu(open,{open=false}) {values.forEach {v->DropdownMenuItem(text={Text(text(v))},onClick={onChange(v);open=false})}}}
 }
 @Composable
-private fun RouteNumber(label:String,value:Double,onChange:(Double)->Unit,positive:Boolean=true) {
+internal fun RouteNumber(label:String,value:Double,onChange:(Double)->Unit,positive:Boolean=true) {
     var input by remember(value) {mutableStateOf("%.3f".format(java.util.Locale.ROOT,value*1000).trimEnd('0').trimEnd('.'))}
     val number=input.toDoubleOrNull()?.div(1000)
     OutlinedTextField(input,{input=it;it.toDoubleOrNull()?.div(1000)?.takeIf {n->n.isFinite() && (!positive || n>0 && n<=100) && kotlin.math.abs(n)<=10000}?.let(onChange)},
@@ -47,6 +47,10 @@ private fun RouteNumber(label:String,value:Double,onChange:(Double)->Unit,positi
 internal fun RoutingSettingsBar(kind:RouteKind,settings:RoutingSettings,onChange:(RoutingSettings)->Unit,showElevation:Boolean=true) {
     Surface(tonalElevation=2.dp) {Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp).testTag("routing_settings"),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
         Text(kind.name.replace('_',' '),style=MaterialTheme.typography.labelLarge)
+        if(kind==RouteKind.CONDUIT || kind==RouteKind.TRUNKING) {
+            RouteChoice("Wall route",settings.wallOptions?.mode,listOf(null,WallServiceMode.SURFACE,WallServiceMode.CHASE),{mode->onChange(settings.copy(wallOptions=mode?.let {(settings.wallOptions ?: WallServiceOptions()).copy(mode=it)}))}){it?.let(::wallModeLabel) ?: "Free route"}
+            settings.wallOptions?.let {options->RouteNumber("Clearance",options.clearance,{onChange(settings.copy(wallOptions=options.copy(clearance=it.coerceIn(0.0,1.0))))},false)}
+        }
         val circular=kind==RouteKind.PIPE || kind==RouteKind.CONDUIT || settings.round
         if(kind==RouteKind.DUCT)RouteChoice("Profile",settings.round,listOf(false,true),{onChange(settings.copy(round=it))}){if(it)"Round"else "Rectangular"}
         RouteChoice("Standard size",if(circular)settings.diameter else settings.width,listOf(.02,.025,.032,.04,.05,.075,.1,.15,.2,.3,.45,.5,.6,.9),{onChange(if(circular)settings.copy(diameter=it)else settings.copy(width=it))}){"${(it*1000).roundToInt()} mm"}

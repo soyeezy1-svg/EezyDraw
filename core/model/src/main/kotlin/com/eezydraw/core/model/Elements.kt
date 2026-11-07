@@ -75,6 +75,7 @@ sealed interface ElementBody {
         val size: Size3,
         val parameters: Map<String, ParameterValue> = emptyMap(),
         val host: HostAttachment? = null,
+        val wallService: WallServiceAttachment? = null,
     ) : ElementBody
 
     /** Path points are local 3D centreline positions; elevation setting records placement intent. */
@@ -86,6 +87,7 @@ sealed interface ElementBody {
         val elevation: ElevationSetting,
         val fittings: List<RouteFitting> = emptyList(),
         val host: HostAttachment? = null,
+        val wallService: WallServiceAttachment? = null,
         val routing: RouteTopology? = null,
         /** Trimmed physical section endpoints; path retains the editable node centerline. */
         val fabricationPath: List<Point3>? = null,

@@ -39,6 +39,7 @@ data class ProjectSettings(
     val rotationSnapDegrees: Int = 15,
     val hiddenLevelIds: Set<LevelId> = emptySet(),
     val showHiddenObjects: Boolean = false,
+    val wallServices:WallServiceSettings = WallServiceSettings(),
     val autoXrayFrontWalls: Boolean = false,
     val canvasLayout: CanvasLayout = CanvasLayout(),
 ) {

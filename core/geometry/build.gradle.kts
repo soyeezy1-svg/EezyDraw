@@ -12,5 +12,6 @@ java {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(libs.jts)
     testImplementation(libs.junit)
 }

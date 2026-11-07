@@ -48,6 +48,8 @@ fun ObjectVisibilityPanel(
     modifier:Modifier=Modifier,
     onLayerVisible:(LayerId,Boolean)->Unit={_,_->},
     onMeasurementsVisible:(Boolean)->Unit={},
+    onWallSettings:(WallServiceSettings)->Unit={},
+    onWallSchedule:()->Unit={},
 ) {
     Column(modifier.width(300.dp).heightIn(max=480.dp).verticalScroll(rememberScrollState())
         .padding(8.dp).testTag("object_visibility_panel"),verticalArrangement=Arrangement.spacedBy(4.dp)) {
@@ -61,6 +63,8 @@ fun ObjectVisibilityPanel(
             "visibility_auto_xray",onAutoXray)
         VisibilityOption(stringResource(R.string.panel_saved_measurements),document.project.settings.showMeasurements,
             "object_visibility_measurements",onMeasurementsVisible)
+        VisibilityOption("Wall chases, recesses and openings",document.project.settings.wallServices.showCuts,"visibility_wall_cuts",{onWallSettings(document.project.settings.wallServices.copy(showCuts=it))})
+        TextButton(onWallSchedule,Modifier.testTag("visibility_wall_schedule")){Text("Wall services schedule")}
         VisibilityHeading(R.string.visibility_levels)
         document.levels.forEach {level->
             VisibilityEye(level.name,level.id !in document.project.settings.hiddenLevelIds,

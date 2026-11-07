@@ -31,6 +31,7 @@ data class LibraryItem(
     val catalogSourceId: LibraryItemId? = null,
     /** Small PNG/JPEG thumbnail copied into the library, never an external URI. */
     val thumbnailBase64: String? = null,
+    val wallService:WallServiceOptions? = null,
 ) {
     init {
         require(name.isNotBlank() && category.isNotBlank() && version > 0)

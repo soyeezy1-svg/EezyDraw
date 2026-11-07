@@ -82,11 +82,12 @@ fun ViewControls(
 }
 
 val canvasViewModes = listOf(ViewMode.WIREFRAME, ViewMode.HIDDEN_LINE, ViewMode.SHADED,
-    ViewMode.SHADED_WITH_EDGES, ViewMode.XRAY, ViewMode.REALISTIC)
+    ViewMode.SHADED_WITH_EDGES, ViewMode.XRAY, ViewMode.REALISTIC,ViewMode.SECTION)
 
 fun viewModeLabel(mode: ViewMode): Int = when (mode) {
     ViewMode.WIREFRAME -> R.string.panel_mode_wireframe
-    ViewMode.HIDDEN_LINE, ViewMode.SECTION -> R.string.panel_mode_hidden_line
+    ViewMode.HIDDEN_LINE -> R.string.panel_mode_hidden_line
+    ViewMode.SECTION -> R.string.panel_mode_wall_section
     ViewMode.SHADED -> R.string.panel_mode_shaded
     ViewMode.SHADED_WITH_EDGES -> R.string.panel_mode_shaded_edges
     ViewMode.XRAY, ViewMode.TRANSPARENT -> R.string.panel_mode_xray

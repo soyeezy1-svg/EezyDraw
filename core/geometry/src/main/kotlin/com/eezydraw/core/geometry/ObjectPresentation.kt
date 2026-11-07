@@ -65,7 +65,7 @@ fun elementShown(document: ProjectDocument, element: Element): Boolean =
 
 /** Physical dimensions/reference positions must not shrink because a wall was hidden or wireframed. */
 fun unfilteredGeometryDocument(document: ProjectDocument): ProjectDocument = document.copy(
-    project = document.project.copy(settings = document.project.settings.copy(showHiddenObjects = true, hiddenLevelIds = emptySet(), showMeasurements = true)),
+    project = document.project.copy(settings = document.project.settings.copy(showHiddenObjects = true, hiddenLevelIds = emptySet(), showMeasurements = true,viewMode=ViewMode.WIREFRAME,wallServices=document.project.settings.wallServices.copy(showCuts=false))),
     layers = document.layers.map { it.copy(visible = true) },
     systems = document.systems.map { it.copy(visible = true) },
     elements = document.elements.map { it.withDisplay(ObjectDisplay.NORMAL).withAllRoomSidesNormal() },

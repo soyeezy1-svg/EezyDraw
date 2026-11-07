@@ -102,7 +102,7 @@ private sealed interface SceneLoad {
 private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean =
     a.elements == b.elements && a.layers == b.layers && a.systems == b.systems && a.libraryItems == b.libraryItems &&
         a.materials == b.materials && a.levels == b.levels && a.project.settings.showMeasurements == b.project.settings.showMeasurements &&
-        a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
+        a.project.settings.wallServices==b.project.settings.wallServices && (a.project.settings.viewMode==ViewMode.SECTION)==(b.project.settings.viewMode==ViewMode.SECTION) && a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
         a.project.settings.lengthUnit == b.project.settings.lengthUnit &&
         a.project.settings.angleFormat == b.project.settings.angleFormat &&
         a.project.settings.decimalPlaces == b.project.settings.decimalPlaces
@@ -158,6 +158,8 @@ fun DrawingCanvasScreen(
     var size by remember { mutableStateOf(IntSize.Zero) }
     var loading: SceneLoad by remember(document.project.id.value) { mutableStateOf(SceneLoad.Loading) }
     var prepared: SceneLoad.Ready? by remember(document.project.id.value) { mutableStateOf(null) }
+    var wallSchedule by remember {mutableStateOf(false)}
+    var libraryWallOptions by remember {mutableStateOf<WallServiceOptions?>(null)}
     var routeKind by remember(document.project.id) {mutableStateOf<RouteKind?>(null)}
     var routeDraft by remember(document.project.id) {mutableStateOf(emptyList<RoutePick>())}
     var routeConfig by remember(document.project.id) {mutableStateOf(RoutingSettings())}
@@ -245,9 +247,9 @@ fun DrawingCanvasScreen(
         pendingLibrary?.let {id->deviceCatalog.find(LibraryItemId(id),document.libraryItems)?.let {libraryPlacementDefinition(document,it)}}
     }
     val libraryAim=precisionPick?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
-    val libraryPlacementResult=remember(document,pendingLibraryItem,libraryAim,selectedLevel) {
+    val libraryPlacementResult=remember(document,pendingLibraryItem,libraryAim,selectedLevel,libraryWallOptions) {
         pendingLibraryItem?.let {item->runCatching {
-            previewLibraryPlacement(libraryPreviewDocument(document),item,libraryAim,selectedLevel?.let(::LevelId))
+            previewLibraryPlacement(libraryPreviewDocument(document),item,libraryAim,selectedLevel?.let(::LevelId),wallOptions=libraryWallOptions)
         }}
     }
     val libraryPlacement=libraryPlacementResult?.getOrNull()
@@ -299,7 +301,7 @@ fun DrawingCanvasScreen(
 
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
-        document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
+        document.project.settings.wallServices,document.project.settings.viewMode==ViewMode.SECTION,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
         settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D) {
         try {
             val previous = prepared
@@ -356,7 +358,9 @@ fun DrawingCanvasScreen(
     }
     fun applyPrecisionPick(pick:PrecisionPick,feedback:Boolean=true) {
         val resolved=if(routeKind!=null) {
-            val next=appendRoutingPick(document,routeKind!!,routeDraft,pick.point,routeConfig,document.levels.find {it.id.value==selectedLevel}).last().point
+            val draft=runCatching {appendRoutingPick(document,routeKind!!,routeDraft,pick.point,routeConfig,document.levels.find {it.id.value==selectedLevel})}.getOrNull()
+            if(draft.isNullOrEmpty()){clearPrecisionCandidate();return}
+            val next=draft.last().point
             val snap=snapRoute(document,routeKind!!,next)
             val screen=projectPrecisionPoint(snap.point,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble()) ?: pick.screen
             pick.copy(point=snap.point,screen=screen)
@@ -449,7 +453,7 @@ fun DrawingCanvasScreen(
             } catch(error:IllegalArgumentException){toolError=error.message}
         } else if(actions!=null && !busy && pendingLibrary!=null) {
             val at=confirmed?.point ?: pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)
-            if((!precisionActive || libraryPlacement!=null) && actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel))placed(library=true)
+            if((!precisionActive || libraryPlacement!=null) && (libraryWallOptions?.let {actions.onInsertWallLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel,it)} ?: actions.onInsertLibrary(LibraryItemId(pendingLibrary!!),at,selectedLevel)))placed(library=true)
         } else if(actions!=null && !busy && latestMeasurementMode.value!=MeasurementMode.NONE && latestGeometryMatches.value && ready!=null) {
             val sceneHit=if(is3D && confirmed==null)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
                 position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density) else null
@@ -529,7 +533,8 @@ fun DrawingCanvasScreen(
         } else if(size.width>0 && size.height>0 && placementActive) {
             val point=orbit.rayToPlaneZ(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),constructionZ)
                 ?: viewPlanePoint(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble())
-            pointerWorld=if(measurementMode==MeasurementMode.NONE)point.copy(z=constructionZ) else point
+            val wallPick=if(routeKind!=null && routeConfig.wallOptions!=null)WallServices.pick(document,Point2(position.x.toDouble(),position.y.toDouble()),orbit,size.width.toDouble(),size.height.toDouble(),selectedLevel?.let(::LevelId)) else null
+            pointerWorld=wallPick?.point ?: if(measurementMode==MeasurementMode.NONE)point.copy(z=constructionZ) else point
         }
     })
     val updatePrecisionPointer=rememberUpdatedState<(Offset,Boolean)->Unit>({position,stylus->
@@ -552,6 +557,9 @@ fun DrawingCanvasScreen(
                                 picked=PrecisionPick(mountingPoint,projected,elementId=id)
                         }
                     }
+                }
+                if(routeKind!=null && routeConfig.wallOptions!=null && is3D) {
+                    WallServices.pick(document,target,orbit,size.width.toDouble(),size.height.toDouble(),selectedLevel?.let(::LevelId))?.let {wall->picked=picked.copy(point=wall.point)}
                 }
                 applyPrecisionPick(picked)
             }
@@ -723,6 +731,7 @@ fun DrawingCanvasScreen(
                     activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
                     libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
                     onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
+                if(pendingLibraryItem?.mounting==MountingType.WALL)WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()})
                 if(routeKind!=null) {
                     RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()})
                     Text("${coordinate(routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
@@ -730,6 +739,7 @@ fun DrawingCanvasScreen(
                 }
                 if(editor!=null && !placementActive) {
                     RoutingRouteList(document,editor.onSelect)
+                    document.elements.singleOrNull {it.id in selectedIds}?.let {WallServiceSelection(it,document,editor.onEditWallService,{wallSchedule=true})}
                     selectedElement?.let {RoutingSelectionActions(document,it,editor)}
                 }
                 if(placementActive) PlacementBanner(activeLabel,
@@ -949,7 +959,7 @@ fun DrawingCanvasScreen(
                         {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
                         panelStates.SaveableStateProvider("library") {
                         LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->
-                            cancelConstruction();pendingLibrary=id.value;actions.onSelect(emptySet());probe=false;zoomWindow=false
+                            cancelConstruction();pendingLibrary=id.value;libraryWallOptions=actions.libraryCatalog.find(id,document.libraryItems)?.takeIf {it.mounting==MountingType.WALL}?.let(::defaultWallDeviceOptions);actions.onSelect(emptySet());probe=false;zoomWindow=false
                             pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
                         },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true,
                             state=document.libraryState,onStateChange=actions.onLibraryState,
@@ -1022,7 +1032,7 @@ fun DrawingCanvasScreen(
                             {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
                             ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},
                                 actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,
-                                onLayerVisible=actions.onLayerVisibility,onMeasurementsVisible=actions.onMeasurementsVisibility)
+                                onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
                         }
                     }
                 }
@@ -1085,6 +1095,7 @@ fun DrawingCanvasScreen(
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,
         onApply = { columns, rows, dx, dy -> editor.onArray(columns,rows,dx,dy); arrayOpen = false },onDismiss = { arrayOpen = false })
+    if(wallSchedule)WallScheduleDialog(document,{editor?.onWallSettings?.invoke(it)},{editor?.onViewMode?.invoke(ViewMode.SECTION);wallSchedule=false},{wallSchedule=false})
     toolError?.let { error -> AlertDialog(onDismissRequest = { toolError = null },title = { Text(stringResource(R.string.canvas_tool_error)) },
         text = { Text(error) },confirmButton = { TextButton({ toolError = null }) { Text(stringResource(R.string.close)) } }) }
 }

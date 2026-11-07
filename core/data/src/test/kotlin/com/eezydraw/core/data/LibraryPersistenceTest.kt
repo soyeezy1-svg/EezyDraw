@@ -3,6 +3,9 @@ package com.eezydraw.core.data
 import android.content.Context
 import androidx.room.Room
 import com.eezydraw.core.model.*
+import com.eezydraw.core.editing.WallServices
+import com.eezydraw.core.editing.LibraryCommands
+import com.eezydraw.core.editing.previewLibraryPlacement
 import com.eezydraw.core.editing.RoutePick
 import com.eezydraw.core.editing.ServiceRouting
 import java.io.ByteArrayInputStream
@@ -199,6 +202,31 @@ class LibraryPersistenceTest {
         assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
         assertEquals(saved.libraryItems,imported.libraryItems)
         assertTrue(imported.elements.filter {it.body is ElementBody.Route}.all {(it.body as ElementBody.Route).fabricationPath!=null})
+    }
+
+    @Test fun `wall chases recesses penetrations warnings and schedule survive native save reopen and import`() = runBlocking {
+        val created=repository.create("Wall services",ProjectTemplate.EMPTY,ProjectSettings(wallServices=WallServiceSettings(maxDepthFraction=.45,sectionHeight=1.4)))
+        projectIds+=created.project.id.value
+        val wall=Element(ElementId("services-wall"),created.project.id,created.layers.first().id,ElementBody.Wall(Point2(0.0,0.0),Point2(6.0,0.0),.2,3.0),levelId=created.levels.first().id,name="W-01")
+        var drawing=created.copy(elements=listOf(wall))
+        val socket=BuiltInLibrary.items.first {it.symbol==LibrarySymbol.SOCKET}
+        val placement=previewLibraryPlacement(drawing,socket,Point3(2.0,.1,.5),wall.levelId,id=ElementId("socket"),wallOptions=WallServiceOptions(WallServiceMode.RECESS,depth=.11,drop=WallDrop.CEILING))
+        drawing=LibraryCommands.place(drawing,placement).preview(drawing)
+        drawing=WallServices.connectDevice(drawing,placement.element.id)
+        val sleeve=wallServiceLibraryItems().first {it.wallService?.profile==OpeningProfile.CIRCULAR}
+        val penetration=previewLibraryPlacement(drawing,sleeve,Point3(4.0,.1,1.0),wall.levelId,id=ElementId("sleeve"))
+        drawing=LibraryCommands.place(drawing,penetration).preview(drawing)
+        val schedule=wallServiceCuts(drawing);assertTrue(schedule.any {it.mode==WallServiceMode.CHASE});assertTrue(schedule.any {it.mode==WallServiceMode.RECESS});assertTrue(schedule.any {it.mode==WallServiceMode.OPENING})
+        assertTrue(wallDepthWarnings(drawing).isNotEmpty())
+        val saved=repository.save(drawing)
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded);assertEquals(schedule,wallServiceCuts(loaded))
+        assertEquals(wallDepthWarnings(saved),wallDepthWarnings(loaded))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(schedule,wallServiceCuts(imported));assertEquals(saved.project.settings.wallServices,imported.project.settings.wallServices)
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
     }
 
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {

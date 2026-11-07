@@ -14,6 +14,7 @@ data class RoutingSettings(
     val ortho: Boolean = true,
     val autoFittings: Boolean = true,
     val bendDegrees: Int = 90,
+    val wallOptions:WallServiceOptions? = null,
 ) {
     init {
         require(listOf(width,height,diameter).all {it.isFinite() && it > 0 && it <= 100})

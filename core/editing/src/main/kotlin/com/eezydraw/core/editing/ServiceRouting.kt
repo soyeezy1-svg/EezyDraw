@@ -70,6 +70,7 @@ fun appendRoutePoint(picks:List<RoutePick>,point:Point3,settings:RoutingSettings
 
 /** Connection capture may add an end riser to an equipment port at another elevation. */
 fun appendRoutingPick(document:ProjectDocument,kind:RouteKind,picks:List<RoutePick>,point:Point3,settings:RoutingSettings,level:Level?):List<RoutePick> {
+    if(settings.wallOptions!=null)return WallServices.append(document,kind,picks,point,settings,level)
     val next=appendRoutePoint(picks,point,settings,level,document.levels,document)
     val desired=next.last()
     val capture=snapRoute(document,kind,desired.point,levelId=level?.id,captureEquipmentInPlan=true)
@@ -105,7 +106,8 @@ object ServiceRouting {
             } else beveled+=p
         }
         val resolved=beveled.mapIndexed {i,pick->
-            val snap=snapRoute(doc,kind,pick.point)
+            val captured=snapRoute(doc,kind,pick.point)
+            val snap=if(pick.settings.wallOptions!=null && captured.anchor!=null)RouteSnap(pick.point)else captured
             var node=snap.node
             if(snap.sectionId!=null && node==null) {
                 val host=doc.elements.first {it.id==snap.sectionId};val b=host.body as ElementBody.Route
@@ -139,7 +141,10 @@ object ServiceRouting {
                 levelId=a.levelId,systemId=system.id,name=kind.name.replace('_',' '),transform=Transform3(a.point),
                 properties=mapOf(ELEMENT_COLOUR_KEY to ParameterValue.Colour(config.colourArgb)))
         }
-        return EditCommands.between(document,reconcile(document,doc.copy(elements=doc.elements+additions)),"Draw service route")
+        val hosted=additions.map {e->val options=(e.body as ElementBody.Route).routing!!.settings.wallOptions
+            if(options==null)e else WallServices.attach(doc,e,options)
+        }
+        return EditCommands.between(document,reconcile(document,doc.copy(elements=doc.elements+hosted)),"Draw service route")
     }
 
     /** A changed node drives every incident endpoint. Locks are checked by the resulting sparse command. */
@@ -269,9 +274,9 @@ object ServiceRouting {
                 ends.size==3->FittingKind.TEE
                 ends.size==1->FittingKind.END_CAP
                 outlet!=body.section && directions.size==2 && abs(d.x*directions[1].x+d.y*directions[1].y+d.z*directions[1].z+1)<EPS->FittingKind.REDUCER
-                abs(d.z)> .5 || abs(directions[1].z)>.5 -> if((if(abs(d.z)>.5)d.z else directions[1].z)>0)FittingKind.BEND_90_VERTICAL_INSIDE else FittingKind.BEND_90_VERTICAL_OUTSIDE
+                body.wallService==null && (abs(d.z)> .5 || abs(directions[1].z)>.5) -> if((if(abs(d.z)>.5)d.z else directions[1].z)>0)FittingKind.BEND_90_VERTICAL_INSIDE else FittingKind.BEND_90_VERTICAL_OUTSIDE
                 abs(d.x*directions[1].x+d.y*directions[1].y+d.z*directions[1].z+1)<EPS->null
-                abs(d.x*directions[1].x+d.y*directions[1].y)>.1->FittingKind.ELBOW_45
+                abs(d.x*directions[1].x+d.y*directions[1].y+d.z*directions[1].z)>.1->FittingKind.ELBOW_45
                 else->FittingKind.ELBOW_90
             }
             val override=ends.firstNotNullOfOrNull {((it.first.body as ElementBody.Route).routing!!).fittingOverrides[node]}
@@ -329,7 +334,8 @@ object ServiceRouting {
         val dz=routingElevationAt(document,settings.elevation,level?.id,world.first())-routingElevationAt(document,topology.settings.elevation,level?.id,world.first())
         val path=world.map {it.copy(z=it.z+dz)}.toMutableList();start?.let {path[0]=it};end?.let {path[path.lastIndex]=it}
         val system=document.systems.find {it.name==settings.system} ?: BuildingSystem(SystemId(UUID.randomUUID().toString()),document.project.id,settings.system,discipline(settings.system),settings.colourArgb)
-        val next=element.copy(body=body.copy(path=path.map {measurementToLocal(element.transform,it)},section=settings.section(body.kind),elevation=settings.elevation,routing=topology.copy(settings=settings,startAnchor=if(start!=null)null else topology.startAnchor,endAnchor=if(end!=null)null else topology.endAnchor)),systemId=system.id,properties=element.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(settings.colourArgb)))
+        var next=element.copy(body=body.copy(path=path.map {measurementToLocal(element.transform,it)},section=settings.section(body.kind),elevation=settings.elevation,wallService=body.wallService?.takeIf {settings.wallOptions!=null},host=if(body.wallService!=null && settings.wallOptions==null)null else body.host,routing=topology.copy(settings=settings,startAnchor=if(start!=null)null else topology.startAnchor,endAnchor=if(end!=null)null else topology.endAnchor)),systemId=system.id,properties=element.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(settings.colourArgb)))
+        if(settings.wallOptions!=null)next=WallServices.attach(document,next,settings.wallOptions!!)
         val after=document.copy(elements=document.elements.map {if(it.id==id)next else it},systems=if(document.systems.any {it.id==system.id})document.systems else document.systems+system)
         return EditCommands.between(document,reconcile(document,after),"Edit connected route")
     }

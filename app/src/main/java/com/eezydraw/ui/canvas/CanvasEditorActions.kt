@@ -61,6 +61,9 @@ data class CanvasEditorActions(
     val onEditRoute:(ElementId,RoutingSettings,Point3?,Point3?)->Unit={_,_,_,_->},
     val onRouteFitting:(ElementId,FittingKind?)->Unit={_,_->},
     val onRouteSupports:(ElementId,Double,FittingKind)->Unit={_,_,_->},
+    val onInsertWallLibrary:(LibraryItemId,Point3,String?,WallServiceOptions)->Boolean={id,p,l,_->onInsertLibrary(id,p,l)},
+    val onEditWallService:(ElementId,WallServiceOptions?)->Unit={_,_->},
+    val onWallSettings:(WallServiceSettings)->Unit={},
     val libraryCanUndo:Boolean=false,
     val libraryCanRedo:Boolean=false,
 )
