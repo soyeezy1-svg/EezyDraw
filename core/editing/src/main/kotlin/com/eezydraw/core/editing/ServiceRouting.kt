@@ -22,7 +22,7 @@ private fun sectionNodes(e:Element):List<Pair<String,Point3>> {
 
 /** Same resolver for preview and commit. Capture is bounded in XYZ so stacked services do not join. */
 fun snapRoute(document:ProjectDocument,kind:RouteKind,point:Point3,tolerance:Double=.15,levelId:LevelId?=null,captureEquipmentInPlan:Boolean=false):RouteSnap {
-    val display=ScenePresentation(document)
+    val display=ScenePresentation(document,planView=true)
     val candidates=mutableListOf<RouteSnap>()
     for(e in document.elements) {
         if(ROUTING_OWNER in e.properties || display.display(e)==ObjectDisplay.HIDDEN || e.lockMode!=LockMode.NONE || document.layers.find {it.id==e.layerId}?.locked==true)continue
@@ -57,7 +57,7 @@ fun snapRoute(document:ProjectDocument,kind:RouteKind,point:Point3,tolerance:Dou
 
 /** Elevation changes insert a vertical leg at the previous XY before continuing horizontally. */
 fun appendRoutePoint(picks:List<RoutePick>,point:Point3,settings:RoutingSettings,level:Level?,levels:List<Level>,document:ProjectDocument?=null):List<RoutePick> {
-    val z=document?.let {routingElevationAt(it,settings.elevation,level?.id,point)} ?: routingElevation(settings.elevation,level,levels)
+    val z=document?.let {floorRoutingElevation(it,settings,level?.id,point)} ?: routingElevation(settings.elevation,level,levels)
     var at=point.copy(z=z)
     val last=picks.lastOrNull()
     if(last!=null && settings.ortho)at=if(abs(at.x-last.point.x)>=abs(at.y-last.point.y))at.copy(y=last.point.y)else at.copy(x=last.point.x)
@@ -86,8 +86,10 @@ fun appendRoutingPick(document:ProjectDocument,kind:RouteKind,picks:List<RoutePi
 object ServiceRouting {
     fun create(document:ProjectDocument,kind:RouteKind,picks:List<RoutePick>):EditCommand {
         require(picks.size>=2){"Place at least two route points"}
-        val layer=document.layers.firstOrNull {it.visible && !it.locked} ?: error("Unlock a visible drawing layer")
         var doc=document
+        val floor=picks.any {it.settings.floorInstallation!=null}
+        if(floor && doc.layers.none {it.name=="Underfloor services"})doc=doc.copy(layers=doc.layers+Layer(LayerId(UUID.randomUUID().toString()),doc.project.id,"Underfloor services"))
+        val layer=doc.layers.firstOrNull {it.visible && !it.locked && (!floor || it.name=="Underfloor services")} ?: error("Unlock and show the routing layer")
         val network=UUID.randomUUID().toString()
         val nodes=mutableMapOf<Int,String>()
         val anchors=mutableMapOf<Int,RouteAnchor>()
@@ -132,7 +134,7 @@ object ServiceRouting {
         }
         val additions=resolved.zipWithNext().mapIndexed {i,(a,b)->
             require(distance3(a.point,b.point)>EPS){"A route section has zero length"}
-            val config=if(abs(a.point.z-b.point.z)>EPS)b.settings else a.settings
+            val config=(if(abs(a.point.z-b.point.z)>EPS)b.settings else a.settings).let {if(it.floorInstallation!=null)it.copy(elevation=ElevationSetting(-it.floorDepth,ElevationReference.ABOVE_FINISHED_FLOOR))else it}
             val system=doc.systems.find {it.name.equals(config.system,true)} ?: BuildingSystem(SystemId(UUID.randomUUID().toString()),doc.project.id,config.system,discipline(config.system),config.colourArgb).also {doc=doc.copy(systems=doc.systems+it)}
             require(system.visible){"Show the selected system before routing"}
             Element(ElementId(UUID.randomUUID().toString()),doc.project.id,layer.id,
@@ -144,7 +146,9 @@ object ServiceRouting {
         val hosted=additions.map {e->val options=(e.body as ElementBody.Route).routing!!.settings.wallOptions
             if(options==null)e else WallServices.attach(doc,e,options)
         }
-        return EditCommands.between(document,reconcile(document,doc.copy(elements=doc.elements+hosted)),"Draw service route")
+        val result=reconcile(document,doc.copy(elements=doc.elements+hosted))
+        FloorServices.validateCuts(document,result)
+        return EditCommands.between(document,result,"Draw service route")
     }
 
     /** A changed node drives every incident endpoint. Locks are checked by the resulting sparse command. */
@@ -331,13 +335,18 @@ object ServiceRouting {
         val element=document.elements.first {it.id==id};val body=element.body as ElementBody.Route;val topology=requireNotNull(body.routing)
         val world=body.path.map {measurementToWorld(element.transform,it)}
         val level=document.levels.find {it.id==element.levelId}
-        val dz=routingElevationAt(document,settings.elevation,level?.id,world.first())-routingElevationAt(document,topology.settings.elevation,level?.id,world.first())
+        val destination=if(settings.floorInstallation!=null)document.layers.firstOrNull {it.name=="Underfloor services"} ?: Layer(LayerId(UUID.randomUUID().toString()),document.project.id,"Underfloor services")else
+            document.layers.firstOrNull {it.id==element.layerId && it.name!="Underfloor services"} ?: document.layers.firstOrNull {it.name!="Underfloor services" && it.visible && !it.locked} ?: error("Choose a visible unlocked layer")
+        require(destination.visible && !destination.locked){"Unlock and show the routing layer"}
+        val dz=floorRoutingElevation(document,settings,level?.id,world.first())-floorRoutingElevation(document,topology.settings,level?.id,world.first())
         val path=world.map {it.copy(z=it.z+dz)}.toMutableList();start?.let {path[0]=it};end?.let {path[path.lastIndex]=it}
         val system=document.systems.find {it.name==settings.system} ?: BuildingSystem(SystemId(UUID.randomUUID().toString()),document.project.id,settings.system,discipline(settings.system),settings.colourArgb)
-        var next=element.copy(body=body.copy(path=path.map {measurementToLocal(element.transform,it)},section=settings.section(body.kind),elevation=settings.elevation,wallService=body.wallService?.takeIf {settings.wallOptions!=null},host=if(body.wallService!=null && settings.wallOptions==null)null else body.host,routing=topology.copy(settings=settings,startAnchor=if(start!=null)null else topology.startAnchor,endAnchor=if(end!=null)null else topology.endAnchor)),systemId=system.id,properties=element.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(settings.colourArgb)))
+        var next=element.copy(layerId=destination.id,body=body.copy(path=path.map {measurementToLocal(element.transform,it)},section=settings.section(body.kind),elevation=if(settings.floorInstallation!=null)ElevationSetting(-settings.floorDepth,ElevationReference.ABOVE_FINISHED_FLOOR)else settings.elevation,wallService=body.wallService?.takeIf {settings.wallOptions!=null},host=if(body.wallService!=null && settings.wallOptions==null)null else body.host,routing=topology.copy(settings=settings,startAnchor=if(start!=null)null else topology.startAnchor,endAnchor=if(end!=null)null else topology.endAnchor)),systemId=system.id,properties=element.properties+(ELEMENT_COLOUR_KEY to ParameterValue.Colour(settings.colourArgb)))
         if(settings.wallOptions!=null)next=WallServices.attach(document,next,settings.wallOptions!!)
-        val after=document.copy(elements=document.elements.map {if(it.id==id)next else it},systems=if(document.systems.any {it.id==system.id})document.systems else document.systems+system)
-        return EditCommands.between(document,reconcile(document,after),"Edit connected route")
+        val after=document.copy(layers=if(document.layers.any {it.id==destination.id})document.layers else document.layers+destination,elements=document.elements.map {if(it.id==id)next else it},systems=if(document.systems.any {it.id==system.id})document.systems else document.systems+system)
+        val result=reconcile(document,after)
+        FloorServices.validateCuts(document,result)
+        return EditCommands.between(document,result,"Edit connected route")
     }
     fun fitting(document:ProjectDocument,id:ElementId,kind:FittingKind?):EditCommand {
         val element=document.elements.first {it.id==id};val owner=(element.properties[ROUTING_OWNER] as? ParameterValue.Text)?.value ?: error("Select an automatic fitting")

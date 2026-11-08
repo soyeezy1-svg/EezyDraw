@@ -85,6 +85,7 @@ fun previewLibraryPlacement(
         properties = mapOf(ELEMENT_COLOUR_KEY to ParameterValue.Colour(colour)),
     )
     if(item.mounting==MountingType.WALL)element=WallServices.attach(document,element,wallOptions ?: defaultWallDeviceOptions(item))
+    if(floorDevice(item)!=null)element=FloorServices.place(document,item,element)
     val connection = libraryFittingConnectionPoint(item, element)
     if (connection != null) {
         val connectionHeight = connection.z - floor

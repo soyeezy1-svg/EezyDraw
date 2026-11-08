@@ -65,10 +65,10 @@ object RoomWalls {
   val layer=document.layers.firstOrNull {it.visible && !it.locked} ?: error("Choose an unlocked visible layer")
   val id=ElementId(UUID.randomUUID().toString());val origin=points.first()
   val body=if(kind=="wall") {require(points.size==2 && points[0]!=points[1]);ElementBody.Wall(Point2(0.0,0.0),Point2(points[1].x-origin.x,points[1].y-origin.y),options.thickness,options.height)}else {
-   val sketch=createSketch(if(kind=="room")DrawingTool.RECTANGLE else DrawingTool.POLYGON,points)
-   ElementBody.Room((sketch.shape as Shape.Polygon).boundary,wallOptions=options.takeIf {automatic})
+   val sketch=createSketch(if(kind in setOf("room","slab"))DrawingTool.RECTANGLE else DrawingTool.POLYGON,points)
+   if(kind=="slab")ElementBody.Slab((sketch.shape as Shape.Polygon).boundary,options.thickness)else ElementBody.Room((sketch.shape as Shape.Polygon).boundary,wallOptions=options.takeIf {automatic})
   }
-  val e=Element(id,document.project.id,layer.id,body,level,name=if(kind=="wall")"Wall"else "Room",transform=Transform3(origin))
+  val e=Element(id,document.project.id,layer.id,body,level,name=if(kind=="wall")"Wall"else if(kind=="slab")"Floor slab"else "Room",transform=Transform3(origin))
   return EditCommands.between(document,reconcile(document,document.copy(elements=document.elements+e)),"Create $kind")
  }
 }

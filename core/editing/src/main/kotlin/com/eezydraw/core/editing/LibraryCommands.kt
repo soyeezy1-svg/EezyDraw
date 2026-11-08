@@ -129,6 +129,7 @@ fun applyLibraryProperties(document: ProjectDocument, element: Element, properti
             changed.transform.translation.z + floor + properties.mountingHeight - resizedConnection.z,
         )))
     }
+    if(definition.floorService!=null)changed=FloorServices.place(document,definition,changed)
     return synchronizeHostPosition(document, changed)
 }
 

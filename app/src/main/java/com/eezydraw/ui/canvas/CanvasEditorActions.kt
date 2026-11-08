@@ -63,6 +63,8 @@ data class CanvasEditorActions(
     val onRouteSupports:(ElementId,Double,FittingKind)->Unit={_,_,_->},
     val onInsertWallLibrary:(LibraryItemId,Point3,String?,WallServiceOptions)->Boolean={id,p,l,_->onInsertLibrary(id,p,l)},
     val onEditWallService:(ElementId,WallServiceOptions?)->Unit={_,_->},
+    val onFloorSettings:(FloorServiceSettings)->Unit={},
+    val onFloorRise:(ElementId,ElementId)->Unit={_,_->},
     val onWallSettings:(WallServiceSettings)->Unit={},
     val onRoomCorner:(ElementId,Int,Point3)->Unit={_,_,_->},
     val onGenerateWalls:(Set<ElementId>,RoomWallOptions)->Unit={_,_->},

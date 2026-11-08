@@ -48,6 +48,8 @@ fun ObjectVisibilityPanel(
     modifier:Modifier=Modifier,
     onLayerVisible:(LayerId,Boolean)->Unit={_,_->},
     onMeasurementsVisible:(Boolean)->Unit={},
+    onFloorSettings:(FloorServiceSettings)->Unit={},
+    onFloorSchedule:()->Unit={},
     onWallSettings:(WallServiceSettings)->Unit={},
     onWallSchedule:()->Unit={},
 ) {
@@ -65,6 +67,8 @@ fun ObjectVisibilityPanel(
             "object_visibility_measurements",onMeasurementsVisible)
         VisibilityOption("Wall chases, recesses and openings",document.project.settings.wallServices.showCuts,"visibility_wall_cuts",{onWallSettings(document.project.settings.wallServices.copy(showCuts=it))})
         TextButton(onWallSchedule,Modifier.testTag("visibility_wall_schedule")){Text("Wall services schedule")}
+        VisibilityOption("Show underfloor services",document.project.settings.floorServices.showServices,"visibility_underfloor",{onFloorSettings(document.project.settings.floorServices.copy(showServices=it))})
+        TextButton(onFloorSchedule,Modifier.testTag("floor_schedule_open")){Text("Floor services schedule")}
         VisibilityHeading(R.string.visibility_levels)
         document.levels.forEach {level->
             VisibilityEye(level.name,level.id !in document.project.settings.hiddenLevelIds,

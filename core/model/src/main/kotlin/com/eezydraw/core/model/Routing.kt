@@ -20,11 +20,15 @@ data class RoutingSettings(
     val bendDegrees: Int = 90,
     val wallOptions:WallServiceOptions? = null,
     val wallSnapAngles:WallSnapAngles? = null,
+    val floorInstallation:FloorInstallation? = null,
+    val floorDepth:Double=.1,
 ) {
     init {
         require(listOf(width,height,diameter).all {it.isFinite() && it > 0 && it <= 100})
         require(system in listOf("Power","ICT","HVAC","Plumbing","Fire"))
         require(bendDegrees == 45 || bendDegrees == 90)
+        require(floorDepth.isFinite() && floorDepth>=0 && floorDepth<=100)
+        require(floorInstallation==null || wallOptions==null)
     }
     fun effectiveWallSnapAngles():WallSnapAngles = wallSnapAngles ?: if(ortho)WallSnapAngles.NINETY else WallSnapAngles.FREE
     fun section(kind:RouteKind):RouteSection = if(round || kind==RouteKind.PIPE || kind==RouteKind.CONDUIT)

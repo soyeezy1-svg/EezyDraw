@@ -163,7 +163,7 @@ fun EezyDrawApp(
                                             viewModel::addSketch,viewModel::select,viewModel::transformSelection,viewModel::updateProperties,
                                             viewModel::copySelection,viewModel::pasteSelection,viewModel::deleteSelection,viewModel::undo,viewModel::redo,
                                             viewModel::mirrorSelection,viewModel::arraySelection,
-                                            onInsertWallLibrary={id,p,l,options->viewModel.insertWallLibraryItem(id,p,l,options)},onEditWallService=viewModel::editWallService,onWallSettings=viewModel::wallServiceSettings,
+                                            onInsertWallLibrary={id,p,l,options->viewModel.insertWallLibraryItem(id,p,l,options)},onEditWallService=viewModel::editWallService,onWallSettings=viewModel::wallServiceSettings,onFloorSettings=viewModel::floorServiceSettings,onFloorRise=viewModel::floorRise,
                                             onRoomCorner=viewModel::roomCorner,onGenerateWalls=viewModel::generateRoomWalls,onCreateBuilding=viewModel::createBuilding,onCreateRoute=viewModel::createRoute,onRoutingSettings=viewModel::rememberRoutingSettings,
                                             onEditRoute=viewModel::editRoute,onRouteFitting=viewModel::routeFitting,onRouteSupports=viewModel::routeSupports,
                                             onViewMode=viewModel::changeViewMode,onLayerVisibility=viewModel::setLayerVisibility,

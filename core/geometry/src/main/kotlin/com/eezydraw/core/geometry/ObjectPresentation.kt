@@ -3,7 +3,7 @@ package com.eezydraw.core.geometry
 import com.eezydraw.core.model.*
 
 /** Visibility is presentation only. The underlying element bodies and measurement anchors stay intact. */
-class ScenePresentation(private val document: ProjectDocument) {
+class ScenePresentation(private val document: ProjectDocument,private val planView:Boolean=false) {
     private val layers = document.layers.associateBy { it.id }
     private val systems = document.systems.associateBy { it.id }
     private val elements = document.elements.associateBy { it.id }
@@ -20,6 +20,8 @@ class ScenePresentation(private val document: ProjectDocument) {
     fun display(element: Element): ObjectDisplay {
         if (hierarchyHidden(element) || element.objectDisplay == ObjectDisplay.HIDDEN) return ObjectDisplay.HIDDEN
         val owner=(element.properties["routingOwner"] as? ParameterValue.Text)?.value?.let {elements[ElementId(it)]}
+        val floor=(owner ?: element).floorRouting()
+        if(floor!=null && (!document.project.settings.floorServices.showServices || !planView && !floorRevealed(document,owner ?: element)))return ObjectDisplay.HIDDEN
         if(owner!=null) {
             if(hierarchyHidden(owner) || owner.objectDisplay==ObjectDisplay.HIDDEN)return ObjectDisplay.HIDDEN
             if(element.objectDisplay==ObjectDisplay.NORMAL)return owner.objectDisplay
@@ -65,7 +67,7 @@ fun elementShown(document: ProjectDocument, element: Element): Boolean =
 
 /** Physical dimensions/reference positions must not shrink because a wall was hidden or wireframed. */
 fun unfilteredGeometryDocument(document: ProjectDocument): ProjectDocument = document.copy(
-    project = document.project.copy(settings = document.project.settings.copy(showHiddenObjects = true, hiddenLevelIds = emptySet(), showMeasurements = true,viewMode=ViewMode.WIREFRAME,wallServices=document.project.settings.wallServices.copy(showCuts=false))),
+    project = document.project.copy(settings = document.project.settings.copy(showHiddenObjects = true, hiddenLevelIds = emptySet(), showMeasurements = true,viewMode=ViewMode.XRAY,floorServices=document.project.settings.floorServices.copy(showServices=true,showChannels=false),wallServices=document.project.settings.wallServices.copy(showCuts=false))),
     layers = document.layers.map { it.copy(visible = true) },
     systems = document.systems.map { it.copy(visible = true) },
     elements = document.elements.map { it.withDisplay(ObjectDisplay.NORMAL).withAllRoomSidesNormal() },

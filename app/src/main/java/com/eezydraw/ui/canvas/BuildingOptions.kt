@@ -8,10 +8,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.eezydraw.core.model.*
-@Composable internal fun BuildingOptions(value:RoomWallOptions,onChange:(RoomWallOptions)->Unit,automatic:Boolean,onAutomatic:(Boolean)->Unit,room:Boolean,wallOnly:Boolean=false) {
+@Composable internal fun BuildingOptions(value:RoomWallOptions,onChange:(RoomWallOptions)->Unit,automatic:Boolean,onAutomatic:(Boolean)->Unit,room:Boolean,wallOnly:Boolean=false,slab:Boolean=false) {
  Row(Modifier.horizontalScroll(rememberScrollState()).padding(4.dp)) {
-  RouteNumber("Wall thickness",value.thickness,{onChange(value.copy(thickness=it))})
-  RouteNumber("Wall height",value.height,{onChange(value.copy(height=it))})
+  RouteNumber(if(slab)"Slab thickness"else "Wall thickness",value.thickness,{onChange(value.copy(thickness=it))})
+  if(!slab)RouteNumber("Wall height",value.height,{onChange(value.copy(height=it))})
   if(!wallOnly) {
   OutlinedTextField(value.material,{if(it.isNotBlank())onChange(value.copy(material=it))},label={Text("Material")},modifier=Modifier.width(150.dp))
   RouteChoice("Alignment",value.alignment,RoomWallAlignment.entries,{onChange(value.copy(alignment=it))}){when(it){RoomWallAlignment.CENTERLINE->"Centerline";RoomWallAlignment.INSIDE_FACE->"Inside face";RoomWallAlignment.OUTSIDE_FACE->"Outside face"}}

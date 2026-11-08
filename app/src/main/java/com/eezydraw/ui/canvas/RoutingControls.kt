@@ -44,11 +44,21 @@ internal fun RouteNumber(label:String,value:Double,onChange:(Double)->Unit,posit
         modifier=Modifier.width(132.dp).testTag("route_input_$label"))
 }
 @Composable
-internal fun RoutingSettingsBar(kind:RouteKind,settings:RoutingSettings,onChange:(RoutingSettings)->Unit,showElevation:Boolean=true) {
+internal fun RoutingSettingsBar(kind:RouteKind,settings:RoutingSettings,onChange:(RoutingSettings)->Unit,showElevation:Boolean=true,floorDefaults:FloorServiceSettings=FloorServiceSettings()) {
     Surface(tonalElevation=2.dp) {Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp).testTag("routing_settings"),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
         Text(kind.name.replace('_',' '),style=MaterialTheme.typography.labelLarge)
-        if(kind==RouteKind.CONDUIT || kind==RouteKind.TRUNKING) {
-            RouteChoice("Wall route",settings.wallOptions?.mode,listOf(null,WallServiceMode.SURFACE,WallServiceMode.CHASE),{mode->onChange(settings.copy(wallOptions=mode?.let {(settings.wallOptions ?: WallServiceOptions()).copy(mode=it)}))}){it?.let(::wallModeLabel) ?: "Free route"}
+        if(kind in listOf(RouteKind.CONDUIT,RouteKind.TRUNKING,RouteKind.CABLE_TRAY,RouteKind.PIPE)) {
+            val installation=if(settings.wallOptions!=null)"On wall"else settings.floorInstallation?.let(::floorInstallationLabel) ?: "Above ceiling / free height"
+            RouteChoice("Installation",installation,listOf("Above ceiling / free height")+if(kind in listOf(RouteKind.CONDUIT,RouteKind.TRUNKING))listOf("On wall")+FloorInstallation.entries.map(::floorInstallationLabel)else FloorInstallation.entries.map(::floorInstallationLabel),{label->
+                val floor=FloorInstallation.entries.find {floorInstallationLabel(it)==label}
+                val depth=floor?.let {floorDefaults.defaultDepths[it]} ?: settings.floorDepth
+                onChange(settings.copy(floorInstallation=floor,floorDepth=depth,wallOptions=if(label=="On wall")WallServiceOptions()else null,
+                    elevation=if(floor!=null)ElevationSetting(-depth,ElevationReference.ABOVE_FINISHED_FLOOR)else if(settings.floorInstallation!=null)ElevationSetting(2.5,ElevationReference.ABOVE_FINISHED_FLOOR)else settings.elevation))
+            })
+            if(settings.floorInstallation!=null)RouteNumber("Depth below finished floor",settings.floorDepth,{onChange(settings.copy(floorDepth=it,elevation=ElevationSetting(-it,ElevationReference.ABOVE_FINISHED_FLOOR)))})
+        }
+        if(settings.floorInstallation==null && (kind==RouteKind.CONDUIT || kind==RouteKind.TRUNKING)) {
+            RouteChoice("Wall route",settings.wallOptions?.mode,listOf(null,WallServiceMode.SURFACE,WallServiceMode.CHASE),{mode->onChange(settings.copy(floorInstallation=null,wallOptions=mode?.let {(settings.wallOptions ?: WallServiceOptions()).copy(mode=it)}))}){it?.let(::wallModeLabel) ?: "Free route"}
             settings.wallOptions?.let {options->RouteNumber("Clearance",options.clearance,{onChange(settings.copy(wallOptions=options.copy(clearance=it.coerceIn(0.0,1.0))))},false)}
         }
         val circular=kind==RouteKind.PIPE || kind==RouteKind.CONDUIT || settings.round
@@ -57,7 +67,7 @@ internal fun RoutingSettingsBar(kind:RouteKind,settings:RoutingSettings,onChange
         if(circular)RouteNumber("Diameter",settings.diameter,{onChange(settings.copy(diameter=it))}) else {
             RouteNumber("Width",settings.width,{onChange(settings.copy(width=it))});RouteNumber("Height",settings.height,{onChange(settings.copy(height=it))})
         }
-        if(showElevation) {
+        if(showElevation && settings.floorInstallation==null) {
             RouteNumber("Elevation",settings.elevation.value,{onChange(settings.copy(elevation=settings.elevation.copy(value=it)))},false)
             RouteChoice("Reference",settings.elevation.reference,listOf(ElevationReference.ABOVE_FINISHED_FLOOR,ElevationReference.BELOW_CEILING,ElevationReference.BELOW_SLAB),{onChange(settings.copy(elevation=settings.elevation.copy(reference=it)))},::routingReferenceLabel)
         }
@@ -93,6 +103,7 @@ internal fun RoutingSelectionActions(document:ProjectDocument,element:Element,ac
     val topology=route?.routing
     val managed=ROUTING_OWNER in element.properties
     if(topology==null && !managed)return
+    var rise by remember(element.id) {mutableStateOf<String?>(null)}
     var edit by remember(element.id) {mutableStateOf(false)}
     var more by remember(element.id) {mutableStateOf(false)}
     var spacing by remember(element.id) {mutableDoubleStateOf(1.0)}
@@ -112,9 +123,18 @@ internal fun RoutingSelectionActions(document:ProjectDocument,element:Element,ac
             }
         }
     }
+    if(element.floorRouting()!=null)Row {
+        TextButton({rise="wall"},Modifier.testTag("rise_to_wall")){Text("Rise to wall")}
+        TextButton({rise="box"},Modifier.testTag("rise_to_floor_box")){Text("Rise to floor box")}
+    }
+    if(rise!=null)AlertDialog(onDismissRequest={rise=null},title={Text(if(rise=="wall")"Rise to wall"else "Rise to floor box")},text={Column(Modifier.heightIn(max=280.dp).verticalScroll(rememberScrollState())) {
+        val targets=document.elements.filter {e->(e.body as? ElementBody.Component)?.let {b->document.libraryItems.find {it.id==b.libraryItemId}?.let {if(rise=="wall")it.mounting==MountingType.WALL else floorDevice(it) in listOf(FloorDeviceKind.FLOOR_BOX,FloorDeviceKind.FLOOR_SOCKET)}}==true}
+        if(targets.isEmpty())Text("Place a ${if(rise=="wall")"wall device"else "floor box or floor socket"} from the library first.")
+        targets.forEach {target->TextButton({actions.onFloorRise(element.id,target.id);rise=null}){Text(target.name)}}
+    }},confirmButton={TextButton({rise=null}){Text("Cancel")}})
     if(edit && topology!=null) {
         var value by remember(element) {mutableStateOf(topology.settings)}
-        AlertDialog(onDismissRequest={edit=false},title={Text("Route section")},text={Column {RoutingSettingsBar(route.kind,value,{value=it});Text("Drag either end handle to reshape the section. Connected sections and fittings follow.")}},
+        AlertDialog(onDismissRequest={edit=false},title={Text("Route section")},text={Column {RoutingSettingsBar(route.kind,value,{value=it},floorDefaults=document.project.settings.floorServices);Text("Drag either end handle to reshape the section. Connected sections and fittings follow.")}},
             confirmButton={TextButton({actions.onEditRoute(element.id,value,null,null);edit=false},Modifier.testTag("route_apply")){Text("Apply")}},dismissButton={TextButton({edit=false}){Text("Cancel")}})
     }
     if(accessories)AlertDialog(onDismissRequest={accessories=false},title={Text("Add support every X mm")},text={Column {

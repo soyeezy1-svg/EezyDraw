@@ -8,12 +8,14 @@ import org.locationtech.jts.triangulate.polygon.PolygonTriangulator
 import kotlin.math.abs
 
 /** Exact planar polygon unions in small wall coordinates, extruded through distinct depth bands. */
-fun wallCutMesh(frame:WallFrame,cuts:List<WallCut>,sectionHeight:Double?=null):Shape.Mesh? {
+fun wallCutMesh(frame:WallFrame,cuts:List<WallCut>,sectionHeight:Double?=null,boundary:Polygon2?=null):Shape.Mesh? {
     require(cuts.size<=512){"A wall exceeds the 512-cut geometry limit"}
     val height=minOf(frame.height,sectionHeight ?: frame.height).coerceAtLeast(1e-8)
     val factory=GeometryFactory()
     fun polygon(points:List<Point2>):Polygon=factory.createPolygon((points+points.first()).map {Coordinate(it.x,it.y)}.toTypedArray())
-    val extent=polygon(listOf(Point2(0.0,0.0),Point2(frame.length,0.0),Point2(frame.length,height),Point2(0.0,height)))
+    val extent=if(boundary==null)polygon(listOf(Point2(0.0,0.0),Point2(frame.length,0.0),Point2(frame.length,height),Point2(0.0,height)))else factory.createPolygon(
+        factory.createLinearRing((boundary.outer+boundary.outer.first()).map {Coordinate(it.x,it.y)}.toTypedArray()),
+        boundary.holes.map {factory.createLinearRing((it+it.first()).map {p->Coordinate(p.x,p.y)}.toTypedArray())}.toTypedArray())
     val bounded=cuts.map {it to polygon(it.outline).intersection(extent)}.filterNot {it.second.isEmpty}
     val depths=(listOf(0.0,frame.thickness)+bounded.flatMap {listOf(it.first.fromDepth,it.first.toDepth)}).distinct().sorted()
     val bands=depths.zipWithNext().map {(a,b)->
