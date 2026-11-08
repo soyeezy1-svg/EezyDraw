@@ -26,6 +26,22 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ProjectStorageTest {
+    @Test fun issueReviewAndAttachmentsSurviveLoadArchiveAndBackup() = runBlocking {
+        val source=repository.create("Issue review",ProjectTemplate.EMPTY,ProjectSettings())
+        val id=source.project.id;val asset=ProjectAsset(AssetId("photo"),id,"photo.png","image/png")
+        val bytes=byteArrayOf(1,2,3,4)
+        ProjectFiles(File(context.filesDir,"projects")).writeAssets(id.value,mapOf(asset.relativePath to bytes))
+        val capture=IssueView("view",Point2(2.0,3.0),100.0,Point3(),.5,.5,10.0,10.0,Projection.ORTHOGRAPHIC,true,source.levels.first().id,source.project.settings,emptyMap(),emptyMap(),emptyMap(),400,300,true)
+        val issue=Issue(IssueId("issue"),id,"Repair",1,description="Description",priority=IssuePriority.HIGH,dueDate="2026-12-01",assignedTo="Pat",position=Point3(2.0,3.0),capture=capture,attachments=listOf(asset.id),screenshot=asset.id,annotations=listOf(IssueMarkup(MarkupTool.CLOUD,listOf(Point2(.1,.1),Point2(.8,.8)),viewId=capture.id)))
+        val saved=repository.save(source.copy(issues=listOf(issue),assets=listOf(asset)))
+        assertEquals(saved,repository.load(id.value))
+        val out=ByteArrayOutputStream();repository.exportProject(id.value,out)
+        val imported=repository.importProject(ByteArrayInputStream(out.toByteArray()))
+        assertEquals(issue.copy(projectId=imported.project.id),imported.issues.single())
+        repository.save(saved.copy(issues=listOf(issue.copy(status=IssueStatus.CLOSED))))
+        assertEquals(IssueStatus.OPEN,repository.restoreBackup(id.value).issues.single().status)
+    }
+
     @Test fun clashStatusesNotesOptionsAndResolvedAuditSurviveSaveLoadArchiveAndBackup() = runBlocking {
         val created=repository.create("Coordination",ProjectTemplate.EMPTY,ProjectSettings())
         val p=created.project.id;val layer=created.layers.first().id

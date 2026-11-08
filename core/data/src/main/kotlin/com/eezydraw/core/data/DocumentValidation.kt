@@ -97,6 +97,7 @@ internal fun validateDocument(document: ProjectDocument) {
         valid(it.elementIds.all(elementIds::contains), "A group refers to a missing element.")
     }
     document.issues.forEach { issue ->
+        valid((issue.attachments+listOfNotNull(issue.screenshot,issue.capture?.screenshot)+issue.savedViews.mapNotNull {it.screenshot}).all {id->document.assets.any {it.id==id}}, "An issue attachment is missing.")
         valid(issue.elementIds.all(elementIds::contains) && (issue.viewId == null || issue.viewId in views),
             "An issue refers to missing project data.")
         issue.clash?.let {

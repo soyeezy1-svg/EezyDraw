@@ -111,6 +111,14 @@ fun EezyDrawApp(
         val name=snapshot.document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)+"."+options.format.extension
         when(options.format){com.eezydraw.storage.DrawingFormat.PDF->exportPdf.launch(name);com.eezydraw.storage.DrawingFormat.PNG->exportPng.launch(name);com.eezydraw.storage.DrawingFormat.DXF->exportDxf.launch(name)}
     },{drawingRequest=null})}
+    var photoIssue by remember {mutableStateOf<com.eezydraw.core.model.Issue?>(null)}
+    var photoIssueKey by rememberSaveable {mutableStateOf<String?>(null)}
+    var cameraUriText by rememberSaveable {mutableStateOf<String?>(null)}
+    var issueExportFormat by remember {mutableStateOf("pdf")}
+    val issuePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){uri->uri?.let {viewModel.exportIssues(it.toString(),"pdf")}}
+    val issueCsv=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")){uri->uri?.let {viewModel.exportIssues(it.toString(),"csv")}}
+    val galleryIssue=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->(photoIssue ?: state.document?.issues?.find {it.id.value==photoIssueKey})?.let {i->uri?.let {viewModel.attachIssueImage(i,it.toString())}};photoIssue=null;photoIssueKey=null}
+    val cameraIssue=rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()){success->if(success)(photoIssue ?: state.document?.issues?.find {it.id.value==photoIssueKey})?.let {i->cameraUriText?.let {viewModel.attachIssueImage(i,it)}};photoIssue=null;photoIssueKey=null}
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let { viewModel.chooseFolder(it.toString()) }
     }
@@ -205,6 +213,9 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        onSaveIssue=viewModel::saveIssue,onDeleteIssue=viewModel::deleteIssue,onIssueScreenshot=viewModel::attachIssueScreenshot,onShareIssue=viewModel::shareIssue,
+                                        onIssueExport={format->if(format=="pdf")issuePdf.launch("issues.pdf")else issueCsv.launch("issues.csv")},
+                                        onIssuePhoto={issue,camera->viewModel.saveIssue(issue);photoIssue=issue;photoIssueKey=issue.id.value;if(camera){val file=java.io.File(context.cacheDir,"issue-share/camera-${java.util.UUID.randomUUID()}.jpg");file.parentFile!!.mkdirs();val uri=androidx.core.content.FileProvider.getUriForFile(context,context.packageName+".issues",file);cameraUriText=uri.toString();cameraIssue.launch(uri)}else galleryIssue.launch(arrayOf("image/png","image/jpeg"))},
                                         clashProgress=state.clashProgress,clashSummary=state.clashSummary,onRunClash=viewModel::runClashCheck,onCancelClash=viewModel::cancelClashCheck,onClashStatus=viewModel::updateClashStatus,
                                         onExportModel={level,plan->modelOptions=com.eezydraw.core.geometry.ModelExportOptions(levelId=level?.let {com.eezydraw.core.model.LevelId(it)},selected=state.selectedIds,planView=plan);modelDialog=true},
                                         onExportDrawing={request->drawingOptions=com.eezydraw.storage.DrawingExportOptions();drawingRequest=request},

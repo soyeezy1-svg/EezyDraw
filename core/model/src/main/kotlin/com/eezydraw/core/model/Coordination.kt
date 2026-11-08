@@ -45,8 +45,20 @@ data class Issue(
     val assignedTo: String? = null,
     val comments: List<IssueComment> = emptyList(),
     val markup: List<Shape> = emptyList(),
+    val priority: IssuePriority = IssuePriority.MEDIUM,
+    val dueDate: String? = null,
+    val levelId: LevelId? = null,
+    val sourceClashId: IssueId? = null,
+    val attachments: List<AssetId> = emptyList(),
+    val screenshot: AssetId? = null,
+    val capture: IssueView? = null,
+    val savedViews: List<IssueView> = emptyList(),
+    val annotations: List<IssueMarkup> = emptyList(),
+    val markupVisible: Boolean = true,
+    val hidden: Boolean = false,
+    val locked: Boolean = false,
 ) {
-    init { require(title.isNotBlank()) }
+    init { require(title.isNotBlank() && annotations.size<=2000);dueDate?.let {java.time.LocalDate.parse(it)} }
 }
 
 @Serializable

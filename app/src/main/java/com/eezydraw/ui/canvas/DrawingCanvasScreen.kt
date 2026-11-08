@@ -1,4 +1,5 @@
 package com.eezydraw.ui.canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.listSaver
@@ -136,6 +138,9 @@ fun DrawingCanvasScreen(
     modifier: Modifier = Modifier,
     surface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
     editor: CanvasEditorActions? = null,
+    onSaveIssue:(Issue)->Unit={},onDeleteIssue:(Issue)->Unit={},
+    onIssuePhoto:(Issue,Boolean)->Unit={_,_->},onShareIssue:(Issue,String)->Unit={_,_->},onIssueExport:(String)->Unit={},
+    onIssueScreenshot:(Issue,List<IssueMarkup>,android.graphics.Bitmap)->Unit={_,_,_->},
     clashProgress:Float?=null,
     clashSummary:String?=null,
     onRunClash:(ClashCheckOptions)->Unit={},
@@ -226,13 +231,17 @@ fun DrawingCanvasScreen(
     val fallbackSnaps = remember { SnapEngine(SpatialIndex(emptyList())) }
     val window = remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
     val ready = prepared
+    var issueEdit by remember {mutableStateOf<Issue?>(null)}
+    var issueMarkup by remember {mutableStateOf<Issue?>(null)}
+    var issueView by remember {mutableStateOf<IssueView?>(null)}
+    var issuePicking by remember {mutableStateOf(false)}
     var clashDialog by remember {mutableStateOf(false)}
     var clashFocus by remember(document.project.id) {mutableStateOf<IssueId?>(null)}
     var clashXray by remember {mutableStateOf(true)}
     val focusClash=document.issues.find {it.id==clashFocus}?.clash
     val inspectionKey=focusClash?.let {"${clashFocus?.value}:$clashXray"}
-    val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey) {clashInspection(document.copy(project=document.project.copy(
-        settings=document.project.settings.copy(showDetailedMeasurements=settings.showDetailedMeasurement))),focusClash,clashXray)}
+    val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey,issueView) {clashInspection(restoreIssuePresentation(document,issueView).copy(project=document.project.copy(
+        settings=(issueView?.settings ?: document.project.settings).copy(showDetailedMeasurements=settings.showDetailedMeasurement))),focusClash,clashXray)}
     val selectedIds = editor?.selectedIds ?: emptySet()
     val density = LocalDensity.current.density
     val haptics=LocalHapticFeedback.current
@@ -294,7 +303,7 @@ fun DrawingCanvasScreen(
     val latestLocked = rememberUpdatedState(lockedSelection)
     val latestPositionLocked=rememberUpdatedState(positionLockedSelection)
     val latestBusy = rememberUpdatedState(busy)
-    val needsSurfaces = focusClash!=null || document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
+    val needsSurfaces = issueView!=null || focusClash!=null || document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
         document.project.settings.autoXrayFrontWalls || document.elements.any {element->element.objectDisplay==ObjectDisplay.XRAY ||
             element.properties.any {(key,value)->key.startsWith(ROOM_SIDE_DISPLAY_PREFIX) && (value as? ParameterValue.Text)?.value==ObjectDisplay.XRAY.name}}
     val placementActive=routeKind!=null || tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
@@ -321,12 +330,12 @@ fun DrawingCanvasScreen(
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
         document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
-        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey) {
+        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
                 val planSymbols=!is3D
-                val sameGeometry = previous != null && previous.inspectionKey==inspectionKey && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
+                val sameGeometry = previous != null && issueView==null && previous.inspectionKey==inspectionKey && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
                 val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument,planSymbols=planSymbols)
                 val index = SpatialIndex(scene.segments)
                 val allIds=document.elements.mapTo(HashSet()) {it.id}
@@ -693,7 +702,18 @@ fun DrawingCanvasScreen(
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
-        autoXrayFrontWalls=document.project.settings.autoXrayFrontWalls)
+        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls)
+    val issueRequest=com.eezydraw.storage.ViewExportRequest(renderDocument,frame,size.width.coerceAtLeast(1),size.height.coerceAtLeast(1))
+    fun freshIssue(position:Point3,links:Set<ElementId> = emptySet(),source:Issue?=null):Issue = Issue(IssueId(java.util.UUID.randomUUID().toString()),document.project.id,source?.title ?: "New issue",System.currentTimeMillis(),elementIds=links,position=position,levelId=selectedLevel?.let(::LevelId) ?: links.firstNotNullOfOrNull {id->document.elements.find {it.id==id}?.levelId} ?: source?.clash?.levelIds?.singleOrNull(),sourceClashId=source?.id)
+    fun openIssue(issue:Issue) {
+        issueView=issue.capture;clashFocus=null;issueEdit=issue
+        issue.capture?.let {v->viewport=Viewport2D(v.centre,v.pixelsPerMetre);orbit=OrbitCamera(v.target,v.yaw,v.pitch,v.distance,v.orthographicHeight,v.projection);is3D=v.is3D;level=v.levelId?.value;orbitLevel=v.levelId?.value;grid=v.grid} ?: issue.position?.let {p->val bounds=Bounds3(Point3(p.x-1,p.y-1,p.z-1),Point3(p.x+1,p.y+1,p.z+1));viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1));level=issue.levelId?.value;orbitLevel=issue.levelId?.value}
+    }
+    issueEdit?.let {draft->val stored=document.issues.find {it.id==draft.id};val live=if(stored!=null && draft.capture!=null && stored.capture?.id!=draft.capture?.id)stored.copy(capture=draft.capture,screenshot=draft.capture?.screenshot)else stored ?: draft
+        IssueEditor(live,document,{onSaveIssue(it);issueEdit=null},{issueEdit=null}, {i->onSaveIssue(i);issueEdit=null;val marked=i.copy(capture=i.capture ?: captureIssueView(issueRequest));issueView=marked.capture;issueMarkup=marked},
+            {i->val next=i.copy(capture=captureIssueView(issueRequest),screenshot=null,savedViews=(i.savedViews+listOfNotNull(i.capture)).distinctBy {it.id});onSaveIssue(next);issueEdit=next},onIssuePhoto,{i,format->onShareIssue(i.copy(capture=i.capture ?: captureIssueView(issueRequest)),format)},{onDeleteIssue(it);issueEdit=null},{i->openIssue(i)})
+    }
+    issueMarkup?.let {i->IssueMarkupEditor(i,issueRequest,{marks,image->onIssueScreenshot(i,marks,image);issueMarkup=null},{issueMarkup=null})}
     val viewToolbarContent:@Composable ()->Unit={
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
                     horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -739,6 +759,8 @@ fun DrawingCanvasScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
                 } },
                 actions = {
+                    TextButton({setPanel(CanvasPanelId.ISSUES,PanelVisibility.OPEN)}){Text("Issues")}
+                    TextButton({issuePicking=true}){Text("Issue at point")}
                     TextButton({clashDialog=true},Modifier.testTag("clash_check_tool"),enabled=!busy && clashProgress==null){Text("Clash check")}
                     var exportMenu by remember {mutableStateOf(false)}
                     Box {TextButton({exportMenu=true},Modifier.testTag("project_export_menu")){Text("Export")}
@@ -775,9 +797,15 @@ fun DrawingCanvasScreen(
                 if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
                     Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
                 }
-                if(pendingLibraryItem?.mounting==MountingType.WALL)WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()})
+                if(pendingLibraryItem?.mounting==MountingType.WALL) { WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()}) }
                 if(routeKind!=null) {
-                    RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(it.floorInstallation!=null)is3D=false;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()},floorDefaults=document.project.settings.floorServices)
+                    RoutingSettingsBar(routeKind!!,routeConfig,{
+                        routeConfig=it
+                        if(it.floorInstallation!=null) { is3D=false }
+                        if(routeDraft.isNotEmpty()) { routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it) }
+                        editor?.onRoutingSettings?.invoke(routeKind!!,it)
+                        clearPrecisionCandidate()
+                    },floorDefaults=document.project.settings.floorServices)
                     Text("${coordinate(if(routeConfig.floorInstallation!=null)-routeConfig.floorDepth else routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${if(routeConfig.floorInstallation!=null)"Above finished floor"else routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
                         liveRouteLength,liveFittingCount),Modifier.testTag("route_live_label"))
                 }
@@ -809,7 +837,7 @@ fun DrawingCanvasScreen(
                     .pointerInput(document.project.id) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = true)
-                            if (latestReady.value == null) return@awaitEachGesture
+                            if (latestReady.value == null) { return@awaitEachGesture }
                             focus.requestFocus()
                             val first = down.position
                             var moved = 0f
@@ -907,6 +935,15 @@ fun DrawingCanvasScreen(
             ) {
                 if (surface != null) surface(ready?.mainScene, frame, Modifier.fillMaxSize())
                 else NativeDrawingSurface(ready?.mainScene, frame, Modifier.fillMaxSize(), onError = { rendererFailed = true })
+                issuePins(renderDocument,frame,size.width,size.height).forEach {(id,screen)->
+                    TextButton({document.issues.find {it.id==id}?.let(::openIssue)},Modifier.offset {androidx.compose.ui.unit.IntOffset((screen.x-20*density).toInt(),(screen.y-20*density).toInt())}.size(40.dp)){Text("●",color=androidx.compose.ui.graphics.Color(0xFFFF8800))}
+                }
+                if(issuePicking) {
+                    Box(Modifier.fillMaxSize().pointerInput(frame){detectTapGestures {p->val point=if(is3D)orbit.rayToPlaneZ(p.x.toDouble(),p.y.toDouble(),size.width.toDouble(),size.height.toDouble(),floorZ)else viewport.screenToWorld(p.x.toDouble(),p.y.toDouble(),size.width.toDouble(),size.height.toDouble()).let {Point3(it.x,it.y,floorZ)};point?.let {issueEdit=freshIssue(it);issuePicking=false}}})
+                    TextButton({issuePicking=false}){Text("Tap issue position · Cancel")}
+                }
+                val visibleMarks=issueMarkups(renderDocument,frame,issueView)
+                if(visibleMarks.isNotEmpty())Canvas(Modifier.fillMaxSize()) {com.eezydraw.storage.paintIssueMarkups(drawContext.canvas.nativeCanvas,visibleMarks,size.width.toInt(),size.height.toInt())}
                 if (ready != null) Box(Modifier.size(1.dp).testTag("canvas_ready"))
                 if (!is3D) PlanOverlays(viewport, document.project.settings.lengthUnit, cursor, anchor, window)
                 else {
@@ -987,7 +1024,7 @@ fun DrawingCanvasScreen(
                         resizeFrame = if(positionLockedSelection)null else selectionResizeFrame,allowResize=!selectionHasMeasurements,
                         mode=gizmoMode,rotationAngleDegrees=rotationAngle,pivotOverride=positionLockedPivot)
                 }
-                if(!zoomWindow && !panelsHidden) Row(Modifier.align(Alignment.TopStart).padding(8.dp),verticalAlignment=Alignment.Top) {
+                if(!zoomWindow && !panelsHidden) { Row(Modifier.align(Alignment.TopStart).padding(8.dp),verticalAlignment=Alignment.Top) {
                     ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),
                         onCorner={cubeDirection(it)},onOrbit={dx,dy->
                             if(!is3D) {is3D=true;orbitLevel=level}
@@ -999,6 +1036,7 @@ fun DrawingCanvasScreen(
                             orbit=orbit.withProjection(projection);orbitShown=true
                         })
                     CanvasActionButton(Icons.Outlined.Home,stringResource(R.string.canvas_home),{homeView()},Modifier.testTag("canvas_home"))
+                }
                 }
                 // Library visibility changes only through explicit panel/full-screen controls.
                 if(!panelsHidden) editor?.let {actions->
@@ -1079,13 +1117,17 @@ fun DrawingCanvasScreen(
                             MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
                                 onDismiss={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.HIDDEN)},embedded=true)
                         }
+                        PersistentPanel(CanvasPanelId.ISSUES,"Issues",canvasLayout.panel(CanvasPanelId.ISSUES),{setPanelPlacement(CanvasPanelId.ISSUES,it)},width=380.dp) {
+                            IssuesPanel(document,::openIssue,{val ids=editor?.selectedIds.orEmpty();val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport)
+                            TextButton({issueView=null}){Text("Return to project visibility")}
+                        }
                         PersistentPanel(CanvasPanelId.CLASHES,"Clashes",canvasLayout.panel(CanvasPanelId.CLASHES),
                             {setPanelPlacement(CanvasPanelId.CLASHES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.CLASHES,it)},width=380.dp) {
                             ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->
                                 clashFocus=issue.id;actions.onSelect(emptySet());is3D=true;orbitLevel=null
                                 issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3))
                                     orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/max(1,size.height))}
-                            },{clashFocus=null},clashXray,{clashXray=it},onClashStatus)
+                            },{clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})
                         }
                         PersistentPanel(CanvasPanelId.VISIBILITY,stringResource(R.string.panel_visibility),canvasLayout.panel(CanvasPanelId.VISIBILITY),
                             {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
