@@ -9,17 +9,17 @@ import androidx.compose.ui.graphics.Color
 import com.eezydraw.core.model.ThemeMode
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF245FC1), onPrimary = Color.White,
-    primaryContainer = Color(0xFFDDEAFF), onPrimaryContainer = Color(0xFF102E58),
+    primary = Color(0xFF006580), onPrimary = Color.White,
+    primaryContainer = Color(0xFFC2EFFF), onPrimaryContainer = Color(0xFF092B38),
     secondary = Color(0xFF53677F),
     background = Color(0xFFF4F7FC), surface = Color(0xFFF4F7FC),
     surfaceContainer = Color.White, surfaceContainerLow = Color(0xFFF9FBFF),
 )
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFA8C8FF), onPrimary = Color(0xFF113663),
-    primaryContainer = Color(0xFF203F6A), onPrimaryContainer = Color(0xFFDDEAFF),
-    background = Color(0xFF101D32), surface = Color(0xFF101D32),
-    surfaceContainer = Color(0xFF19283D), surfaceContainerLow = Color(0xFF152238),
+    primary = Color(0xFF65D7FF), onPrimary = Color(0xFF003546),
+    primaryContainer = Color(0xFF164558), onPrimaryContainer = Color(0xFFC2EFFF),
+    background = Color(0xFF101820), surface = Color(0xFF101820),
+    surfaceContainer = Color(0xFF17202B), surfaceContainerLow = Color(0xFF131D26),
 )
 
 @Composable

@@ -67,7 +67,12 @@ fun CanvasActionButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     selected: Boolean? = null,
+    shortLabel:String?=null,
 ) {
+    if(shortLabel!=null) {
+        com.eezydraw.ui.canvas.CadTool(com.eezydraw.ui.canvas.CadAction("",shortLabel,icon,selected==true,enabled,onClick),modifier=modifier)
+        return
+    }
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(label) } },

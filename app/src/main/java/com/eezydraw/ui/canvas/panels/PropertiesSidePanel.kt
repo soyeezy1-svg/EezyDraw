@@ -3,6 +3,7 @@ package com.eezydraw.ui.canvas.panels
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -54,7 +55,7 @@ fun PropertiesSidePanel(
 ) {
     if(embedded) {
         PropertiesEditor(properties,units,precision,onApply,onDismiss,
-            modifier.width(320.dp).heightIn(max=520.dp).testTag("properties_side_panel").padding(12.dp),
+            modifier.fillMaxSize().testTag("properties_side_panel").padding(12.dp),
             lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
             onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
             onResetToLibraryDefault=onResetToLibraryDefault)

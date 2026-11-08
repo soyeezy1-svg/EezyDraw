@@ -37,6 +37,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.eezydraw.ui.components.CadTooltip
+import com.eezydraw.ui.components.CadPageBar
+import com.eezydraw.ui.components.CadStyle
+import androidx.compose.foundation.layout.size
 import com.eezydraw.R
 
 private enum class HelpSection { GUIDE, GESTURES, ABOUT, FEEDBACK }
@@ -54,12 +58,12 @@ fun HelpScreen(
         modifier = modifier.fillMaxSize().testTag("help_screen"),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.help)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.help_back))
-                    }
+            CadPageBar(
+                title = stringResource(R.string.help),
+                navigation = {
+                    CadTooltip(stringResource(R.string.help_back)) {IconButton(onClick = onBack,modifier=Modifier.size(48.dp)) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.help_back),modifier=Modifier.size(24.dp))
+                    }}
                 },
             )
         },
@@ -110,7 +114,7 @@ fun HelpScreen(
                         }
                         HelpSection.ABOUT -> {
                             item {
-                                Card(Modifier.fillMaxWidth()) {
+                                Card(Modifier.fillMaxWidth(),shape=CadStyle.shape) {
                                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
                                         Text(stringResource(R.string.help_version))

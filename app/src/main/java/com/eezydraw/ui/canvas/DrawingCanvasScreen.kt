@@ -182,6 +182,9 @@ fun DrawingCanvasScreen(
     var closeConfirmation by remember {mutableStateOf(false)}
     var exitAfterSave by remember {mutableStateOf(false)}
     var chromeHeight by remember {mutableIntStateOf(0)}
+    var libraryLaunch by remember {mutableStateOf<String?>(null)}
+    var selectionMenu by rememberSaveable {mutableStateOf<String?>(null)}
+    var selectionToolbarVisible by rememberSaveable {mutableStateOf(true)}
     var activeDetail by rememberSaveable(document.project.id.value) {mutableStateOf<CanvasPanelId?>(null)}
     var snapsOpen by rememberSaveable { mutableStateOf(false) }
     var grid by rememberSaveable { mutableStateOf(true) }
@@ -280,10 +283,10 @@ fun DrawingCanvasScreen(
     val selectedBounds = remember(ready?.picker,selectedIds) { ready?.picker?.boundsFor(selectedIds) }
     val selectionHasMeasurements=remember(document.elements,selectedIds) {document.elements.any {it.id in selectedIds && isMeasurement(it)}}
     val propertiesOpen=activeDetail==CanvasPanelId.PROPERTIES
-    val selectedElement=remember(document.elements,selectedIds,propertiesOpen) {
-        if(propertiesOpen)document.elements.singleOrNull {it.id in selectedIds} else null
+    val selectedElement=remember(document.elements,selectedIds) {
+        document.elements.singleOrNull {it.id in selectedIds}
     }
-    val selectedProperties=remember(document,selectedElement) { selectedElement?.let {readProperties(document,it)} }
+    val selectedProperties=remember(document,selectedElement,propertiesOpen) { selectedElement?.takeIf {propertiesOpen}?.let {readProperties(document,it)} }
     val selectedLibraryProperties=remember(document,selectedElement) {
         selectedElement?.takeIf {it.body is ElementBody.Component}?.let {readLibraryProperties(document,it)}
     }
@@ -772,7 +775,7 @@ fun DrawingCanvasScreen(
     }
     fun action(id:String,label:String,icon:androidx.compose.ui.graphics.vector.ImageVector=Icons.Outlined.Tune,selected:Boolean=false,enabled:Boolean=true,run:()->Unit)=CadAction(id,label,icon,selected,enabled,run)
     val toolNames=DrawingTool.entries.associateWith {stringResource(drawingToolLabel(it))}
-    val stripActions=when(canvasLayout.openGroup){
+    val buildStripActions: @Composable () -> List<CadAction> = {when(canvasLayout.openGroup){
         CanvasGroup.DRAW->listOf(action("tool_select",toolNames.getValue(DrawingTool.SELECT),drawingToolIcon(DrawingTool.SELECT),tool==DrawingTool.SELECT && navigationTool==NavigationTool.SELECT){beginTool(DrawingTool.SELECT)})+
             listOf("wall" to "Wall","slab" to "Floor slab","room" to "Room","room_polygon" to "Room polygon").map {(id,label)->action("tool_$id",label,Icons.Outlined.CropSquare,buildingTool==id){beginBuilding(id)}}+
             DrawingTool.entries.filter {it!=DrawingTool.SELECT}.map {t->action("tool_${t.name.lowercase()}",toolNames.getValue(t),drawingToolIcon(t),tool==t && buildingTool==null){beginTool(t)}}
@@ -784,9 +787,22 @@ fun DrawingCanvasScreen(
             action("tools_mirror_x","Mirror X",Icons.Outlined.Flip,enabled=selectedIds.isNotEmpty()){editor?.onMirror?.invoke(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
             action("tools_mirror_y","Mirror Y",Icons.Outlined.Flip,enabled=selectedIds.isNotEmpty()){editor?.onMirror?.invoke(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
             action("tools_array","Array",Icons.Outlined.GridView,enabled=selectedIds.isNotEmpty()){arrayOpen=true},
-            action("selection_tools","Selection tools",Icons.Outlined.MoreHoriz){setPanel(CanvasPanelId.EDIT,PanelVisibility.OPEN)})+
+            action("selection_tools","Selection tools",Icons.Outlined.MoreHoriz){selectionToolbarVisible=!selectionToolbarVisible},
+            action("edit_move","Move",Icons.Outlined.OpenWith,enabled=selectedIds.isNotEmpty()){gizmoMode=GizmoMode.MOVE},
+            action("edit_rotate","Rotate",Icons.Outlined.Rotate90DegreesCcw,enabled=selectedIds.isNotEmpty()){gizmoMode=GizmoMode.ROTATE},
+            action("edit_scale","Scale",Icons.Outlined.AspectRatio,enabled=selectedIds.isNotEmpty()){gizmoMode=GizmoMode.SCALE},
+            action("edit_rotate_90","Rotate 90°",Icons.Outlined.Rotate90DegreesCcw,enabled=selectedIds.isNotEmpty()){editor?.onRotate90?.invoke()},
+            action("edit_proportions","Keep proportions",Icons.Outlined.AspectRatio,options.keepProportions){options=options.copy(keepProportions=!options.keepProportions)},
+            action("edit_layer","Layer",Icons.Outlined.Layers,enabled=selectedIds.isNotEmpty()){selectionToolbarVisible=true;selectionMenu="LAYER"},
+            action("edit_colour","Colour",Icons.Outlined.Palette,enabled=selectedIds.isNotEmpty()){selectionToolbarVisible=true;selectionMenu="COLOUR"},
+            action("edit_lock","Locks",Icons.Outlined.Lock,enabled=selectedIds.isNotEmpty()){selectionToolbarVisible=true;selectionMenu="LOCK"},
+            action("edit_display","Object display",Icons.Outlined.Visibility,enabled=selectedIds.isNotEmpty()){selectionToolbarVisible=true;selectionMenu="DISPLAY"},
+            action("edit_rotation_snap","Rotation snap",Icons.Outlined.Rotate90DegreesCcw,enabled=selectedIds.isNotEmpty()){selectionToolbarVisible=true;selectionMenu="ROTATION_SNAP"},
+            action("edit_room_walls","Room walls",Icons.Outlined.CropSquare,enabled=document.elements.any {it.id in selectedIds && it.body is ElementBody.Room}){selectionToolbarVisible=true;selectionMenu="ROOM_WALLS"},
+            action("edit_issue","Issue from selection",Icons.Outlined.PushPin,enabled=selectedIds.isNotEmpty()){issueEdit=freshIssue(elementWorldBounds(document,selectedIds).center(),selectedIds)})+
             if(document.elements.any {it.id in selectedIds && it.body is ElementBody.Room})listOf(action("edit_generate_walls","Generate walls",Icons.Outlined.CropSquare){generateWallsDialog=true})else emptyList()
         CanvasGroup.LIBRARY->listOf(action("canvas_library","Library",Icons.Outlined.Inventory2){setPanel(CanvasPanelId.LIBRARY,PanelVisibility.OPEN)},
+            action("library_new_item","Create custom item",Icons.Outlined.AddBox){libraryLaunch="create";setPanel(CanvasPanelId.LIBRARY,PanelVisibility.OPEN)},action("library_selected_drawing","From drawing",Icons.Outlined.Draw,enabled=selectedIds.isNotEmpty()){libraryLaunch="drawing";setPanel(CanvasPanelId.LIBRARY,PanelVisibility.OPEN)},
             action("library_import","Import library",Icons.Outlined.FileOpen){editor?.onImportLibrary?.invoke()},action("library_export","Export library",Icons.Outlined.Share){editor?.onExportLibrary?.invoke()})
         CanvasGroup.ROUTE->RouteKind.entries.map {kind->action("tool_route_${kind.name}",kind.name.replace('_',' '),Icons.Outlined.Route,routeKind==kind){beginRoute(kind)}}+
             action("canvas_route_list","Route list",Icons.AutoMirrored.Outlined.List){setPanel(CanvasPanelId.DRAW,PanelVisibility.OPEN)}
@@ -826,18 +842,45 @@ fun DrawingCanvasScreen(
             action("canvas_clear_reference",stringResource(R.string.canvas_clear_reference),Icons.Outlined.Clear,enabled=anchor!=null){anchorX=null;anchorY=null},action("canvas_units","Units and levels",Icons.Outlined.Tune){setPanel(CanvasPanelId.VIEW,PanelVisibility.OPEN)},
             action("canvas_add_selection",stringResource(R.string.canvas_add_selection),Icons.Outlined.LibraryAdd,addSelection){addSelection=!addSelection},action("canvas_bottom_hide","Hide bottom bar",Icons.Outlined.ExpandMore){updateLayout(canvasLayout.copy(bottomBarVisible=false))})
         null->emptyList()
-    }
+    }}
+    val stripActions=buildStripActions()
 
+    val selectionControls:(@Composable ()->Unit)?=if(editor!=null && selectedIds.isNotEmpty())({
+                    val selectedElements=document.elements.filter {it.id in selectedIds}
+                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
+                    SelectionToolbar(gizmoMode,!busy && !lockedSelection && selectedRoomSide==null,editor.canUndo,editor.canRedo,editor.canPaste,
+                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
+                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
+                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
+                        onGenerateWalls=if(selectedElements.any {it.body is ElementBody.Room})({generateWallsDialog=true})else null,onProperties={openProperties()},
+                        onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
+                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
+                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.horizontalScroll(rememberScrollState()),menuRequest=selectionMenu,onMenuClosed={selectionMenu=null},modern=true,
+                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked,
+                        lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
+                        onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
+                        display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
+                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
+                        room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
+                        onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
+                        onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout.copy(panels=canvasLayout.panels.mapValues {(id,p)->p.copy(state=if(id==activeDetail)PanelVisibility.OPEN else PanelVisibility.HIDDEN)}),
+                        onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})
+    })else null
+    fun groupTapped(group:CanvasGroup) {
+        val opening=canvasLayout.openGroup!=group
+        updateLayout(canvasLayout.toggleGroup(group))
+        if(opening)activeDetail=when(group){CanvasGroup.LIBRARY->CanvasPanelId.LIBRARY;CanvasGroup.LAYERS->CanvasPanelId.VISIBILITY;CanvasGroup.ISSUES->CanvasPanelId.ISSUES;CanvasGroup.SCHEDULE->CanvasPanelId.SCHEDULES;else->null}
+    }
     val detailContent:(@Composable ()->Unit)?=if(activeDetail!=null || viewsOpen || sectionOptions)({
-        Column {
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text(if(viewsOpen)"Saved views"else if(sectionOptions)"Section box"else activeDetail?.name.orEmpty().replace('_',' '),Modifier.weight(1f).padding(8.dp));IconButton({activeDetail=null;viewsOpen=false;sectionOptions=false},Modifier.size(48.dp).testTag("cad_detail_close")){Icon(Icons.Outlined.Close,"Close tools")}}
-            Box(Modifier.fillMaxWidth().weight(1f,false)) {
+            Box(Modifier.fillMaxSize()) {
                 if(viewsOpen)CameraViews(document,::saveCameraView,::restoreCameraView,onDeleteCameraView)
                 else if(sectionOptions)sectionBox?.let {box->SectionBoxOptions(box,{sectionBox=it},{sectionBox=null;sectionOptions=false})}
                 else if(activeDetail==CanvasPanelId.VIEW)CanvasStatus(document,is3D,orbit,cursor,selectedLevel,onUnitsChange,{if(is3D)orbitLevel=it else level=it},{snapsOpen=true})
                 else editor?.let {actions->when(activeDetail){
                     CanvasPanelId.LIBRARY->panelStates.SaveableStateProvider("library") {
-                        LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->cancelConstruction();navigationTool=NavigationTool.SELECT;pendingLibrary=id.value;libraryWallOptions=actions.libraryCatalog.find(id,document.libraryItems)?.takeIf {it.mounting==MountingType.WALL}?.let(::defaultWallDeviceOptions);actions.onSelect(emptySet());probe=false;zoomWindow=false;pointerWorld=if(is3D)orbit.target.copy(z=floorZ)else Point3(viewport.center.x,viewport.center.y,floorZ)},onDismiss={activeDetail=null},embedded=true,compactHeader=true,
+                        LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->cancelConstruction();navigationTool=NavigationTool.SELECT;pendingLibrary=id.value;libraryWallOptions=actions.libraryCatalog.find(id,document.libraryItems)?.takeIf {it.mounting==MountingType.WALL}?.let(::defaultWallDeviceOptions);actions.onSelect(emptySet());probe=false;zoomWindow=false;pointerWorld=if(is3D)orbit.target.copy(z=floorZ)else Point3(viewport.center.x,viewport.center.y,floorZ)},onDismiss={activeDetail=null},embedded=true,compactHeader=true,launchAction=libraryLaunch,onLaunchHandled={libraryLaunch=null},
                             state=document.libraryState,onStateChange=actions.onLibraryState,units=document.project.settings.lengthUnit,decimalPlaces=document.project.settings.decimalPlaces,activeItemId=pendingLibrary?.let(::LibraryItemId),
                             onSaveItem=actions.onSaveLibraryItem,onRestoreItem=actions.onRestoreLibraryItem,onDeleteItem=actions.onDeleteLibraryItem,onDuplicateItem=actions.onDuplicateLibraryItem,
                             onFromDrawing={runCatching {libraryItemFromDrawing(document,actions.selectedIds,LibraryItemId(java.util.UUID.randomUUID().toString()))}.getOrNull()},onImportLibrary=actions.onImportLibrary,onExportLibrary=actions.onExportLibrary,
@@ -855,34 +898,13 @@ fun DrawingCanvasScreen(
                     CanvasPanelId.SCHEDULES->SchedulesPanel(document,!is3D,{ids->actions.onSelect(ids);scheduleFocus=ids;clashFocus=null;issueView=null;level=null;orbitLevel=null;if(ids.isNotEmpty())fitSelection()},onTakeoffSettings,onTakeoffRate,onShareSchedule)
                     CanvasPanelId.ISSUES->Column {IssuesPanel(document,::openIssue,{val ids=actions.selectedIds;val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport);TextButton({issueView=null}){Text("Return to project visibility")}}
                     CanvasPanelId.CLASHES->ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->clashFocus=issue.id;scheduleFocus=emptySet();actions.onSelect(emptySet());is3D=true;orbitLevel=null;issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3));orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/size.height.coerceAtLeast(1))}}, {clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})
-                    CanvasPanelId.VISIBILITY->ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
+                    CanvasPanelId.VISIBILITY->ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,embedded=true,onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
                     CanvasPanelId.VIEW->CanvasStatus(document,is3D,orbit,cursor,selectedLevel,onUnitsChange,{if(routeKind==null)cancelConstruction()else clearPrecisionCandidate();actions.onSelect(emptySet());if(is3D)orbitLevel=it else level=it},{snapsOpen=true})
-                    CanvasPanelId.EDIT->if(selectedIds.isEmpty())Text("Select objects to edit",Modifier.padding(12.dp))else {
-                    val selectedElements=document.elements.filter {it.id in selectedIds}
-                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
-                    SelectionToolbar(gizmoMode,!busy && !lockedSelection && selectedRoomSide==null,editor.canUndo,editor.canRedo,editor.canPaste,
-                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
-                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
-                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
-                        onGenerateWalls=if(selectedElements.any {it.body is ElementBody.Room})({generateWallsDialog=true})else null,onProperties={openProperties()},
-                        onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
-                        onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
-                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
-                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
-                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.horizontalScroll(rememberScrollState()),
-                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked,
-                        lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
-                        onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
-                        display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
-                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
-                        room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
-                        onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
-                        onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout.copy(panels=canvasLayout.panels.mapValues {(id,p)->p.copy(state=if(id==activeDetail)PanelVisibility.OPEN else PanelVisibility.HIDDEN)}),
-                        onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})                    }
+                    CanvasPanelId.EDIT->Unit
                     null->Unit
                 }}
             }
-        }
+
     })else null
 
     if(clashDialog)ClashCheckDialog(document,selectedLevel,{options->clashDialog=false;setPanel(CanvasPanelId.CLASHES,PanelVisibility.OPEN);onRunClash(options.copy(planView=!is3D))},{clashDialog=false})
@@ -1114,14 +1136,20 @@ fun DrawingCanvasScreen(
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
                     pickContext=ready?.pointPicks,viewMode=renderDocument.project.settings.viewMode,levelId=selectedLevel,
-                    canPlace=pendingLibrary==null || libraryPlacement!=null,controlsBottomInset=if(panelsHidden || !canvasLayout.bottomBarVisible)0.dp else with(LocalDensity.current){chromeHeight.toDp()},controlsVisible=!panelsHidden)
+                    canPlace=pendingLibrary==null || libraryPlacement!=null,controlsBottomInset=if(panelsHidden || !canvasLayout.bottomBarVisible)0.dp else with(LocalDensity.current){chromeHeight.toDp()},controlsVisible=!panelsHidden,controlsLeftInset=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)76.dp else 0.dp)
                 if(!is3D && (probe || placementActive))cursor.value?.mode?.let {mode->Surface(Modifier.align(Alignment.TopCenter).padding(top=140.dp),tonalElevation=3.dp){Text(stringResource(snapLabel(mode)),Modifier.padding(8.dp))}}
                 if(placedFeedback && !placementActive)Text(stringResource(R.string.placement_placed),Modifier.align(Alignment.TopCenter).padding(top=140.dp).testTag("placement_placed"))
-                if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}))
+                if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)84.dp else 8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}))
                 if(sectionOptions && !panelsHidden)sectionBox?.let {SectionBoxOverlay(it,viewport,orbit,is3D,size.width,size.height,{sectionBox=it})}
                 if(navigationTool==NavigationTool.WALK && !panelsHidden)WalkPad({right,forward->orbit=orbit.walk(right*.02*settings.gestureSensitivity,forward*.02*settings.gestureSensitivity)},Modifier.align(Alignment.BottomEnd).padding(end=8.dp,bottom=with(LocalDensity.current){chromeHeight.toDp()+12.dp}))
+            } // Gesture surface ends here; control overlays are siblings.
+                if(selectionToolbarVisible && navigationTool==NavigationTool.SELECT && !placementActive && !panelsHidden && !zoomWindow && !cameraOrbiting && selectedBounds!=null)selectionControls?.let {controls->
+                    SelectionAnchor(selectedBounds,viewport,orbit,is3D,size.width,size.height,if(canvasLayout.bottomBarVisible)chromeHeight else 0,settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible,controls)
+                }
                 MobileCanvasChrome(canvasLayout,::updateLayout,stripActions,::requestClose,{undoInputOrDocument()},{redoInputOrDocument()},::fit,::toggle3D,
                     editor?.canUndo==true || canPointUndo,editor?.canRedo==true || canPointRedo,is3D,canFit=geometryMatches && !busy,onBottomHeight={chromeHeight=it},
+                    showLabels=settings.bottomBarLabels,barPosition=settings.barPosition,onGroup=::groupTapped,detailKey=activeDetail?.name ?: if(viewsOpen)"views"else "section",
+                    detailTitle=if(viewsOpen)"Saved views"else if(sectionOptions)"Section box"else when(activeDetail){CanvasPanelId.DRAW->"Routes";CanvasPanelId.VISIBILITY->"Layers / Visibility";CanvasPanelId.VIEW->"Units and levels";CanvasPanelId.SCHEDULES->"Schedules / BOQ";else->activeDetail?.name.orEmpty().lowercase().replaceFirstChar {it.uppercase()}},onCloseDetail={activeDetail=null;viewsOpen=false;sectionOptions=false},
                     cube={ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),onCorner={cubeDirection(it)},onOrbit={dx,dy->if(!is3D){is3D=true;orbitLevel=level};val invert=if(settings.invertOrbit)-1 else 1;orbit=orbit.orbit(-dx*.006*settings.gestureSensitivity*invert,dy*.006*settings.gestureSensitivity*invert)},onGestureActive={cameraOrbiting=it},onPlan={is3D=false;zoomWindow=false;window.value=null},onProjection={projection->if(!is3D){is3D=true;orbitLevel=level};orbit=orbit.withProjection(projection);orbitShown=true},onCompass={yaw->orbit=orbit.copy(yaw=yaw);if(!is3D){is3D=true;orbitLevel=level}})},
                     options=if(placementActive)({Column {
                 if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool !in setOf("wall","slab"),wallOnly=buildingTool in setOf("wall","slab"),slab=buildingTool=="slab")
@@ -1166,7 +1194,6 @@ fun DrawingCanvasScreen(
                 if (loading == SceneLoad.Loading) Text(stringResource(R.string.canvas_preparing), Modifier.align(Alignment.Center))
                 if (rendererFailed) Text(stringResource(R.string.canvas_renderer_error), Modifier.align(Alignment.Center).padding(32.dp))
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))
-            }
     }
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,

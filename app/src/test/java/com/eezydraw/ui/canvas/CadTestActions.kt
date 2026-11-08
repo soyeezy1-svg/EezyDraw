@@ -26,6 +26,7 @@ internal fun ComposeContentTestRule.cadTool(name:String) {
     waitForIdle()
 }
 internal fun ComposeContentTestRule.cadSelection() {
+    cadCloseDetail()
     cadGroup("edit")
     if(onAllNodesWithTag("selection_toolbar").fetchSemanticsNodes().isEmpty())onNodeWithTag("selection_tools").performScrollTo().performClick()
 }

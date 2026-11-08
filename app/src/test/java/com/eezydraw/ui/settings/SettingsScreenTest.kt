@@ -40,6 +40,24 @@ class SettingsScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
+    @Test fun barLabelsAndPositionPersistThroughDraftRestorationAndSettingsStorageFormat() {
+        var saved:AppSettings?=null
+        val restoration=StateRestorationTester(compose)
+        restoration.setContent {EezyDrawTheme {SettingsScreen(AppSettings(),{saved=it},{},{},{},{})}}
+        choose("settings_bar_labels","Hide");choose("settings_bar_position","Left")
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("settings_save").performClick()
+        compose.runOnIdle {
+            val settings=checkNotNull(saved)
+            assertEquals(false,settings.bottomBarLabels)
+            assertEquals(com.eezydraw.core.model.CanvasBarPosition.LEFT,settings.barPosition)
+            assertEquals(settings,Json.decodeFromString<AppSettings>(Json.encodeToString(settings)))
+            val old=Json.decodeFromString<AppSettings>("{}")
+            assertEquals(true,old.bottomBarLabels)
+            assertEquals(com.eezydraw.core.model.CanvasBarPosition.BOTTOM,old.barPosition)
+        }
+    }
+
     @Test
     fun invalidPrecisionCannotBeSavedAndCanBeCorrected() {
         var saved: AppSettings? = null

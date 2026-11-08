@@ -246,6 +246,7 @@ class ProjectStorageTest {
             backupEnabled = false, showAutosaveNotification = true, bodyDragMovesSelection = true,
             showDetailedMeasurement = true, keepToolActiveAfterPlacing = true,
             autoHidePanelsWhileDrawing=true,lockWallsByDefault=true,
+            bottomBarLabels=false,barPosition=CanvasBarPosition.LEFT,
             canvasLayouts=mapOf("restored-project" to CanvasLayout(hideAll=true).withPanel(CanvasPanelId.PROPERTIES,
                 PanelPlacement(PanelVisibility.OPEN,.62,.27))),
             precisionPointer=PrecisionPointerSettings(enabled=false,offsetDp=120.0,side=PrecisionOffsetSide.ABOVE_RIGHT,

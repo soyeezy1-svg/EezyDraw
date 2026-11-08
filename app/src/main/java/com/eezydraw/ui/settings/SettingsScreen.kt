@@ -14,6 +14,11 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.ButtonDefaults
+import com.eezydraw.ui.components.CadStyle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -48,6 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.eezydraw.R
 import com.eezydraw.core.model.AngleFormat
+import com.eezydraw.core.model.CanvasBarPosition
+import com.eezydraw.ui.components.CadPageBar
+import com.eezydraw.ui.components.CadTooltip
 import com.eezydraw.core.model.AppSettings
 import com.eezydraw.core.model.ElevationReference
 import com.eezydraw.core.model.InputMode
@@ -92,25 +100,26 @@ fun SettingsScreen(
     Scaffold(
         modifier = modifier.testTag("settings_screen"),
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings)) },
-                navigationIcon = {
-                    IconButton(onClick = back, modifier = Modifier.testTag("settings_back")) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_back))
-                    }
+            CadPageBar(
+                title = stringResource(R.string.settings),
+                navigation = {
+                    CadTooltip(stringResource(R.string.settings_back)) {IconButton(onClick = back, modifier = Modifier.size(48.dp).testTag("settings_back")) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_back),Modifier.size(24.dp))
+                    }}
                 },
                 actions = {
                     TextButton(
                         onClick = { draft.toSettings()?.let(onSave) },
                         enabled = errors.isEmpty(),
-                        modifier = Modifier.testTag("settings_save"),
+                        modifier = Modifier.testTag("settings_save"),colors=ButtonDefaults.textButtonColors(contentColor=CadStyle.accent),
                     ) { Text(stringResource(R.string.settings_save_action)) }
                 },
             )
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.TopCenter) {
         LazyColumn(
-            modifier = Modifier.padding(padding).widthIn(max = 900.dp).fillMaxWidth().testTag("settings_list"),
+            modifier = Modifier.widthIn(max = 900.dp).fillMaxWidth().testTag("settings_list"),
             contentPadding = PaddingValues(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -228,6 +237,12 @@ fun SettingsScreen(
                 }
             }
             item { SectionHeading(stringResource(R.string.settings_appearance_input)) }
+            item {
+                ChoiceField("Bottom bar labels",current.bottomBarLabels,listOf(true to "Show",false to "Hide"),
+                    {update(current.copy(bottomBarLabels=it))},"settings_bar_labels")
+                ChoiceField("Bar position",current.barPosition,listOf(CanvasBarPosition.BOTTOM to "Bottom",CanvasBarPosition.LEFT to "Left"),
+                    {update(current.copy(barPosition=it))},"settings_bar_position")
+            }
             item {
                 ChoiceField(
                     stringResource(R.string.appearance), current.theme,
@@ -366,6 +381,7 @@ fun SettingsScreen(
                 ) { Text(stringResource(R.string.settings_save)) }
             }
         }
+        }
     }
     if (discard) {
         AlertDialog(
@@ -386,7 +402,12 @@ fun SettingsScreen(
 
 @Composable
 private fun SectionHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+    androidx.compose.material3.Surface(color=MaterialTheme.colorScheme.surfaceContainerHigh,shape=CadStyle.shape) {
+        Row(Modifier.fillMaxWidth().padding(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Tune,null,Modifier.size(24.dp),tint=MaterialTheme.colorScheme.primary)
+            Text(text,style=MaterialTheme.typography.titleMedium)
+        }
+    }
 }
 
 @Composable

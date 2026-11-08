@@ -60,7 +60,7 @@ internal fun PrecisionPointerOverlay(
     onPlace: () -> Unit, onCancel: () -> Unit, onNudge: (Int, Int) -> Unit, enabled: Boolean,
     modifier: Modifier = Modifier, pickContext: PointPickContext? = null,
     viewMode: ViewMode = ViewMode.WIREFRAME, levelId: String? = null,
-    canPlace:Boolean=true,controlsBottomInset:androidx.compose.ui.unit.Dp=0.dp,controlsVisible:Boolean=true,
+    canPlace:Boolean=true,controlsBottomInset:androidx.compose.ui.unit.Dp=0.dp,controlsVisible:Boolean=true,controlsLeftInset:androidx.compose.ui.unit.Dp=0.dp,
 ) {
     val density = LocalDensity.current.density
     val accent = MaterialTheme.colorScheme.primary
@@ -149,7 +149,7 @@ internal fun PrecisionPointerOverlay(
             }
         }
         if(controlsVisible)Surface(Modifier.align(if(settings.side==PrecisionOffsetSide.ABOVE_LEFT)Alignment.BottomEnd else Alignment.BottomStart)
-            .padding(bottom=controlsBottomInset).padding(12.dp).testTag("precision_controls").pointerInput(Unit) {detectTapGestures(onTap={})},
+            .padding(start=controlsLeftInset,bottom=controlsBottomInset).padding(12.dp).testTag("precision_controls").pointerInput(Unit) {detectTapGestures(onTap={})},
             shape=RoundedCornerShape(18.dp),tonalElevation=5.dp,shadowElevation=3.dp) {
             Column(Modifier.padding(4.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                 Row {

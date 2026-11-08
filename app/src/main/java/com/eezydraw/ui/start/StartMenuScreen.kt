@@ -1,5 +1,11 @@
 package com.eezydraw.ui.start
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import com.eezydraw.ui.components.CadStyle
+import com.eezydraw.ui.components.CadTooltip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +73,9 @@ fun StartMenuScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("start_menu"),
     ) {
-        BrandBar(onAction)
+        CompositionLocalProvider(LocalContentColor provides Color.White) {
+            androidx.compose.material3.Surface(color=CadStyle.chrome,contentColor=Color.White){BrandBar(onAction)}
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             if (maxWidth >= 840.dp) {
@@ -128,14 +136,14 @@ fun StartMenuScreen(
 @Composable
 private fun BrandBar(onAction: (StartMenuAction) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Image(
             painter = painterResource(R.drawable.eezy_draw_logo),
             contentDescription = null,
-            modifier = Modifier.size(40.dp).graphicsLayer { scaleX = 1.8f; scaleY = 1.8f },
+            modifier = Modifier.size(48.dp),
         )
         Column(Modifier.weight(1f)) {
             Text(
@@ -148,24 +156,25 @@ private fun BrandBar(onAction: (StartMenuAction) -> Unit) {
             Text(
                 text = stringResource(R.string.start_menu_tagline),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFFB7C9D8),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         Row {
-            IconButton(
+            CadTooltip(stringResource(R.string.settings)) { IconButton(
                 onClick = { onAction(StartMenuAction.Settings) },
                 modifier = Modifier.size(48.dp).testTag("settings"),
             ) {
                 Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings))
             }
-            IconButton(
+            }
+            CadTooltip(stringResource(R.string.help)) { IconButton(
                 onClick = { onAction(StartMenuAction.Help) },
                 modifier = Modifier.size(48.dp).testTag("help"),
             ) {
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, contentDescription = stringResource(R.string.help))
-            }
+            }}
         }
     }
 }
