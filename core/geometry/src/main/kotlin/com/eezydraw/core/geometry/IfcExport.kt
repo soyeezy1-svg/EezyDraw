@@ -20,14 +20,14 @@ internal fun ifcClass(document:ProjectDocument,m:ExportMesh):String {
         else->"IFCBUILDINGELEMENTPROXY"
     }
 }
-internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:ModelExportOptions,output:OutputStream) {
+internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:ModelExportOptions,output:OutputStream,originShift:Point3=Point3()) {
     val w=output.bufferedWriter();var index=0
     fun entity(type:String,args:String):Int {val id=++index;w.appendLine("#$id=$type($args);");return id}
     fun str(s:String):String = if(s.any {it.code !in 32..126})"'\\X2\\"+s.toByteArray(Charsets.UTF_16BE).joinToString(""){(it.toInt() and 255).toString(16).uppercase().padStart(2,'0')}+"\\X0\\'"else "'"+s.replace("'","''")+"'"
     fun guid():String {var n=BigInteger(UUID.randomUUID().toString().replace("-",""),16);val alphabet="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";var result="";repeat(22){result=alphabet[n.and(BigInteger.valueOf(63)).toInt()]+result;n=n.shiftRight(6)};return str(result)}
     fun refs(ids:List<Int>)="("+ids.joinToString(","){"#$it"}+")"
     val f=options.units.factor
-    w.appendLine("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [DesignTransferView]'),'2;1');\nFILE_NAME('model.ifc','2026-11-08T00:00:00',(''),(''),'EEZY DRAW','EEZY DRAW','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;")
+    w.appendLine("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [DesignTransferView]',${str(exportCoordinateNote(options,originShift))}),'2;1');\nFILE_NAME('model.ifc','${java.time.Instant.now()}',(''),(''),${str("EEZY DRAW "+options.appVersion)},'EEZY DRAW','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;")
     val zero=entity("IFCCARTESIANPOINT","(0.,0.,0.)");val axis=entity("IFCAXIS2PLACEMENT3D","#$zero,$,$")
     val placement=entity("IFCLOCALPLACEMENT","$,#$axis")
     val context=entity("IFCGEOMETRICREPRESENTATIONCONTEXT","$,'Model',3,1.E-6,#$axis,$")
@@ -37,8 +37,8 @@ internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:M
     val project=entity("IFCPROJECT","${guid()},$,${str(document.project.name)},${str(document.project.description)},$,$,$,(#$context),#$units")
     val building=entity("IFCBUILDING","${guid()},$,${str(document.project.name)},$,$,#$placement,$,$,.ELEMENT.,$,$,$")
     entity("IFCRELAGGREGATES","${guid()},$,$,$,#$project,(#$building)")
-    val levels=document.levels.filter {l->options.scope==ModelScope.PROJECT || meshes.any {it.element.levelId==l.id}}.associate {l->l.id to entity("IFCBUILDINGSTOREY","${guid()},$,${str(l.name)},$,$,#$placement,$,$,.ELEMENT.,${(l.elevation+document.project.origin.z)*f}")}.toMutableMap<LevelId?,Int>()
-    if(meshes.any {it.element.levelId==null})levels[null]=entity("IFCBUILDINGSTOREY","${guid()},$,'Project datum',$,$,#$placement,$,$,.ELEMENT.,${document.project.origin.z*f}")
+    val levels=document.levels.filter {l->options.scope==ModelScope.PROJECT || meshes.any {it.element.levelId==l.id}}.associate {l->l.id to entity("IFCBUILDINGSTOREY","${guid()},$,${str(l.name)},$,$,#$placement,$,$,.ELEMENT.,${(l.elevation+document.project.origin.z-originShift.z)*f}")}.toMutableMap<LevelId?,Int>()
+    if(meshes.any {it.element.levelId==null})levels[null]=entity("IFCBUILDINGSTOREY","${guid()},$,'Project datum',$,$,#$placement,$,$,.ELEMENT.,${(document.project.origin.z-originShift.z)*f}")
     entity("IFCRELAGGREGATES","${guid()},$,$,$,#$building,${refs(levels.values.toList())}")
     val objects=linkedMapOf<ElementId,Int>();val contained=mutableMapOf<LevelId?,MutableList<Int>>();val systems=mutableMapOf<String,MutableList<Int>>()
     val pendingVoids=mutableListOf<Pair<Int,ElementId>>()
@@ -56,7 +56,7 @@ internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:M
         entity("IFCPRESENTATIONLAYERASSIGNMENT","${str(layer)},$,(#$faces),$")
         val system=m.element.systemId?.let {s->document.systems.find {it.id==s}?.name} ?: (m.element.body as? ElementBody.Route)?.routing?.settings?.system.orEmpty()
         if(system.isNotBlank())systems.getOrPut(system){mutableListOf()}.add(id)
-        val properties=linkedMapOf<String,String>("Layer" to layer,"System" to system,"Name" to m.name)
+        val properties=linkedMapOf<String,String>("Layer" to layer,"System" to system,"Name" to m.name,"ExportUpAxis" to options.resolvedUpAxis().name,"ExportUnits" to options.units.name,"ExportAppVersion" to options.appVersion,"ExportCoordinates" to exportCoordinateNote(options,originShift))
         val body=m.element.body
         if(body is ElementBody.Component){val item=document.libraryItems.find {it.id==body.libraryItemId};properties["Manufacturer"]=(body.parameters[LibraryParameterKeys.MANUFACTURER] as? ParameterValue.Text)?.value ?: item?.manufacturer.orEmpty();properties["Model"]=(body.parameters[LibraryParameterKeys.MODEL] as? ParameterValue.Text)?.value ?: item?.model.orEmpty()}
         val pids=properties.map {(k,v)->entity("IFCPROPERTYSINGLEVALUE","${str(k)},$,IFCLABEL(${str(v)}),$")}.toMutableList()

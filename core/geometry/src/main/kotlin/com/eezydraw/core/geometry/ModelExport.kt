@@ -5,7 +5,6 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
-import kotlin.math.sqrt
 
 enum class ModelFormat(val extension:String) { IFC("ifc"), OBJ("obj"), GLTF("gltf"), GLB("glb"), STL("stl") }
 enum class ModelScope { PROJECT, LEVEL, SELECTED, VISIBLE }
@@ -14,7 +13,7 @@ enum class ModelCuts { CUTS, SEPARATE, NONE }
 data class ModelExportOptions(val format:ModelFormat=ModelFormat.IFC,val scope:ModelScope=ModelScope.PROJECT,
     val units:ModelUnits=ModelUnits.M,val levelId:LevelId?=null,val selected:Set<ElementId> = emptySet(),
     val systems:Set<String> = emptySet(),val walls:Boolean=true,val slabs:Boolean=true,val library:Boolean=true,
-    val routes:Boolean=true,val fittings:Boolean=true,val underfloor:Boolean=true,val cuts:ModelCuts=ModelCuts.CUTS,val planView:Boolean=true)
+    val routes:Boolean=true,val fittings:Boolean=true,val underfloor:Boolean=true,val cuts:ModelCuts=ModelCuts.CUTS,val planView:Boolean=true,val upAxis:ModelUpAxis?=null,val moveToOrigin:Boolean=false,val appVersion:String="unknown")
 data class ExportMesh(val element:Element,val name:String,val vertices:List<Point3>,val host:ElementId?=null)
 
 /** Snapshot-only conversion. All geometry is in world metres, including the project origin. */
@@ -70,32 +69,35 @@ object ModelExport {
         return meshes
     }
     fun write(document:ProjectDocument,options:ModelExportOptions,output:OutputStream) {
-        val meshes=meshes(document,options)
-        when(options.format){ModelFormat.IFC->writeIfc(document,meshes,options,output);ModelFormat.GLTF,ModelFormat.GLB->gltf(meshes,options,output);else->{
-            val w=output.bufferedWriter();var index=1
-            if(options.format==ModelFormat.OBJ)w.appendLine("# EEZY DRAW units ${options.units}")else w.appendLine("solid EEZY_DRAW_${options.units}")
+        options.resolvedUpAxis()
+        val (meshes,shift)=prepareModelCoordinates(meshes(document,options),options)
+        when(options.format){ModelFormat.IFC->writeIfc(document,meshes,options,output,shift);ModelFormat.GLTF,ModelFormat.GLB->gltf(meshes,options,output,shift);else->{
+            val w=output.bufferedWriter();var index=1;var normalIndex=1
+            val solidName="EEZY_DRAW_upAxis_${options.resolvedUpAxis().name}_units_${options.units.name}_app_${options.appVersion.replace(Regex("[^A-Za-z0-9._-]"),"_")}_origin_${if(options.moveToOrigin)"MOVE"else "PROJECT"}_offset_${shift.x}_${shift.y}_${shift.z}"
+            if(options.format==ModelFormat.OBJ){w.appendLine("# EEZY DRAW ${exportCoordinateNote(options,shift)}");w.appendLine("# Forward axis: ${if(options.resolvedUpAxis()==ModelUpAxis.Y_UP)"-Z"else "+Y"}")}else w.appendLine("solid $solidName")
             for(m in meshes){if(options.format==ModelFormat.OBJ)w.appendLine("o "+m.name.replace(Regex("[\\r\\n#]"),"_"))
-                for(t in m.vertices.chunked(3))if(options.format==ModelFormat.OBJ){for(p in t)w.appendLine("v ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");w.appendLine("f $index ${index+1} ${index+2}");index+=3}else {
-                    val a=t[0];val b=t[1];val c=t[2];val x=(b.y-a.y)*(c.z-a.z)-(b.z-a.z)*(c.y-a.y);val y=(b.z-a.z)*(c.x-a.x)-(b.x-a.x)*(c.z-a.z);val z=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);val n=sqrt(x*x+y*y+z*z).coerceAtLeast(1e-30)
-                    w.appendLine("facet normal ${x/n} ${y/n} ${z/n}\nouter loop");for(p in t)w.appendLine("vertex ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");w.appendLine("endloop\nendfacet")}}
-            if(options.format==ModelFormat.STL)w.appendLine("endsolid EEZY_DRAW_${options.units}");w.flush()
+                for(t in m.vertices.chunked(3))if(options.format==ModelFormat.OBJ){for(p in t)w.appendLine("v ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");val n=triangleNormal(t[0],t[1],t[2]);w.appendLine("vn ${n.x} ${n.y} ${n.z}");w.appendLine("f $index//$normalIndex ${index+1}//$normalIndex ${index+2}//$normalIndex");index+=3;normalIndex++}else {
+                    val n=triangleNormal(t[0],t[1],t[2])
+                    w.appendLine("facet normal ${n.x} ${n.y} ${n.z}\nouter loop");for(p in t)w.appendLine("vertex ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");w.appendLine("endloop\nendfacet")}}
+            if(options.format==ModelFormat.STL)w.appendLine("endsolid $solidName");w.flush()
         }}
     }
-    private fun gltf(meshes:List<ExportMesh>,options:ModelExportOptions,output:OutputStream) {
-        val size=meshes.sumOf {it.vertices.size}*12;val buffer=ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
+    private fun gltf(meshes:List<ExportMesh>,options:ModelExportOptions,output:OutputStream,shift:Point3) {
+        val size=meshes.sumOf {it.vertices.size}*24;val buffer=ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
         val views=mutableListOf<String>();val accessors=mutableListOf<String>();val nodes=mutableListOf<String>();val meshJson=mutableListOf<String>()
         for((i,m) in meshes.withIndex()) {
             val origin=m.vertices.first();val offset=buffer.position()
             val points=m.vertices.map {Point3((it.x-origin.x)*options.units.factor,(it.y-origin.y)*options.units.factor,(it.z-origin.z)*options.units.factor)}
-            for(p in points)buffer.putFloat(p.x.toFloat()).putFloat(p.z.toFloat()).putFloat((-p.y).toFloat()) // Z-up -> glTF Y-up.
-            views+="{\"buffer\":0,\"byteOffset\":$offset,\"byteLength\":${points.size*12},\"target\":34962}"
-            accessors+="{\"bufferView\":$i,\"componentType\":5126,\"count\":${points.size},\"type\":\"VEC3\",\"min\":[${points.minOf {it.x}},${points.minOf {it.z}},${-points.maxOf {it.y}}],\"max\":[${points.maxOf {it.x}},${points.maxOf {it.z}},${-points.minOf {it.y}}]}"
-            meshJson+="{\"name\":${json(m.name)},\"primitives\":[{\"attributes\":{\"POSITION\":$i},\"mode\":4}]}"
+            for(t in points.chunked(3)){val normal=triangleNormal(t[0],t[1],t[2]);for(p in t)buffer.putFloat(p.x.toFloat()).putFloat(p.y.toFloat()).putFloat(p.z.toFloat()).putFloat(normal.x.toFloat()).putFloat(normal.y.toFloat()).putFloat(normal.z.toFloat())}
+            views+="{\"buffer\":0,\"byteOffset\":$offset,\"byteLength\":${points.size*24},\"byteStride\":24,\"target\":34962}"
+            accessors+="{\"bufferView\":$i,\"componentType\":5126,\"count\":${points.size},\"type\":\"VEC3\",\"min\":[${points.minOf {it.x}},${points.minOf {it.y}},${points.minOf {it.z}}],\"max\":[${points.maxOf {it.x}},${points.maxOf {it.y}},${points.maxOf {it.z}}]}"
+            accessors+="{\"bufferView\":$i,\"byteOffset\":12,\"componentType\":5126,\"count\":${points.size},\"type\":\"VEC3\"}"
+            meshJson+="{\"name\":${json(m.name)},\"primitives\":[{\"attributes\":{\"POSITION\":${i*2},\"NORMAL\":${i*2+1}},\"mode\":4}]}"
             val scale=1/options.units.factor
-            nodes+="{\"mesh\":$i,\"name\":${json(m.name)},\"translation\":[${origin.x},${origin.z},${-origin.y}],\"scale\":[$scale,$scale,$scale]}"
+            nodes+="{\"mesh\":$i,\"name\":${json(m.name)},\"translation\":[${origin.x},${origin.y},${origin.z}],\"scale\":[$scale,$scale,$scale]}"
         }
         val uri=if(options.format==ModelFormat.GLTF)",\"uri\":\"data:application/octet-stream;base64,${Base64.getEncoder().encodeToString(buffer.array())}\""else ""
-        val text="{\"asset\":{\"version\":\"2.0\",\"generator\":\"EEZY DRAW\",\"extras\":{\"sourceUnits\":${json(options.units.name)}}},\"scene\":0,\"scenes\":[{\"nodes\":[${meshes.indices.joinToString()}]}],\"nodes\":[${nodes.joinToString()}],\"meshes\":[${meshJson.joinToString()}],\"buffers\":[{\"byteLength\":$size$uri}],\"bufferViews\":[${views.joinToString()}],\"accessors\":[${accessors.joinToString()}]}"
+        val text="{\"asset\":{\"version\":\"2.0\",\"generator\":${json("EEZY DRAW "+options.appVersion)},\"extras\":{\"sourceUnits\":${json(options.units.name)},\"upAxis\":${json(options.resolvedUpAxis().name)},\"coordinateUnits\":\"M\",\"appVersion\":${json(options.appVersion)},\"originPolicy\":${json(if(options.moveToOrigin)"MOVE_TO_ORIGIN"else "PROJECT")},\"sourceOffsetMetres\":[${shift.x},${shift.y},${shift.z}]}},\"scene\":0,\"scenes\":[{\"nodes\":[${meshes.indices.joinToString()}]}],\"nodes\":[${nodes.joinToString()}],\"meshes\":[${meshJson.joinToString()}],\"buffers\":[{\"byteLength\":$size$uri}],\"bufferViews\":[${views.joinToString()}],\"accessors\":[${accessors.joinToString()}]}"
         if(options.format==ModelFormat.GLTF){output.write(text.toByteArray());return}
         val data=text.toByteArray();val padded=(data.size+3)/4*4
         val header=ByteBuffer.allocate(20).order(ByteOrder.LITTLE_ENDIAN).putInt(0x46546c67).putInt(2).putInt(12+8+padded+8+size).putInt(padded).putInt(0x4e4f534a).array()

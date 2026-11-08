@@ -613,7 +613,7 @@ class AppViewModel(
 
     private var pendingModelExport:Pair<ProjectDocument,com.eezydraw.core.geometry.ModelExportOptions>?=null
     fun prepareModelExport(options:com.eezydraw.core.geometry.ModelExportOptions) {
-        state.value.document?.let {pendingModelExport=it to options}
+        state.value.document?.let {pendingModelExport=it to options.copy(appVersion=application.packageManager.getPackageInfo(application.packageName,0).versionName ?: "unknown")}
     }
     fun cancelModelExport() {pendingModelExport=null}
     fun exportModel(uri:String) = operation {
