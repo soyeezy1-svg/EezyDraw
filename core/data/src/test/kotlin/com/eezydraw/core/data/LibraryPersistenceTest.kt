@@ -242,6 +242,36 @@ class LibraryPersistenceTest {
         assertEquals(saved,RoomWalls.reconcile(saved,saved))
     }
 
+    @Test fun `wall angle choices diagonal chases and both bend sizes survive native storage and import`() = runBlocking {
+        val base=repository.create("Wall angles",ProjectTemplate.EMPTY,ProjectSettings());projectIds+=base.project.id.value
+        val level=base.levels.first().id
+        val wall=Element(ElementId("angle-wall"),base.project.id,base.layers.first().id,
+            ElementBody.Wall(Point2(0.0,0.0),Point2(12.0,0.0),.2,3.0),level)
+        var document=base.copy(elements=listOf(wall))
+        val configs=listOf(RouteKind.CONDUIT,RouteKind.TRUNKING).associateWith {kind->defaultRoutingSettings(kind).copy(
+            wallOptions=WallServiceOptions(WallServiceMode.CHASE,depth=.11),wallSnapAngles=WallSnapAngles.FORTY_FIVE)}
+        for((index,entry) in configs.entries.withIndex()) {
+            val (kind,config)=entry
+            val picks=listOf(Point3(1.0,.08,.5),Point3(3.0,.08,.5),Point3(4.0,.08,1.5),Point3(4.0,.08,2.5),Point3(5.0,.08,2.5))
+                .map {RoutePick(it.copy(x=it.x+index*6),config,level)}
+            document=ServiceRouting.create(document,kind,picks).preview(document)
+        }
+        val saved=repository.save(document.copy(project=document.project.copy(settings=document.project.settings.copy(routeDefaults=configs))))
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(configs,loaded.project.settings.routeDefaults)
+        assertEquals(wallServiceCuts(saved),wallServiceCuts(loaded))
+        assertTrue(wallDepthWarnings(loaded).isNotEmpty())
+        assertEquals(loaded,ServiceRouting.reconcile(loaded,loaded))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(saved.libraryItems,imported.libraryItems)
+        assertEquals(wallServiceCuts(saved),wallServiceCuts(imported))
+        assertEquals(configs,imported.project.settings.routeDefaults)
+    }
+
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {
         try {
             block()

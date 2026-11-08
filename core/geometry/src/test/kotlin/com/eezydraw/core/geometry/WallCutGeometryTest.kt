@@ -29,6 +29,15 @@ class WallCutGeometryTest {
         val hidden=doc.copy(project=doc.project.copy(settings=doc.project.settings.copy(wallServices=WallServiceSettings(showCuts=false))))
         assertNotEquals(buildSurfaceScene(doc),buildSurfaceScene(hidden))
     }
+    @Test fun `diagonal chase removes its swept width and depth rather than its bounding box`() {
+        val diagonal=route(start=Point3(1.0,.08,.5),end=Point3(3.0,.08,1.5))
+        val document=base.copy(elements=listOf(wall,diagonal))
+        val cuts=wallServiceCuts(document)
+        val mesh=wallCutMesh(wallFrames(document).single(),cuts)!!
+        assertEquals(3.6-sqrt(5.0)*.035*.035,volume(mesh),1e-8)
+        assertEquals(.035,cuts.single().depth,1e-9)
+        assertTrue(mesh.vertices.all {it.x.isFinite() && it.y.isFinite() && it.z.isFinite()})
+    }
     @Test fun `overlapping chases are unioned and do not create interior faces`() {
         val doc=base.copy(elements=listOf(wall,route(end=Point3(4.0,.08,1.0)),route("second",Point3(2.0,.08,1.0),Point3(5.0,.08,1.0))))
         val mesh=wallCutMesh(wallFrames(doc).single(),wallServiceCuts(doc))!!

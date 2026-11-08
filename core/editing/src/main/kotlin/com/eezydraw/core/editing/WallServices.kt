@@ -49,7 +49,26 @@ object WallServices {
         val face=requireNotNull(nearest(document,point,level?.id)){"Aim at a visible, unlocked wall face"}
         val frame=face.frame;var q=frame.coordinates(point)
         val last=picks.lastOrNull()?.point?.let(frame::coordinates)
-        if(last!=null && settings.ortho)q=if(abs(q.x-last.x)>=abs(q.z-last.z))q.copy(z=last.z)else q.copy(x=last.x)
+        if(last!=null) {
+            val dx=q.x-last.x;val dz=q.z-last.z
+            val direction=when(settings.effectiveWallSnapAngles()) {
+                WallSnapAngles.FREE->Point2(dx,dz)
+                WallSnapAngles.HORIZONTAL->Point2(dx,0.0)
+                WallSnapAngles.NINETY->if(abs(dx)>=abs(dz))Point2(dx,0.0)else Point2(0.0,dz)
+                WallSnapAngles.FORTY_FIVE->{
+                    val angle=round(atan2(dz,dx)/(PI/4))*(PI/4)
+                    val x=cos(angle);val z=sin(angle);val length=dx*x+dz*z
+                    Point2(x*length,z*length)
+                }
+            }
+            // Clip along the snapped ray, so a wall edge cannot turn a diagonal into a free angle.
+            var fraction=1.0
+            if(direction.x>WALL_EPS)fraction=min(fraction,(frame.length-last.x)/direction.x)
+            if(direction.x < -WALL_EPS)fraction=min(fraction,-last.x/direction.x)
+            if(direction.y>WALL_EPS)fraction=min(fraction,(frame.height-last.z)/direction.y)
+            if(direction.y < -WALL_EPS)fraction=min(fraction,-last.z/direction.y)
+            q=q.copy(x=last.x+direction.x*fraction.coerceIn(0.0,1.0),z=last.z+direction.y*fraction.coerceIn(0.0,1.0))
+        }
         val section=settings.section(kind)
         val depth=when(section){is RouteSection.Circular->section.diameter;is RouteSection.Rectangular->section.height}
         val into=if(options.mode==WallServiceMode.SURFACE)-depth/2 else options.clearance+depth/2

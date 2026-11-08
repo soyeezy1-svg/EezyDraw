@@ -461,7 +461,7 @@ fun DrawingCanvasScreen(
                 val next=appendRoutingPick(document,routeKind!!,routeDraft,raw,routeConfig,document.levels.find {it.id.value==selectedLevel})
                 val last=next.last()
                 val captured=snapRoute(document,routeKind!!,last.point)
-                routeDraft=next.dropLast(1)+last.copy(point=captured.point)
+                routeDraft=if(routeConfig.wallOptions!=null)next else next.dropLast(1)+last.copy(point=captured.point)
                 points=routeDraft.map {it.point};anchorX=points.last().x;anchorY=points.last().y
                 if(!precisionActive && prior.points!=points)retainInput(prior)
             } catch(error:IllegalArgumentException){toolError=error.message}
