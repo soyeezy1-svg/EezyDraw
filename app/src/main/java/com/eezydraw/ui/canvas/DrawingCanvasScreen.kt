@@ -138,6 +138,9 @@ fun DrawingCanvasScreen(
     modifier: Modifier = Modifier,
     surface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
     editor: CanvasEditorActions? = null,
+    onTakeoffSettings:(TakeoffSettings)->Unit={},
+    onTakeoffRate:(String,Set<LibraryItemId>,Double?,Boolean)->Unit={_,_,_,_->},
+    onShareSchedule:(ScheduleDefinition,Boolean,com.eezydraw.storage.ScheduleFormat)->Unit={_,_,_->},
     onSaveIssue:(Issue)->Unit={},onDeleteIssue:(Issue)->Unit={},
     onIssuePhoto:(Issue,Boolean)->Unit={_,_->},onShareIssue:(Issue,String)->Unit={_,_->},onIssueExport:(String)->Unit={},
     onIssueScreenshot:(Issue,List<IssueMarkup>,android.graphics.Bitmap)->Unit={_,_,_->},
@@ -235,12 +238,13 @@ fun DrawingCanvasScreen(
     var issueMarkup by remember {mutableStateOf<Issue?>(null)}
     var issueView by remember {mutableStateOf<IssueView?>(null)}
     var issuePicking by remember {mutableStateOf(false)}
+    var scheduleFocus by remember(document.project.id) {mutableStateOf(emptySet<ElementId>())}
     var clashDialog by remember {mutableStateOf(false)}
     var clashFocus by remember(document.project.id) {mutableStateOf<IssueId?>(null)}
     var clashXray by remember {mutableStateOf(true)}
     val focusClash=document.issues.find {it.id==clashFocus}?.clash
-    val inspectionKey=focusClash?.let {"${clashFocus?.value}:$clashXray"}
-    val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey,issueView) {clashInspection(restoreIssuePresentation(document,issueView).copy(project=document.project.copy(
+    val inspectionKey=focusClash?.let {"${clashFocus?.value}:$clashXray"} ?: scheduleFocus.takeIf {it.isNotEmpty()}?.joinToString {it.value}
+    val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey,issueView) {clashInspection(scheduleInspection(restoreIssuePresentation(document,issueView),scheduleFocus).copy(project=document.project.copy(
         settings=(issueView?.settings ?: document.project.settings).copy(showDetailedMeasurements=settings.showDetailedMeasurement))),focusClash,clashXray)}
     val selectedIds = editor?.selectedIds ?: emptySet()
     val density = LocalDensity.current.density
@@ -706,7 +710,7 @@ fun DrawingCanvasScreen(
     val issueRequest=com.eezydraw.storage.ViewExportRequest(renderDocument,frame,size.width.coerceAtLeast(1),size.height.coerceAtLeast(1))
     fun freshIssue(position:Point3,links:Set<ElementId> = emptySet(),source:Issue?=null):Issue = Issue(IssueId(java.util.UUID.randomUUID().toString()),document.project.id,source?.title ?: "New issue",System.currentTimeMillis(),elementIds=links,position=position,levelId=selectedLevel?.let(::LevelId) ?: links.firstNotNullOfOrNull {id->document.elements.find {it.id==id}?.levelId} ?: source?.clash?.levelIds?.singleOrNull(),sourceClashId=source?.id)
     fun openIssue(issue:Issue) {
-        issueView=issue.capture;clashFocus=null;issueEdit=issue
+        issueView=issue.capture;clashFocus=null;scheduleFocus=emptySet();issueEdit=issue
         issue.capture?.let {v->viewport=Viewport2D(v.centre,v.pixelsPerMetre);orbit=OrbitCamera(v.target,v.yaw,v.pitch,v.distance,v.orthographicHeight,v.projection);is3D=v.is3D;level=v.levelId?.value;orbitLevel=v.levelId?.value;grid=v.grid} ?: issue.position?.let {p->val bounds=Bounds3(Point3(p.x-1,p.y-1,p.z-1),Point3(p.x+1,p.y+1,p.z+1));viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1));level=issue.levelId?.value;orbitLevel=issue.levelId?.value}
     }
     issueEdit?.let {draft->val stored=document.issues.find {it.id==draft.id};val live=if(stored!=null && draft.capture!=null && stored.capture?.id!=draft.capture?.id)stored.copy(capture=draft.capture,screenshot=draft.capture?.screenshot)else stored ?: draft
@@ -759,6 +763,7 @@ fun DrawingCanvasScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
                 } },
                 actions = {
+                    TextButton({setPanel(CanvasPanelId.SCHEDULES,PanelVisibility.OPEN)}){Text("Schedules")}
                     TextButton({setPanel(CanvasPanelId.ISSUES,PanelVisibility.OPEN)}){Text("Issues")}
                     TextButton({issuePicking=true}){Text("Issue at point")}
                     TextButton({clashDialog=true},Modifier.testTag("clash_check_tool"),enabled=!busy && clashProgress==null){Text("Clash check")}
@@ -1117,6 +1122,10 @@ fun DrawingCanvasScreen(
                             MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
                                 onDismiss={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.HIDDEN)},embedded=true)
                         }
+                        PersistentPanel(CanvasPanelId.SCHEDULES,"Schedules",canvasLayout.panel(CanvasPanelId.SCHEDULES),
+                            {setPanelPlacement(CanvasPanelId.SCHEDULES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.SCHEDULES,it)},width=with(LocalDensity.current){minOf(620.dp,size.width.toDp())}) {
+                            SchedulesPanel(document,!is3D,{ids->actions.onSelect(ids);scheduleFocus=ids;clashFocus=null;issueView=null;level=null;orbitLevel=null;if(ids.isNotEmpty()){val bounds=elementWorldBounds(document,ids);viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1))}},onTakeoffSettings,onTakeoffRate,onShareSchedule)
+                        }
                         PersistentPanel(CanvasPanelId.ISSUES,"Issues",canvasLayout.panel(CanvasPanelId.ISSUES),{setPanelPlacement(CanvasPanelId.ISSUES,it)},width=380.dp) {
                             IssuesPanel(document,::openIssue,{val ids=editor?.selectedIds.orEmpty();val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport)
                             TextButton({issueView=null}){Text("Return to project visibility")}
@@ -1124,7 +1133,7 @@ fun DrawingCanvasScreen(
                         PersistentPanel(CanvasPanelId.CLASHES,"Clashes",canvasLayout.panel(CanvasPanelId.CLASHES),
                             {setPanelPlacement(CanvasPanelId.CLASHES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.CLASHES,it)},width=380.dp) {
                             ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->
-                                clashFocus=issue.id;actions.onSelect(emptySet());is3D=true;orbitLevel=null
+                                clashFocus=issue.id;scheduleFocus=emptySet();actions.onSelect(emptySet());is3D=true;orbitLevel=null
                                 issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3))
                                     orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/max(1,size.height))}
                             },{clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})

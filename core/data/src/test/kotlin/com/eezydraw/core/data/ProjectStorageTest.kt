@@ -26,6 +26,21 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ProjectStorageTest {
+    @Test fun schedulesRatesAndLibraryDefaultsSurviveSaveArchiveAndBackup() = runBlocking {
+        val source=repository.create("Takeoff",ProjectTemplate.EMPTY,ProjectSettings())
+        val item=LibraryItem(LibraryItemId("priced"),"Priced item",Discipline.ELECTRICAL,"Devices",Size3(.1,.1,.1),unitRates=mapOf("USD" to 25.0))
+        val definitions=providedSchedules().map {it.copy(levels=setOf(source.levels.first().id),visibleOnly=false)}
+        val settings=TakeoffSettings(10.0,"USD",definitions,mapOf("rate" to mapOf("USD" to 4.5)))
+        val saved=repository.save(source.copy(libraryItems=listOf(item),project=source.project.copy(settings=source.project.settings.copy(takeoff=settings))))
+        assertEquals(saved,repository.load(source.project.id.value))
+        val output=ByteArrayOutputStream();repository.exportProject(source.project.id.value,output)
+        val imported=repository.importProject(ByteArrayInputStream(output.toByteArray()))
+        assertEquals(settings,imported.project.settings.takeoff);assertEquals(item,imported.libraryItems.single())
+        assertEquals(mapOf("USD" to 25.0),LibraryArchive.decode(ByteArrayInputStream(LibraryArchive.encode(LibraryCatalog(items=listOf(item))))).items.single().unitRates)
+        repository.save(saved.copy(project=saved.project.copy(settings=saved.project.settings.copy(takeoff=settings.copy(currency="EUR")))))
+        assertEquals(settings,repository.restoreBackup(saved.project.id.value).project.settings.takeoff)
+    }
+
     @Test fun issueReviewAndAttachmentsSurviveLoadArchiveAndBackup() = runBlocking {
         val source=repository.create("Issue review",ProjectTemplate.EMPTY,ProjectSettings())
         val id=source.project.id;val asset=ProjectAsset(AssetId("photo"),id,"photo.png","image/png")

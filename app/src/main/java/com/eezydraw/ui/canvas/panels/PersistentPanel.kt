@@ -148,5 +148,5 @@ private fun panelIcon(id: CanvasPanelId): ImageVector = when (id) {
     CanvasPanelId.VIEW, CanvasPanelId.VISIBILITY -> Icons.Outlined.Visibility
     CanvasPanelId.MEASURE -> Icons.Outlined.Straighten
     CanvasPanelId.LIBRARY -> Icons.Outlined.Inventory2
-    CanvasPanelId.MEASUREMENTS, CanvasPanelId.CLASHES, CanvasPanelId.ISSUES -> Icons.AutoMirrored.Outlined.ListAlt
+    CanvasPanelId.MEASUREMENTS, CanvasPanelId.CLASHES, CanvasPanelId.ISSUES, CanvasPanelId.SCHEDULES -> Icons.AutoMirrored.Outlined.ListAlt
 }

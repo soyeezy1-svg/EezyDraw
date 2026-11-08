@@ -213,6 +213,7 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        onTakeoffSettings=viewModel::takeoffSettings,onTakeoffRate=viewModel::takeoffRate,onShareSchedule=viewModel::shareSchedule,
                                         onSaveIssue=viewModel::saveIssue,onDeleteIssue=viewModel::deleteIssue,onIssueScreenshot=viewModel::attachIssueScreenshot,onShareIssue=viewModel::shareIssue,
                                         onIssueExport={format->if(format=="pdf")issuePdf.launch("issues.pdf")else issueCsv.launch("issues.csv")},
                                         onIssuePhoto={issue,camera->viewModel.saveIssue(issue);photoIssue=issue;photoIssueKey=issue.id.value;if(camera){val file=java.io.File(context.cacheDir,"issue-share/camera-${java.util.UUID.randomUUID()}.jpg");file.parentFile!!.mkdirs();val uri=androidx.core.content.FileProvider.getUriForFile(context,context.packageName+".issues",file);cameraUriText=uri.toString();cameraIssue.launch(uri)}else galleryIssue.launch(arrayOf("image/png","image/jpeg"))},

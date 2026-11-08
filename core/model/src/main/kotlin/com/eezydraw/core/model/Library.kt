@@ -33,9 +33,11 @@ data class LibraryItem(
     val thumbnailBase64: String? = null,
     val wallService:WallServiceOptions? = null,
     val floorService:FloorDeviceKind? = null,
+    val unitRates:Map<String,Double> = emptyMap(),
 ) {
     init {
         require(name.isNotBlank() && category.isNotBlank() && version > 0)
+        require(validUnitRates(unitRates))
         require(thumbnailBase64 == null || thumbnailBase64.length <= 350_000)
         require(defaultMountingHeight.isFinite() && defaultMountingHeight >= 0)
     }
