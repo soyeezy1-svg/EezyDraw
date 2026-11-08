@@ -26,6 +26,21 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ProjectStorageTest {
+    @Test fun mobileLayoutAndNamedCameraRotationSectionSurviveSaveArchiveAndBackup() = runBlocking {
+        val source=repository.create("Mobile canvas",ProjectTemplate.EMPTY,ProjectSettings())
+        val box=Bounds3(Point3(-1.0,-2.0,-3.0),Point3(4.0,5.0,6.0))
+        val layout=CanvasLayout(hideAll=true,openGroup=CanvasGroup.NAVIGATE,bottomBarVisible=false)
+        val capture=IssueView("capture",Point2(2.0,3.0),120.0,Point3(),.5,.5,10.0,10.0,Projection.ORTHOGRAPHIC,false,source.levels.first().id,source.project.settings,emptyMap(),emptyMap(),emptyMap(),400,300,true,planRotation=.4,sectionBox=box)
+        val view=SavedView(ViewId("named"),source.project.id,"Rotated section",Camera(Point3(z=10.0),Point3()),sectionBox=box,capture=capture)
+        val saved=repository.save(source.copy(views=listOf(view),project=source.project.copy(settings=source.project.settings.copy(canvasLayout=layout))))
+        assertEquals(saved,repository.load(source.project.id.value))
+        val output=ByteArrayOutputStream();repository.exportProject(source.project.id.value,output)
+        val imported=repository.importProject(ByteArrayInputStream(output.toByteArray()))
+        assertEquals(layout,imported.project.settings.canvasLayout);assertEquals(view.copy(projectId=imported.project.id),imported.views.single())
+        repository.save(saved.copy(views=emptyList()))
+        assertEquals(view,repository.restoreBackup(saved.project.id.value).views.single())
+    }
+
     @Test fun schedulesRatesAndLibraryDefaultsSurviveSaveArchiveAndBackup() = runBlocking {
         val source=repository.create("Takeoff",ProjectTemplate.EMPTY,ProjectSettings())
         val item=LibraryItem(LibraryItemId("priced"),"Priced item",Discipline.ELECTRICAL,"Devices",Size3(.1,.1,.1),unitRates=mapOf("USD" to 25.0))

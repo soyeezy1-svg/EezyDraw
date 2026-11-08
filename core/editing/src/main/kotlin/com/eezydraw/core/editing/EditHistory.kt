@@ -37,6 +37,7 @@ class EditCommand internal constructor(
     private val groups: LinkPatch<ElementGroup>? = null,
     private val issues: LinkPatch<Issue>? = null,
     private val assets: LinkPatch<com.eezydraw.core.model.ProjectAsset>? = null,
+    private val views:LinkPatch<com.eezydraw.core.model.SavedView>?=null,
     private val systems: LinkPatch<BuildingSystem>? = null,
     private val libraryItems: LinkPatch<LibraryItem>? = null,
     private val materials: LinkPatch<Material>? = null,
@@ -46,14 +47,14 @@ class EditCommand internal constructor(
     val affectedElementIds: Set<ElementId> get() = patches.mapTo(linkedSetOf()) { it.id }
     val addedElementIds: Set<ElementId>
         get() = patches.filter { it.before == null && it.after != null }.mapTo(linkedSetOf()) { it.id }
-    val isEmpty: Boolean get() = assets == null && patches.isEmpty() && layers == null && groups == null && issues == null && systems == null && libraryItems == null && materials == null && settings == null
+    val isEmpty: Boolean get() = views==null && assets == null && patches.isEmpty() && layers == null && groups == null && issues == null && systems == null && libraryItems == null && materials == null && settings == null
 
     /** Apply without adding history, for composing a validated multi-part transaction. */
     fun preview(document: ProjectDocument): ProjectDocument = apply(document, forward = true)
 
     // Auxiliary records count toward the budget too, so large coordination edits stay bounded.
     internal val retainedChangeCount: Int
-        get() = patches.size + (assets?.let {it.before.size+it.after.size} ?: 0) + (layers?.let { it.before.size + it.after.size } ?: 0) +
+        get() = (views?.let {it.before.size+it.after.size} ?: 0) + patches.size + (assets?.let {it.before.size+it.after.size} ?: 0) + (layers?.let { it.before.size + it.after.size } ?: 0) +
             (groups?.let { it.before.size + it.after.size } ?: 0) +
             (issues?.let { it.before.size + it.after.size } ?: 0) +
             (systems?.let { it.before.size + it.after.size } ?: 0) +
@@ -96,6 +97,7 @@ class EditCommand internal constructor(
             (if(forward)settings.before else settings.after).copy(canvasLayout=document.project.settings.canvasLayout)) {
             "The project settings changed; this edit is stale"
         }
+        require(views==null || document.views==(if(forward)views.before else views.after)) {"Saved views changed"}
         require(assets==null || document.assets==(if(forward)assets.before else assets.after)) {"Issue assets changed"}
         if (isEmpty) return document
 
@@ -127,6 +129,7 @@ class EditCommand internal constructor(
             layers = layers?.let { if (forward) it.after else it.before } ?: document.layers,
             groups = groups?.let { if (forward) it.after else it.before } ?: document.groups,
             assets = assets?.let {if(forward)it.after else it.before} ?: document.assets,
+            views=views?.let {if(forward)it.after else it.before} ?: document.views,
             issues = issues?.let { if (forward) it.after else it.before } ?: document.issues,
             systems = systems?.let {if(forward)it.after else it.before} ?: document.systems,
             libraryItems = libraryItems?.let {if(forward)it.after else it.before} ?: document.libraryItems,

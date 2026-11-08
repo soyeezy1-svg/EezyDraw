@@ -260,19 +260,23 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun automaticPanelHidingAndGeneratedWallLocksAreOptionalAndSurviveRestoration() {
+    fun navigationPreferencesAndGeneratedWallLocksSurviveRestoration() {
         var saved:AppSettings?=null
         val restoration=StateRestorationTester(compose)
         restoration.setContent { EezyDrawTheme { Surface {
-            SettingsScreen(AppSettings(),onSave={saved=it},onBack={},onChooseSaveLocation={},onResetSaveLocation={},onOpenPermissions={})
+            SettingsScreen(AppSettings(autoHidePanelsWhileDrawing=true),onSave={saved=it},onBack={},onChooseSaveLocation={},onResetSaveLocation={},onOpenPermissions={})
         } } }
-        visible("settings_auto_hide_panels").assertIsOff().performClick()
+        visible("settings_invert_orbit").assertIsOff().performClick()
+        visible("settings_axis_indicator").assertIsOn().performClick()
         visible("settings_lock_walls").assertIsOff().performClick()
         restoration.emulateSavedInstanceStateRestore()
-        visible("settings_auto_hide_panels").assertIsOn()
+        visible("settings_invert_orbit").assertIsOn()
+        visible("settings_axis_indicator").assertIsOff()
         visible("settings_lock_walls").assertIsOn()
         compose.onNodeWithTag("settings_save").assertIsEnabled().performClick()
         compose.runOnIdle {
+            assertEquals(true,saved?.invertOrbit)
+            assertEquals(false,saved?.showAxisIndicator)
             assertEquals(true,saved?.autoHidePanelsWhileDrawing)
             assertEquals(true,saved?.lockWallsByDefault)
         }

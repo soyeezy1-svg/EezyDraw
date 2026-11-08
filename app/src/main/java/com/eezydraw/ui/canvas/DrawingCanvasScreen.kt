@@ -6,6 +6,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Save
@@ -152,6 +156,8 @@ fun DrawingCanvasScreen(
     onExportDrawing:(ViewExportRequest)->Unit={},
     onExportModel:(String?,Boolean)->Unit={_,_->},
     onExportView: (ViewExportRequest,ViewExportFormat)->Unit = { _,_-> },
+    onDiscardExit:()->Unit=onBack,onOpenSettings:()->Unit={},onNavigationSettings:(AppSettings)->Unit={},
+    onSaveCameraView:(SavedView)->Unit={},onDeleteCameraView:(ViewId)->Unit={},
 ) {
     var viewport by rememberSaveable(document.project.id.value, stateSaver = PlanCameraSaver) { mutableStateOf(Viewport2D()) }
     var orbit by rememberSaveable(document.project.id.value, stateSaver = OrbitCameraSaver) { mutableStateOf(OrbitCamera()) }
@@ -167,7 +173,16 @@ fun DrawingCanvasScreen(
     var anchorY by rememberSaveable(document.project.id.value) { mutableStateOf<Double?>(null) }
     var zoomWindow by rememberSaveable { mutableStateOf(false) }
     var probe by rememberSaveable { mutableStateOf(false) }
-    var orbitPan by rememberSaveable { mutableStateOf(false) }
+    var navigationTool by rememberSaveable(document.project.id.value) {mutableStateOf(NavigationTool.SELECT)}
+    var planRotationDialog by remember {mutableStateOf(false)}
+    var navigationPreferences by remember {mutableStateOf(false)}
+    var viewsOpen by remember {mutableStateOf(false)}
+    var sectionOptions by remember {mutableStateOf(false)}
+    var sectionBox by rememberSaveable(document.project.id.value,stateSaver=listSaver<Bounds3?,Double>(save={it?.let {b->listOf(b.min.x,b.min.y,b.min.z,b.max.x,b.max.y,b.max.z)} ?: emptyList()},restore={if(it.size==6)Bounds3(Point3(it[0],it[1],it[2]),Point3(it[3],it[4],it[5]))else null})) {mutableStateOf<Bounds3?>(null)}
+    var closeConfirmation by remember {mutableStateOf(false)}
+    var exitAfterSave by remember {mutableStateOf(false)}
+    var chromeHeight by remember {mutableIntStateOf(0)}
+    var activeDetail by rememberSaveable(document.project.id.value) {mutableStateOf<CanvasPanelId?>(null)}
     var snapsOpen by rememberSaveable { mutableStateOf(false) }
     var grid by rememberSaveable { mutableStateOf(true) }
     var rendererFailed by remember(document.project.id.value) { mutableStateOf(false) }
@@ -206,18 +221,15 @@ fun DrawingCanvasScreen(
     var addSelection by rememberSaveable { mutableStateOf(false) }
     var propertiesSession by rememberSaveable { mutableIntStateOf(0) }
     var canvasLayout by remember(document.project.id) {mutableStateOf(document.project.settings.canvasLayout)}
-    var panelBounds by remember(document.project.id) {mutableStateOf(emptyMap<CanvasPanelId,Rect>())}
-    fun recordPanelBounds(id:CanvasPanelId,bounds:Rect?) {
-        val next=if(bounds==null)panelBounds-id else panelBounds+(id to bounds)
-        if(next!=panelBounds)panelBounds=next
-    }
     var selectedRoomSide by remember(document.project.id) {mutableStateOf<RoomSideRef?>(null)}
     LaunchedEffect(document.project.settings.canvasLayout) {canvasLayout=document.project.settings.canvasLayout}
     val panelsHidden=canvasLayout.hideAll
-    val propertiesOpen=canvasLayout.panel(CanvasPanelId.PROPERTIES).state==PanelVisibility.OPEN
-    fun updateLayout(next:CanvasLayout) {canvasLayout=next;editor?.onCanvasLayout?.invoke(next)}
-    fun setPanel(id:CanvasPanelId,state:PanelVisibility) {updateLayout(canvasLayout.withPanel(id,canvasLayout.panel(id).copy(state=state)))}
-    fun setPanelPlacement(id:CanvasPanelId,placement:PanelPlacement) {updateLayout(canvasLayout.withPanel(id,placement))}
+    fun updateLayout(next:CanvasLayout) {if(next.openGroup!=canvasLayout.openGroup){activeDetail=null;viewsOpen=false;sectionOptions=false};canvasLayout=next;editor?.onCanvasLayout?.invoke(next)}
+    fun setPanel(id:CanvasPanelId,state:PanelVisibility) {
+        if(state==PanelVisibility.OPEN){val group=when(id){CanvasPanelId.DRAW->CanvasGroup.ROUTE;CanvasPanelId.EDIT,CanvasPanelId.PROPERTIES->CanvasGroup.EDIT;CanvasPanelId.VIEW->CanvasGroup.VIEW;CanvasPanelId.MEASURE,CanvasPanelId.MEASUREMENTS->CanvasGroup.MEASURE;CanvasPanelId.LIBRARY->CanvasGroup.LIBRARY;CanvasPanelId.VISIBILITY->CanvasGroup.LAYERS;CanvasPanelId.CLASHES,CanvasPanelId.ISSUES->CanvasGroup.ISSUES;CanvasPanelId.SCHEDULES->CanvasGroup.SCHEDULE}
+            updateLayout(canvasLayout.copy(openGroup=group,bottomBarVisible=true));activeDetail=id
+        }else if(activeDetail==id)activeDetail=null
+    }
     fun openProperties() {propertiesSession++;setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.OPEN)}
     var arrayOpen by rememberSaveable { mutableStateOf(false) }
     val panelStates=rememberSaveableStateHolder()
@@ -243,7 +255,7 @@ fun DrawingCanvasScreen(
     var clashFocus by remember(document.project.id) {mutableStateOf<IssueId?>(null)}
     var clashXray by remember {mutableStateOf(true)}
     val focusClash=document.issues.find {it.id==clashFocus}?.clash
-    val inspectionKey=focusClash?.let {"${clashFocus?.value}:$clashXray"} ?: scheduleFocus.takeIf {it.isNotEmpty()}?.joinToString {it.value}
+    val inspectionKey=(focusClash?.let {"${clashFocus?.value}:$clashXray"} ?: scheduleFocus.takeIf {it.isNotEmpty()}?.joinToString {it.value}).orEmpty()+sectionBox.toString()
     val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey,issueView) {clashInspection(scheduleInspection(restoreIssuePresentation(document,issueView),scheduleFocus).copy(project=document.project.copy(
         settings=(issueView?.settings ?: document.project.settings).copy(showDetailedMeasurements=settings.showDetailedMeasurement))),focusClash,clashXray)}
     val selectedIds = editor?.selectedIds ?: emptySet()
@@ -267,6 +279,7 @@ fun DrawingCanvasScreen(
     val latestMeasurementMode = rememberUpdatedState(measurementMode)
     val selectedBounds = remember(ready?.picker,selectedIds) { ready?.picker?.boundsFor(selectedIds) }
     val selectionHasMeasurements=remember(document.elements,selectedIds) {document.elements.any {it.id in selectedIds && isMeasurement(it)}}
+    val propertiesOpen=activeDetail==CanvasPanelId.PROPERTIES
     val selectedElement=remember(document.elements,selectedIds,propertiesOpen) {
         if(propertiesOpen)document.elements.singleOrNull {it.id in selectedIds} else null
     }
@@ -311,9 +324,8 @@ fun DrawingCanvasScreen(
         document.project.settings.autoXrayFrontWalls || document.elements.any {element->element.objectDisplay==ObjectDisplay.XRAY ||
             element.properties.any {(key,value)->key.startsWith(ROOM_SIDE_DISPLAY_PREFIX) && (value as? ParameterValue.Text)?.value==ObjectDisplay.XRAY.name}}
     val placementActive=routeKind!=null || tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
-    val floatingPanelsVisible=!panelsHidden && !(settings.autoHidePanelsWhileDrawing && (placementActive || selectedIds.isNotEmpty()))
     val latestPlacementActive=rememberUpdatedState(placementActive)
-    val precisionActive=placementActive && settings.precisionPointer.enabled
+    val precisionActive=placementActive && settings.precisionPointer.enabled && navigationTool==NavigationTool.SELECT
     val latestPrecisionActive=rememberUpdatedState(precisionActive)
     val canPointUndo=pointUndo.isNotEmpty()
     val canPointRedo=pointRedo.isNotEmpty()
@@ -334,28 +346,28 @@ fun DrawingCanvasScreen(
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
         document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
-        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView) {
+        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView,sectionBox) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
                 val planSymbols=!is3D
                 val sameGeometry = previous != null && issueView==null && previous.inspectionKey==inspectionKey && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
-                val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument,planSymbols=planSymbols)
+                val scene = if (sameGeometry) previous!!.scene else SectionClip.drawing(buildDrawingScene(renderDocument,planSymbols=planSymbols),sectionBox)
                 val index = SpatialIndex(scene.segments)
                 val allIds=document.elements.mapTo(HashSet()) {it.id}
                 val mainIds=allIds-selectedIds
-                val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(renderDocument,mainIds,planSymbols)
-                val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(renderDocument,selectedIds,planSymbols)
-                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)buildSurfaceScene(renderDocument) else null
+                val main = if (selectedIds.isEmpty()) scene else SectionClip.drawing(buildDrawingScene(renderDocument,mainIds,planSymbols),sectionBox)
+                val selected = if (selectedIds.isEmpty()) null else SectionClip.drawing(buildDrawingScene(renderDocument,selectedIds,planSymbols),sectionBox)
+                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)SectionClip.surfaces(buildSurfaceScene(renderDocument),sectionBox) else null
                 val mainSurfaces=surfaces?.let {if(selectedIds.isEmpty())it else it.partition(selectedIds,false)}
                 val selectedSurfaces=if(selectedIds.isEmpty())null else surfaces?.partition(selectedIds,true)
                 val surfacedIds=surfaces?.chunks.orEmpty().mapTo(HashSet()) {ElementId(it.elementId)}
                 val annotationIds=allIds-surfacedIds+if(planSymbols)document.elements.filter {it.body is ElementBody.Component}.map {it.id} else emptyList()
-                val annotations=if(surfaces==null)main else buildDrawingScene(renderDocument,annotationIds-selectedIds,planSymbols)
-                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else buildDrawingScene(renderDocument,annotationIds.intersect(selectedIds),planSymbols)
+                val annotations=if(surfaces==null)main else SectionClip.drawing(buildDrawingScene(renderDocument,annotationIds-selectedIds,planSymbols),sectionBox)
+                val selectedAnnotations=if(selectedIds.isEmpty())null else if(surfaces==null)selected else SectionClip.drawing(buildDrawingScene(renderDocument,annotationIds.intersect(selectedIds),planSymbols),sectionBox)
                 val dimensionIds=document.elements.filter {((it.body as? ElementBody.DrawingShape)?.shape is Shape.Dimension)}.mapTo(HashSet()){it.id}
-                val measurementScene=buildDrawingScene(renderDocument,dimensionIds-selectedIds)
-                val selectedMeasurements=if(selectedIds.isEmpty())null else buildDrawingScene(renderDocument,dimensionIds.intersect(selectedIds))
+                val measurementScene=SectionClip.drawing(buildDrawingScene(renderDocument,dimensionIds-selectedIds),sectionBox)
+                val selectedMeasurements=if(selectedIds.isEmpty())null else SectionClip.drawing(buildDrawingScene(renderDocument,dimensionIds.intersect(selectedIds)),sectionBox)
                 val resize = if (sameGeometry && previous!!.selectedIds == selectedIds) previous.resizeFrame else
                     if (selectedIds.size == 1) document.elements.find { it.id in selectedIds && !isMeasurement(it) }?.let { resizeFrame(document,it) } else null
                 SceneLoad.Ready(document, selectedIds, scene, main, selected,
@@ -523,7 +535,7 @@ fun DrawingCanvasScreen(
             }
         } else if (actions != null && !busy && latestTool.value == DrawingTool.SELECT && !probe && latestGeometryMatches.value) {
             val picker = latestReady.value?.picker
-            val picked = if (is3D) picker?.pick3D(orbit, position.x.toDouble(), position.y.toDouble(),
+            val picked = if(is3D && sectionBox!=null && ready!=null)pickSceneHit(ready.scene,ready.surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ,sectionBox=sectionBox),position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density)?.elementId else if (is3D) picker?.pick3D(orbit, position.x.toDouble(), position.y.toDouble(),
                 size.width.toDouble(), size.height.toDouble(), 14.0 * density, selectedLevel) ?: ready?.surfaces?.let {surfaces->
                     pickSceneHit(ready.scene,surfaces,CanvasFrame(viewport,orbit,true,selectedLevel,floorElevation=floorZ),
                         position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density)?.elementId}
@@ -545,19 +557,24 @@ fun DrawingCanvasScreen(
             }
         } else if (!is3D) cursor.value?.point?.let { anchorX = it.x; anchorY = it.y }
     })
+    fun fitMargin():Double=maxOf(48.0*density,minOf(maxOf(128.0*density,chromeHeight+36.0*density),minOf(size.width,size.height)*.30))
+    fun fitOrbit(camera:OrbitCamera,bounds:Bounds3):OrbitCamera {
+        val factor=(1-2*fitMargin()/minOf(size.width,size.height).coerceAtLeast(1)).coerceIn(.05,1.0)
+        return camera.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1)).zoom(factor)
+    }
     fun fit() {
         if (!geometryMatches) return
         val scene = ready?.scene ?: return
         if (size.width <= 0 || size.height <= 0) return
         val bounds = if(scene.segments.isEmpty())Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+2.0)) else scene.boundsForLevel(selectedLevel)
-        if (is3D) orbit = orbit.fit(bounds, size.width.toDouble() / size.height)
-        else viewport = viewport.fit(bounds, size.width.toDouble(), size.height.toDouble(), 48.0 * density)
+        if (is3D) orbit = fitOrbit(orbit,bounds)
+        else viewport = viewport.fit(bounds, size.width.toDouble(), size.height.toDouble(), fitMargin())
     }
     LaunchedEffect(ready, size, selectedLevel) {
         if (!initialized && ready != null && size.width > 0 && size.height > 0) {
             val emptyBounds = Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+2.0))
             val planBounds = if (ready.scene.segments.isEmpty()) emptyBounds else ready.scene.boundsForLevel(level)
-            viewport = viewport.fit(planBounds, size.width.toDouble(), size.height.toDouble(), 48.0 * density)
+            viewport = viewport.fit(planBounds, size.width.toDouble(), size.height.toDouble(), fitMargin())
             orbit = orbit.fit(if (ready.scene.segments.isEmpty()) emptyBounds else ready.scene.bounds, size.width.toDouble() / size.height)
             initialized = true
         }
@@ -658,7 +675,7 @@ fun DrawingCanvasScreen(
         pointUndo=pointUndo.map {it.copy(candidate=null)};pointRedo=pointRedo.map {it.copy(candidate=null)}
     }
     fun beginTool(next:DrawingTool) {
-        cancelConstruction();tool=next;probe=false;zoomWindow=false;gizmoMode=GizmoMode.MOVE
+        cancelConstruction();tool=next;navigationTool=NavigationTool.SELECT;probe=false;zoomWindow=false;gizmoMode=GizmoMode.MOVE
         if(next!=DrawingTool.SELECT) {
             is3D=false;editor?.onSelect?.invoke(emptySet())
             pointerWorld=Point3(viewport.center.x,viewport.center.y,floorZ)
@@ -666,7 +683,7 @@ fun DrawingCanvasScreen(
         }
     }
     fun beginMeasurement(mode:MeasurementMode) {
-        cancelConstruction();measurementMode=mode;editor?.onSelect?.invoke(emptySet());probe=false
+        cancelConstruction();navigationTool=NavigationTool.SELECT;measurementMode=mode;editor?.onSelect?.invoke(emptySet());probe=false
         pointerWorld=if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
     }
     fun cubeDirection(normal:Point3) {
@@ -706,42 +723,170 @@ fun DrawingCanvasScreen(
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
-        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls)
+        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,sectionBox=sectionBox)
     val issueRequest=com.eezydraw.storage.ViewExportRequest(renderDocument,frame,size.width.coerceAtLeast(1),size.height.coerceAtLeast(1))
     fun freshIssue(position:Point3,links:Set<ElementId> = emptySet(),source:Issue?=null):Issue = Issue(IssueId(java.util.UUID.randomUUID().toString()),document.project.id,source?.title ?: "New issue",System.currentTimeMillis(),elementIds=links,position=position,levelId=selectedLevel?.let(::LevelId) ?: links.firstNotNullOfOrNull {id->document.elements.find {it.id==id}?.levelId} ?: source?.clash?.levelIds?.singleOrNull(),sourceClashId=source?.id)
     fun openIssue(issue:Issue) {
-        issueView=issue.capture;clashFocus=null;scheduleFocus=emptySet();issueEdit=issue
-        issue.capture?.let {v->viewport=Viewport2D(v.centre,v.pixelsPerMetre);orbit=OrbitCamera(v.target,v.yaw,v.pitch,v.distance,v.orthographicHeight,v.projection);is3D=v.is3D;level=v.levelId?.value;orbitLevel=v.levelId?.value;grid=v.grid} ?: issue.position?.let {p->val bounds=Bounds3(Point3(p.x-1,p.y-1,p.z-1),Point3(p.x+1,p.y+1,p.z+1));viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1));level=issue.levelId?.value;orbitLevel=issue.levelId?.value}
+        issueView=issue.capture;sectionBox=issue.capture?.sectionBox;clashFocus=null;scheduleFocus=emptySet();issueEdit=issue
+        issue.capture?.let {v->viewport=Viewport2D(v.centre,v.pixelsPerMetre,v.planRotation);orbit=OrbitCamera(v.target,v.yaw,v.pitch,v.distance,v.orthographicHeight,v.projection);is3D=v.is3D;level=v.levelId?.value;orbitLevel=v.levelId?.value;grid=v.grid} ?: issue.position?.let {p->val bounds=Bounds3(Point3(p.x-1,p.y-1,p.z-1),Point3(p.x+1,p.y+1,p.z+1));viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1));level=issue.levelId?.value;orbitLevel=issue.levelId?.value}
     }
     issueEdit?.let {draft->val stored=document.issues.find {it.id==draft.id};val live=if(stored!=null && draft.capture!=null && stored.capture?.id!=draft.capture?.id)stored.copy(capture=draft.capture,screenshot=draft.capture?.screenshot)else stored ?: draft
         IssueEditor(live,document,{onSaveIssue(it);issueEdit=null},{issueEdit=null}, {i->onSaveIssue(i);issueEdit=null;val marked=i.copy(capture=i.capture ?: captureIssueView(issueRequest));issueView=marked.capture;issueMarkup=marked},
             {i->val next=i.copy(capture=captureIssueView(issueRequest),screenshot=null,savedViews=(i.savedViews+listOfNotNull(i.capture)).distinctBy {it.id});onSaveIssue(next);issueEdit=next},onIssuePhoto,{i,format->onShareIssue(i.copy(capture=i.capture ?: captureIssueView(issueRequest)),format)},{onDeleteIssue(it);issueEdit=null},{i->openIssue(i)})
     }
     issueMarkup?.let {i->IssueMarkupEditor(i,issueRequest,{marks,image->onIssueScreenshot(i,marks,image);issueMarkup=null},{issueMarkup=null})}
-    val viewToolbarContent:@Composable ()->Unit={
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("canvas_toolbar").padding(horizontal=8.dp),
-                    horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
-                    CanvasActionButton(Icons.Outlined.FitScreen,stringResource(R.string.canvas_extents),{fit()},Modifier.testTag("canvas_extents"),enabled=geometryMatches)
-                    CanvasActionButton(Icons.Outlined.CropFree,stringResource(R.string.canvas_window),{zoomWindow=!zoomWindow;window.value=null},Modifier.testTag("canvas_zoom_window"),selected=zoomWindow)
-                    editor?.let {actions->
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Undo,stringResource(R.string.editing_undo),{undoInputOrDocument()},Modifier.testTag("view_undo"),enabled=actions.canUndo || canPointUndo)
-                        CanvasActionButton(Icons.AutoMirrored.Outlined.Redo,stringResource(R.string.editing_redo),{redoInputOrDocument()},Modifier.testTag("view_redo"),enabled=actions.canRedo || canPointRedo)
-                        ViewControls(renderDocument,document.project.settings.viewMode,actions.onViewMode,actions.onLayerVisibility,actions.onSystemVisibility,actions.onMeasurementsVisibility,onOpenVisibility={setPanel(CanvasPanelId.VISIBILITY,PanelVisibility.OPEN)})
-                    }
-                    CanvasActionButton(Icons.Outlined.Save,stringResource(R.string.canvas_save),onSave,Modifier.testTag("canvas_save"),enabled=dirty && !busy)
-                    if(!is3D) {
-                        CanvasActionButton(Icons.Outlined.MyLocation,stringResource(R.string.canvas_probe),{probe=!probe},Modifier.testTag("canvas_probe"),selected=probe)
-                        CanvasActionButton(Icons.Outlined.Grid4x4,stringResource(R.string.canvas_snaps),{snapsOpen=true},Modifier.testTag("canvas_snaps"))
-                        CanvasActionButton(Icons.Outlined.Clear,stringResource(R.string.canvas_clear_reference),{anchorX=null;anchorY=null},Modifier.testTag("canvas_clear_reference"),enabled=anchor!=null)
-                    }
-                    if(editor!=null) CanvasActionButton(Icons.Outlined.LibraryAdd,stringResource(R.string.canvas_add_selection),{addSelection=!addSelection},Modifier.testTag("canvas_add_selection"),selected=addSelection)
-                    CanvasActionButton(Icons.Outlined.GridOn,stringResource(R.string.canvas_grid),{grid=!grid},selected=grid)
-                    CanvasActionButton(Icons.Outlined.Image,stringResource(R.string.canvas_export_png),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PNG)},Modifier.testTag("canvas_export_png"),enabled=geometryMatches && size.width>0 && !placementActive)
-                    CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0 && !placementActive)
-                }
+    fun requestClose(){if(!busy){if(dirty)closeConfirmation=true else onBack()}}
+    BackHandler(enabled=!busy){requestClose()}
+    LaunchedEffect(exitAfterSave,dirty,busy){if(exitAfterSave && !dirty && !busy){exitAfterSave=false;onBack()}}
+    if(closeConfirmation)AlertDialog(onDismissRequest={closeConfirmation=false},title={Text("Save changes?")},text={Text("Save changes to ${document.project.name} before leaving?")},
+        confirmButton={TextButton({closeConfirmation=false;exitAfterSave=true;onSave()},Modifier.testTag("canvas_exit_save")){Text("Save")}},
+        dismissButton={Row {TextButton({closeConfirmation=false;onDiscardExit()},Modifier.testTag("canvas_exit_discard")){Text("Don't save")};TextButton({closeConfirmation=false}){Text("Cancel")}}})
+    if(planRotationDialog)PlanRotationDialog(viewport.rotation,{viewport=viewport.copy(rotation=it);is3D=false;planRotationDialog=false},{planRotationDialog=false})
+    if(navigationPreferences)NavigationPreferences(settings,{onNavigationSettings(it);navigationPreferences=false},{navigationPreferences=false})
+    fun beginBuilding(mode:String){cancelConstruction();navigationTool=NavigationTool.SELECT;buildingTool=mode;tool=if(mode=="wall")DrawingTool.LINE else if(mode in setOf("room","slab"))DrawingTool.RECTANGLE else DrawingTool.POLYGON;editor?.onSelect?.invoke(emptySet())}
+    fun beginRoute(kind:RouteKind){cancelConstruction();navigationTool=NavigationTool.SELECT;routeKind=kind
+        val defaults=settings.projectDefaults
+        routeConfig=settings.lastRoutingSettings[kind] ?: (defaults.routeDefaults[kind] ?: defaultRoutingSettings(kind)).let {it.copy(elevation=defaults.defaultRouteElevations[kind] ?: it.elevation)}
+        if(routeConfig.floorInstallation!=null)is3D=false
+        editor?.onSelect?.invoke(emptySet());probe=false;zoomWindow=false
     }
+    fun navigate(next:NavigationTool){navigationTool=if(navigationTool==next)NavigationTool.SELECT else next;zoomWindow=false;probe=false;clearPrecisionCandidate()
+        if(next in setOf(NavigationTool.ORBIT,NavigationTool.LOOK_AROUND,NavigationTool.WALK)){is3D=true;orbitLevel=level;if(next!=NavigationTool.ORBIT)orbit=orbit.withProjection(Projection.PERSPECTIVE)}
+    }
+    fun toggle3D(){if(is3D)is3D=false else {is3D=true;orbitLevel=level;if(!orbitShown){fit();orbitShown=true}}}
+    fun zoomBy(factor:Double){if(is3D)orbit=orbit.zoom(factor)else viewport=viewport.zoom(factor,size.width/2.0,size.height/2.0,size.width.toDouble(),size.height.toDouble())}
+    fun fitSelection(){if(selectedIds.isNotEmpty()){val bounds=elementWorldBounds(document,selectedIds);if(is3D)orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1))else viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble(),fitMargin())}}
+    fun restoreCameraView(view:SavedView){
+        val saved=view.capture ?: run {val c=view.camera;val dx=c.position.x-c.target.x;val dy=c.position.y-c.target.y;val dz=c.position.z-c.target.z
+            captureIssueView(issueRequest).copy(target=c.target,yaw=atan2(dy,dx),pitch=atan2(dz,hypot(dx,dy)),distance=hypot(hypot(dx,dy),dz).coerceIn(1e-5,1e12),orthographicHeight=c.orthographicHeight,projection=c.projection,is3D=true,levelId=view.levelId,sectionBox=view.sectionBox,settings=document.project.settings.copy(viewMode=view.mode),layerVisibility=document.layers.associate {it.id to (it.id !in view.hiddenLayerIds)},systemVisibility=document.systems.associate {it.id to (it.id !in view.hiddenSystemIds)})}
+        issueView=saved;sectionBox=saved.sectionBox;viewport=Viewport2D(saved.centre,saved.pixelsPerMetre,saved.planRotation);orbit=OrbitCamera(saved.target,saved.yaw,saved.pitch,saved.distance,saved.orthographicHeight,saved.projection)
+        is3D=saved.is3D;level=saved.levelId?.value;orbitLevel=saved.levelId?.value;grid=saved.grid;clashFocus=null;scheduleFocus=emptySet()
+    }
+    fun saveCameraView(name:String){val capture=captureIssueView(issueRequest);val target=if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
+        val camera=Camera(if(is3D)orbit.eye()else target.copy(z=target.z+100),target,up=if(is3D)Point3(z=1.0)else Point3(y=1.0),projection=if(is3D)orbit.projection else Projection.ORTHOGRAPHIC,orthographicHeight=if(is3D)orbit.orthographicHeight else size.height/viewport.pixelsPerMetre)
+        onSaveCameraView(SavedView(ViewId(java.util.UUID.randomUUID().toString()),document.project.id,name,camera,frame.viewMode,selectedLevel?.let(::LevelId),document.layers.filterNot {it.visible}.mapTo(HashSet()){it.id},document.systems.filterNot {it.visible}.mapTo(HashSet()){it.id},sectionBox=sectionBox,capture=capture))
+    }
+    fun openSection(){viewsOpen=false;activeDetail=null;sectionOptions=true
+        if(sectionBox==null){val b=selectedBounds ?: ready?.scene?.bounds ?: Bounds3(Point3(-2.0,-2.0,floorZ),Point3(2.0,2.0,floorZ+3))
+            sectionBox=Bounds3(Point3(b.min.x-.05,b.min.y-.05,b.min.z-.05),Point3(b.max.x+.05,b.max.y+.05,b.max.z+.05))}
+    }
+    fun action(id:String,label:String,icon:androidx.compose.ui.graphics.vector.ImageVector=Icons.Outlined.Tune,selected:Boolean=false,enabled:Boolean=true,run:()->Unit)=CadAction(id,label,icon,selected,enabled,run)
+    val toolNames=DrawingTool.entries.associateWith {stringResource(drawingToolLabel(it))}
+    val stripActions=when(canvasLayout.openGroup){
+        CanvasGroup.DRAW->listOf(action("tool_select",toolNames.getValue(DrawingTool.SELECT),drawingToolIcon(DrawingTool.SELECT),tool==DrawingTool.SELECT && navigationTool==NavigationTool.SELECT){beginTool(DrawingTool.SELECT)})+
+            listOf("wall" to "Wall","slab" to "Floor slab","room" to "Room","room_polygon" to "Room polygon").map {(id,label)->action("tool_$id",label,Icons.Outlined.CropSquare,buildingTool==id){beginBuilding(id)}}+
+            DrawingTool.entries.filter {it!=DrawingTool.SELECT}.map {t->action("tool_${t.name.lowercase()}",toolNames.getValue(t),drawingToolIcon(t),tool==t && buildingTool==null){beginTool(t)}}
+        CanvasGroup.EDIT->listOf(action("edit_select","Select",Icons.Outlined.NearMe){beginTool(DrawingTool.SELECT)},
+            action("tools_properties","Properties",Icons.Outlined.Tune,enabled=selectedIds.size==1){openProperties()},
+            action("tools_copy","Copy",Icons.Outlined.ContentCopy,enabled=selectedIds.isNotEmpty()){editor?.onCopy?.invoke()},
+            action("tools_paste","Paste",Icons.Outlined.ContentPaste,enabled=editor?.canPaste==true){cancelConstruction();editor?.onPaste?.invoke()},
+            action("tools_delete","Delete",Icons.Outlined.Delete,enabled=selectedIds.isNotEmpty()){editor?.onDelete?.invoke()},
+            action("tools_mirror_x","Mirror X",Icons.Outlined.Flip,enabled=selectedIds.isNotEmpty()){editor?.onMirror?.invoke(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+            action("tools_mirror_y","Mirror Y",Icons.Outlined.Flip,enabled=selectedIds.isNotEmpty()){editor?.onMirror?.invoke(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+            action("tools_array","Array",Icons.Outlined.GridView,enabled=selectedIds.isNotEmpty()){arrayOpen=true},
+            action("selection_tools","Selection tools",Icons.Outlined.MoreHoriz){setPanel(CanvasPanelId.EDIT,PanelVisibility.OPEN)})+
+            if(document.elements.any {it.id in selectedIds && it.body is ElementBody.Room})listOf(action("edit_generate_walls","Generate walls",Icons.Outlined.CropSquare){generateWallsDialog=true})else emptyList()
+        CanvasGroup.LIBRARY->listOf(action("canvas_library","Library",Icons.Outlined.Inventory2){setPanel(CanvasPanelId.LIBRARY,PanelVisibility.OPEN)},
+            action("library_import","Import library",Icons.Outlined.FileOpen){editor?.onImportLibrary?.invoke()},action("library_export","Export library",Icons.Outlined.Share){editor?.onExportLibrary?.invoke()})
+        CanvasGroup.ROUTE->RouteKind.entries.map {kind->action("tool_route_${kind.name}",kind.name.replace('_',' '),Icons.Outlined.Route,routeKind==kind){beginRoute(kind)}}+
+            action("canvas_route_list","Route list",Icons.AutoMirrored.Outlined.List){setPanel(CanvasPanelId.DRAW,PanelVisibility.OPEN)}
+        CanvasGroup.LEVEL->listOf(action("level_all","All levels",Icons.Outlined.Layers,selectedLevel==null){if(routeKind==null)cancelConstruction();if(is3D)orbitLevel=null else level=null},action("level_units","Units and levels",Icons.Outlined.Tune){setPanel(CanvasPanelId.VIEW,PanelVisibility.OPEN)})+
+            document.levels.map {l->action("level_${l.id.value}",l.name,Icons.Outlined.Layers,selectedLevel==l.id.value){if(routeKind==null)cancelConstruction()else clearPrecisionCandidate();editor?.onSelect?.invoke(emptySet());if(is3D)orbitLevel=l.id.value else level=l.id.value}}
+        CanvasGroup.MEASURE->listOf(action("canvas_measure","Measure distance",Icons.Outlined.Straighten){beginMeasurement(MeasurementMode.DISTANCE)},
+            action("canvas_reference_dimension","Reference dimension",Icons.Outlined.Straighten){beginMeasurement(MeasurementMode.REFERENCE)},
+            action("canvas_measurements","Saved measurements",Icons.AutoMirrored.Outlined.List){setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)})
+        CanvasGroup.VIEW->listOf("Top" to Point3(z=1.0),"Bottom" to Point3(z=-1.0),"Left" to Point3(x=-1.0),"Right" to Point3(x=1.0),"Front" to Point3(y=-1.0),"Back" to Point3(y=1.0)).map {(label,normal)->action("view_${label.lowercase()}",label,Icons.Outlined.ViewInAr){cubeDirection(normal)}}+
+            listOf(action("view_isometric","Isometric",Icons.Outlined.ViewInAr){cubeDirection(Point3(1.0,1.0,1.0))},action("canvas_home",stringResource(R.string.canvas_home),Icons.Outlined.Home){homeView()},
+            action("view_projection",if(orbit.projection==Projection.PERSPECTIVE)"Orthographic"else "Perspective",Icons.Outlined.ViewInAr){is3D=true;orbit=orbit.withProjection(if(orbit.projection==Projection.PERSPECTIVE)Projection.ORTHOGRAPHIC else Projection.PERSPECTIVE)},
+            action("view_plan","Plan 2D",Icons.Outlined.GridOn){is3D=false},action("view_grid",stringResource(R.string.canvas_grid),Icons.Outlined.GridOn,grid){grid=!grid})
+        CanvasGroup.NAVIGATE->listOf(action("navigate_select","Select",Icons.Outlined.NearMe,navigationTool==NavigationTool.SELECT){beginTool(DrawingTool.SELECT)},
+            action("navigate_pan","Pan",Icons.Outlined.PanTool,navigationTool==NavigationTool.PAN){navigate(NavigationTool.PAN)},
+            action("navigate_orbit","Orbit",Icons.Outlined.Public,navigationTool==NavigationTool.ORBIT){navigate(NavigationTool.ORBIT)},
+            action("canvas_zoom_window",stringResource(R.string.canvas_window),Icons.Outlined.CropFree,zoomWindow){zoomWindow=!zoomWindow;window.value=null},
+            action("navigate_zoom_in","Zoom in",Icons.Outlined.ZoomIn){zoomBy(1.25)},action("navigate_zoom_out","Zoom out",Icons.Outlined.ZoomOut){zoomBy(.8)},
+            action("navigate_extents","Zoom extents",Icons.Outlined.FitScreen){fit()},action("navigate_selection","Zoom to selection",Icons.Outlined.CenterFocusStrong,enabled=selectedIds.isNotEmpty()){fitSelection()},
+            action("navigate_look","Look around",Icons.Outlined.Visibility,navigationTool==NavigationTool.LOOK_AROUND){navigate(NavigationTool.LOOK_AROUND)},
+            action("navigate_walk","Walk / Roam",Icons.AutoMirrored.Outlined.DirectionsWalk,navigationTool==NavigationTool.WALK){navigate(NavigationTool.WALK)},
+            action("navigate_rotate_plan","Rotate view in 2D",Icons.Outlined.Rotate90DegreesCcw){planRotationDialog=true},
+            action("navigate_reset_north","Reset north",Icons.Outlined.North){viewport=viewport.copy(rotation=0.0)},
+            action("navigate_projection",if(orbit.projection==Projection.PERSPECTIVE)"Orthographic"else "Perspective",Icons.Outlined.ViewInAr){is3D=true;orbit=orbit.withProjection(if(orbit.projection==Projection.PERSPECTIVE)Projection.ORTHOGRAPHIC else Projection.PERSPECTIVE)},
+            action("navigate_saved_views","Saved views",Icons.Outlined.Bookmarks){activeDetail=null;sectionOptions=false;viewsOpen=!viewsOpen},
+            action("navigate_section_box","Section box",Icons.Outlined.Crop,sectionBox!=null){openSection()},
+            action("navigate_project_display","Return to project visibility",Icons.Outlined.Visibility){issueView=null})
+        CanvasGroup.DISPLAY->ViewMode.entries.map {mode->action("display_${mode.name}",mode.name.replace('_',' '),Icons.Outlined.Visibility,renderDocument.project.settings.viewMode==mode){issueView=null;editor?.onViewMode?.invoke(mode)}}
+        CanvasGroup.LAYERS->listOf(action("canvas_visibility","Visibility",Icons.Outlined.Layers){setPanel(CanvasPanelId.VISIBILITY,PanelVisibility.OPEN)},action("layers_show_all","Show all",Icons.Outlined.Visibility){editor?.onShowAll?.invoke()})
+        CanvasGroup.ISSUES->listOf(action("canvas_issues","Issues",Icons.Outlined.PushPin){setPanel(CanvasPanelId.ISSUES,PanelVisibility.OPEN)},action("issue_at_point","Issue at point",Icons.Outlined.AddLocation){issuePicking=true},
+            action("clash_check_tool","Clash check",Icons.Outlined.FindInPage,enabled=!busy && clashProgress==null){clashDialog=true},action("canvas_clashes","Clashes",Icons.AutoMirrored.Outlined.List){setPanel(CanvasPanelId.CLASHES,PanelVisibility.OPEN)})
+        CanvasGroup.SCHEDULE->listOf(action("canvas_schedules","Schedules",Icons.Outlined.TableChart){setPanel(CanvasPanelId.SCHEDULES,PanelVisibility.OPEN)},action("wall_schedule","Wall schedule",Icons.Outlined.CropSquare){wallSchedule=true},action("floor_schedule","Floor schedule",Icons.Outlined.Layers){floorScheduleOpen=true})
+        CanvasGroup.EXPORT->listOf(action("export_2d","Export 2D drawing",Icons.Outlined.PictureAsPdf){onExportDrawing(issueRequest)},action("export_3d","Export 3D model",Icons.Outlined.ViewInAr){onExportModel(selectedLevel,!is3D)},
+            action("export_project",stringResource(R.string.canvas_export),Icons.Outlined.Share){onExport()},action("canvas_export_png",stringResource(R.string.canvas_export_png),Icons.Outlined.Image){onExportView(issueRequest,ViewExportFormat.PNG)},action("canvas_export_pdf",stringResource(R.string.canvas_export_pdf),Icons.Outlined.PictureAsPdf){onExportView(issueRequest,ViewExportFormat.PDF)})
+        CanvasGroup.SETTINGS->listOf(action("canvas_save",stringResource(R.string.canvas_save),Icons.Outlined.Save,enabled=dirty && !busy){onSave()},action("canvas_details",stringResource(R.string.canvas_project_details),Icons.Outlined.Description){onDetails()},
+            action("canvas_settings","Settings",Icons.Outlined.Settings){onOpenSettings()},action("navigation_settings","Navigation settings",Icons.Outlined.Tune){navigationPreferences=true},
+            action("canvas_snaps","Snap options",Icons.Outlined.Grid4x4){snapsOpen=true},action("canvas_probe",stringResource(R.string.canvas_probe),Icons.Outlined.MyLocation,probe){probe=!probe},
+            action("canvas_clear_reference",stringResource(R.string.canvas_clear_reference),Icons.Outlined.Clear,enabled=anchor!=null){anchorX=null;anchorY=null},action("canvas_units","Units and levels",Icons.Outlined.Tune){setPanel(CanvasPanelId.VIEW,PanelVisibility.OPEN)},
+            action("canvas_add_selection",stringResource(R.string.canvas_add_selection),Icons.Outlined.LibraryAdd,addSelection){addSelection=!addSelection},action("canvas_bottom_hide","Hide bottom bar",Icons.Outlined.ExpandMore){updateLayout(canvasLayout.copy(bottomBarVisible=false))})
+        null->emptyList()
+    }
+
+    val detailContent:(@Composable ()->Unit)?=if(activeDetail!=null || viewsOpen || sectionOptions)({
+        Column {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text(if(viewsOpen)"Saved views"else if(sectionOptions)"Section box"else activeDetail?.name.orEmpty().replace('_',' '),Modifier.weight(1f).padding(8.dp));IconButton({activeDetail=null;viewsOpen=false;sectionOptions=false},Modifier.size(48.dp).testTag("cad_detail_close")){Icon(Icons.Outlined.Close,"Close tools")}}
+            Box(Modifier.fillMaxWidth().weight(1f,false)) {
+                if(viewsOpen)CameraViews(document,::saveCameraView,::restoreCameraView,onDeleteCameraView)
+                else if(sectionOptions)sectionBox?.let {box->SectionBoxOptions(box,{sectionBox=it},{sectionBox=null;sectionOptions=false})}
+                else if(activeDetail==CanvasPanelId.VIEW)CanvasStatus(document,is3D,orbit,cursor,selectedLevel,onUnitsChange,{if(is3D)orbitLevel=it else level=it},{snapsOpen=true})
+                else editor?.let {actions->when(activeDetail){
+                    CanvasPanelId.LIBRARY->panelStates.SaveableStateProvider("library") {
+                        LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->cancelConstruction();navigationTool=NavigationTool.SELECT;pendingLibrary=id.value;libraryWallOptions=actions.libraryCatalog.find(id,document.libraryItems)?.takeIf {it.mounting==MountingType.WALL}?.let(::defaultWallDeviceOptions);actions.onSelect(emptySet());probe=false;zoomWindow=false;pointerWorld=if(is3D)orbit.target.copy(z=floorZ)else Point3(viewport.center.x,viewport.center.y,floorZ)},onDismiss={activeDetail=null},embedded=true,compactHeader=true,
+                            state=document.libraryState,onStateChange=actions.onLibraryState,units=document.project.settings.lengthUnit,decimalPlaces=document.project.settings.decimalPlaces,activeItemId=pendingLibrary?.let(::LibraryItemId),
+                            onSaveItem=actions.onSaveLibraryItem,onRestoreItem=actions.onRestoreLibraryItem,onDeleteItem=actions.onDeleteLibraryItem,onDuplicateItem=actions.onDuplicateLibraryItem,
+                            onFromDrawing={runCatching {libraryItemFromDrawing(document,actions.selectedIds,LibraryItemId(java.util.UUID.randomUUID().toString()))}.getOrNull()},onImportLibrary=actions.onImportLibrary,onExportLibrary=actions.onExportLibrary,
+                            onUndoLibrary=actions.onUndoLibrary,onRedoLibrary=actions.onRedoLibrary,canUndoLibrary=actions.libraryCanUndo,canRedoLibrary=actions.libraryCanRedo,authoringEnabled=actions.libraryReady && !busy,projectItemIds=document.libraryItems.mapTo(HashSet()){it.id})
+                    }
+                    CanvasPanelId.DRAW->Column(Modifier.verticalScroll(rememberScrollState())){RoutingRouteList(document,actions.onSelect);document.elements.singleOrNull {it.id in selectedIds}?.let {WallServiceSelection(it,document,actions.onEditWallService,{wallSchedule=true});RoutingSelectionActions(document,it,actions)}}
+                    CanvasPanelId.PROPERTIES->{val source=document.elements.singleOrNull {it.id in selectedIds}
+                        if(selectionHasMeasurements)MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,{activeDetail=null},embedded=true)
+                        else if(selectedProperties!=null)panelStates.SaveableStateProvider("properties:$propertiesSession:${source?.id?.value}") {
+                            PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,document.project.settings.decimalPlaces,onApply=actions.onProperties,onDismiss={activeDetail=null},lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true,libraryProperties=selectedLibraryProperties,
+                                onApplyLibrary={transform,parameters->actions.onLibraryProperties(transform,parameters,false)},onUpdateAllOfType={transform,parameters->actions.onLibraryProperties(transform,parameters,true)},onResetToLibraryDefault=actions.onResetLibraryProperties)
+                        }else Text(stringResource(R.string.presentation_select_properties),Modifier.padding(12.dp))
+                    }
+                    CanvasPanelId.MEASURE,CanvasPanelId.MEASUREMENTS->MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,{activeDetail=null},embedded=true)
+                    CanvasPanelId.SCHEDULES->SchedulesPanel(document,!is3D,{ids->actions.onSelect(ids);scheduleFocus=ids;clashFocus=null;issueView=null;level=null;orbitLevel=null;if(ids.isNotEmpty())fitSelection()},onTakeoffSettings,onTakeoffRate,onShareSchedule)
+                    CanvasPanelId.ISSUES->Column {IssuesPanel(document,::openIssue,{val ids=actions.selectedIds;val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport);TextButton({issueView=null}){Text("Return to project visibility")}}
+                    CanvasPanelId.CLASHES->ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->clashFocus=issue.id;scheduleFocus=emptySet();actions.onSelect(emptySet());is3D=true;orbitLevel=null;issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3));orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/size.height.coerceAtLeast(1))}}, {clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})
+                    CanvasPanelId.VISIBILITY->ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
+                    CanvasPanelId.VIEW->CanvasStatus(document,is3D,orbit,cursor,selectedLevel,onUnitsChange,{if(routeKind==null)cancelConstruction()else clearPrecisionCandidate();actions.onSelect(emptySet());if(is3D)orbitLevel=it else level=it},{snapsOpen=true})
+                    CanvasPanelId.EDIT->if(selectedIds.isEmpty())Text("Select objects to edit",Modifier.padding(12.dp))else {
+                    val selectedElements=document.elements.filter {it.id in selectedIds}
+                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
+                    SelectionToolbar(gizmoMode,!busy && !lockedSelection && selectedRoomSide==null,editor.canUndo,editor.canRedo,editor.canPaste,
+                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
+                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
+                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
+                        onGenerateWalls=if(selectedElements.any {it.body is ElementBody.Room})({generateWallsDialog=true})else null,onProperties={openProperties()},
+                        onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
+                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
+                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
+                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.horizontalScroll(rememberScrollState()),
+                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked,
+                        lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
+                        onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
+                        display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
+                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
+                        room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
+                        onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
+                        onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout.copy(panels=canvasLayout.panels.mapValues {(id,p)->p.copy(state=if(id==activeDetail)PanelVisibility.OPEN else PanelVisibility.HIDDEN)}),
+                        onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})                    }
+                    null->Unit
+                }}
+            }
+        }
+    })else null
+
     if(clashDialog)ClashCheckDialog(document,selectedLevel,{options->clashDialog=false;setPanel(CanvasPanelId.CLASHES,PanelVisibility.OPEN);onRunClash(options.copy(planView=!is3D))},{clashDialog=false})
-    Scaffold(
+    Box(
         modifier = modifier.testTag("drawing_canvas").focusRequester(focus).onPreviewKeyEvent { event ->
             val actions = editor
             if (actions == null || busy || !canvasFocused || event.type != KeyEventType.KeyDown) false
@@ -756,88 +901,12 @@ fun DrawingCanvasScreen(
                 else -> false
             }
         }.onFocusChanged { canvasFocused = it.isFocused }.focusable(),
-        topBar = {
-            if(!panelsHidden) TopAppBar(
-                title = { Text(document.project.name, maxLines = 1) },
-                navigationIcon = { IconButton(onBack, enabled = !busy) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
-                } },
-                actions = {
-                    TextButton({setPanel(CanvasPanelId.SCHEDULES,PanelVisibility.OPEN)}){Text("Schedules")}
-                    TextButton({setPanel(CanvasPanelId.ISSUES,PanelVisibility.OPEN)}){Text("Issues")}
-                    TextButton({issuePicking=true}){Text("Issue at point")}
-                    TextButton({clashDialog=true},Modifier.testTag("clash_check_tool"),enabled=!busy && clashProgress==null){Text("Clash check")}
-                    var exportMenu by remember {mutableStateOf(false)}
-                    Box {TextButton({exportMenu=true},Modifier.testTag("project_export_menu")){Text("Export")}
-                        DropdownMenu(exportMenu,{exportMenu=false}) {
-                            DropdownMenuItem(text={Text("Export 2D drawing")},onClick={exportMenu=false;onExportDrawing(ViewExportRequest(renderDocument,frame,size.width,size.height))},enabled=size.width>0 && size.height>0 && !placementActive)
-                            DropdownMenuItem(text={Text("Export 3D model")},onClick={exportMenu=false;onExportModel(selectedLevel,!is3D)})
-                            DropdownMenuItem(text={Text("Export project archive")},onClick={exportMenu=false;onExport()})
-                        }
-                    }
-                    IconButton(onExport, enabled = !busy) { Icon(Icons.Outlined.Share, stringResource(R.string.canvas_export)) }
-                    IconButton(onDetails, enabled = !busy, modifier = Modifier.testTag("canvas_details")) {
-                        Icon(Icons.Outlined.Description, stringResource(R.string.canvas_project_details))
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            CanvasStatus(document, is3D, orbit, cursor, selectedLevel, onUnitsChange,
-                onLevel = { if(routeKind==null)cancelConstruction()else clearPrecisionCandidate(); editor?.onSelect?.invoke(emptySet()); if (is3D) orbitLevel = it else level = it }, onSnaps = { snapsOpen = true })
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            if(!panelsHidden) {
-                if(editor!=null) CanvasToolbars(
-                    onDraw={},onEdit={},onView={},onMeasure={beginMeasurement(MeasurementMode.DISTANCE)},
-                    onReferenceDimension={beginMeasurement(MeasurementMode.REFERENCE)},
-                    onMeasurements={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)},onLibrary={},
-                    onTogglePanels={},panelsHidden=false,modifier=Modifier.fillMaxWidth(),
-                    activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
-                    libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
-                    onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
-                if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool !in setOf("wall","slab"),wallOnly=buildingTool in setOf("wall","slab"),slab=buildingTool=="slab")
-
-                if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
-                    Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
-                }
-                if(pendingLibraryItem?.mounting==MountingType.WALL) { WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()}) }
-                if(routeKind!=null) {
-                    RoutingSettingsBar(routeKind!!,routeConfig,{
-                        routeConfig=it
-                        if(it.floorInstallation!=null) { is3D=false }
-                        if(routeDraft.isNotEmpty()) { routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it) }
-                        editor?.onRoutingSettings?.invoke(routeKind!!,it)
-                        clearPrecisionCandidate()
-                    },floorDefaults=document.project.settings.floorServices)
-                    Text("${coordinate(if(routeConfig.floorInstallation!=null)-routeConfig.floorDepth else routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${if(routeConfig.floorInstallation!=null)"Above finished floor"else routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
-                        liveRouteLength,liveFittingCount),Modifier.testTag("route_live_label"))
-                }
-                if(editor!=null && !placementActive) {
-                    RoutingRouteList(document,editor.onSelect)
-                    document.elements.singleOrNull {it.id in selectedIds}?.let {WallServiceSelection(it,document,editor.onEditWallService,{wallSchedule=true})}
-                    document.elements.singleOrNull {it.id in selectedIds}?.let {RoutingSelectionActions(document,it,editor)}
-                }
-                if(placementActive) PlacementBanner(activeLabel,
-                    when {
-                        precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
-                        pendingLibrary!=null || buildingTool==null && options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
-                        measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_measure_pick_first)
-                        measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.canvas_measure_pick_second)
-                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_reference_pick_object)
-                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==1->stringResource(R.string.canvas_reference_pick_reference)
-                        measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.canvas_reference_place_label)
-                        points.isEmpty()->stringResource(R.string.placement_tap_to_start,activeLabel)
-                        else->stringResource(R.string.placement_add_points)
-                    },canDone=routeKind==null || routeDraft.size>=2,onCancel={cancelConstruction()},onDone={finishTool()},showCancel=!precisionActive)
-                if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
-            }
+    ) {
             Box(
-                Modifier.fillMaxWidth().weight(1f).onSizeChanged { size = it }
+                Modifier.fillMaxSize().onSizeChanged { size = it }
                     .testTag("canvas_surface").semantics {
                         set(PlanCenterX, viewport.center.x); set(PlanCenterY, viewport.center.y)
-                        set(PlanScale, viewport.pixelsPerMetre); set(OrbitYaw, orbit.yaw); set(OrbitPitch, orbit.pitch)
+                        set(PlanScale, viewport.pixelsPerMetre); set(PlanRotation,viewport.rotation); set(OrbitYaw, orbit.yaw); set(OrbitPitch, orbit.pitch)
                     }
                     .pointerInput(document.project.id) {
                         awaitEachGesture {
@@ -849,7 +918,7 @@ fun DrawingCanvasScreen(
                             var multi = false
                             val bodyReady=latestReady.value
                             val bodySelection=latestEditor.value?.selectedIds.orEmpty()
-                            val bodyHit=if(latestSettings.value.bodyDragMovesSelection && latestTool.value==DrawingTool.SELECT &&
+                            val bodyHit=if(navigationTool==NavigationTool.SELECT && latestSettings.value.bodyDragMovesSelection && latestTool.value==DrawingTool.SELECT &&
                                 latestMeasurementMode.value==MeasurementMode.NONE && !latestPositionLocked.value && selectedRoomSide==null && !latestPlacementActive.value && gizmoMode==GizmoMode.MOVE && latestSceneMatches.value && !latestLocked.value && !latestBusy.value && !zoomWindow && !probe) {
                                 if(is3D)bodyReady?.picker?.pick3D(orbit,first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble(),14.0*density,latestLevel.value)
                                 else bodyReady?.picker?.pickPlan(viewport.screenToWorld(first.x.toDouble(),first.y.toDouble(),size.width.toDouble(),size.height.toDouble()),14.0*density/viewport.pixelsPerMetre,latestLevel.value)
@@ -888,7 +957,7 @@ fun DrawingCanvasScreen(
                                         zoomWindow = false
                                     } else if(precise && !multi) {
                                         updatePrecisionPointer.value(position,pen)
-                                    } else if (!multi && moved < viewConfiguration.touchSlop) {
+                                    } else if (navigationTool==NavigationTool.SELECT && !multi && moved < viewConfiguration.touchSlop) {
                                         updatePointer.value(position)
                                         onCanvasTap.value(position)
                                     }
@@ -906,19 +975,27 @@ fun DrawingCanvasScreen(
                                     if(bodyMove) {bodyCancelled=true;preview=null}
                                     val zoom = event.calculateZoom().toDouble().pow(sensitivity)
                                     val centroid = event.calculateCentroid()
-                                    if (is3D) orbit = orbit.pan(pan.x.toDouble(), pan.y.toDouble(), size.width.toDouble(), size.height.toDouble()).zoom(zoom)
-                                    else viewport = viewport.pan(pan.x.toDouble(), pan.y.toDouble()).zoom(zoom,
-                                        centroid.x.toDouble(), centroid.y.toDouble(), size.width.toDouble(), size.height.toDouble())
+                                    val anchor=if(latestSettings.value.zoomTowardFinger)centroid else Offset(size.width/2f,size.height/2f)
+                                    if (is3D) orbit=orbit.pan(pan.x*sensitivity,pan.y*sensitivity,size.width.toDouble(),size.height.toDouble()).zoomAt(zoom,anchor.x.toDouble(),anchor.y.toDouble(),size.width.toDouble(),size.height.toDouble())
+                                    else viewport=viewport.pan(pan.x*sensitivity,pan.y*sensitivity).zoom(zoom,anchor.x.toDouble(),anchor.y.toDouble(),size.width.toDouble(),size.height.toDouble())
+                                        .rotate(-event.calculateRotation()*PI/180,centroid.x.toDouble(),centroid.y.toDouble(),size.width.toDouble(),size.height.toDouble())
                                 } else if(bodyMove) {
                                     if(!bodyCancelled && moved>=viewConfiguration.touchSlop) preview=bodyReady?.moves?.delta(bodyPivot,
                                         Point2(first.x.toDouble(),first.y.toDouble()),Point2(position.x.toDouble(),position.y.toDouble()),null,
                                         viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble(),latestSnaps.value,14.0*density,latestLevel.value)
                                 } else if (zoomWindow) window.value = first to position
-                                else if(latestPlacementActive.value) { /* Only the ghost follows a placement drag. */ }
+                                else if(navigationTool==NavigationTool.PAN) {
+                                    if(is3D)orbit=orbit.pan(pan.x*sensitivity,pan.y*sensitivity,size.width.toDouble(),size.height.toDouble())else viewport=viewport.pan(pan.x*sensitivity,pan.y*sensitivity)
+                                }
+                                else if(navigationTool in setOf(NavigationTool.LOOK_AROUND,NavigationTool.WALK)) {
+                                    val invert=if(latestSettings.value.invertOrbit)-1 else 1
+                                    orbit=orbit.lookAround(-pan.x*.006*sensitivity*invert,pan.y*.006*sensitivity*invert);cameraOrbiting=true
+                                }
+                                else if(latestPlacementActive.value && navigationTool!=NavigationTool.ORBIT) { /* Only the ghost follows a placement drag. */ }
                                 else if (is3D) {
                                     if(moved>=viewConfiguration.touchSlop)cameraOrbiting=true
-                                    orbit = if (orbitPan) orbit.pan(pan.x*sensitivity, pan.y*sensitivity, size.width.toDouble(), size.height.toDouble())
-                                    else orbit.orbit(-pan.x*.006*sensitivity, pan.y*.006*sensitivity)
+                                    val invert=if(latestSettings.value.invertOrbit)-1 else 1
+                                    orbit=orbit.orbit(-pan.x*.006*sensitivity*invert,pan.y*.006*sensitivity*invert)
                                 }
                                 else if (!probing) viewport = viewport.pan(pan.x*sensitivity, pan.y*sensitivity)
                                 if(precise && !multi)updatePrecisionPointer.value(position,pen)
@@ -961,10 +1038,10 @@ fun DrawingCanvasScreen(
                 if(routeKind!=null) {
                     RouteGhost(document,routeKind!!,liveRoutePicks,viewport,orbit,is3D,preview=liveRouteDocument)
                 }
-                if(editor!=null && !placementActive && !panelsHidden && !zoomWindow)document.elements.singleOrNull {it.id in selectedIds && it.body is ElementBody.Room}?.let {e->
+                if(editor!=null && navigationTool==NavigationTool.SELECT && !placementActive && !panelsHidden && !zoomWindow)document.elements.singleOrNull {it.id in selectedIds && it.body is ElementBody.Room}?.let {e->
                     RoomCornerHandles(e,viewport,orbit,is3D,size.width,size.height){i,p->editor.onRoomCorner(e.id,i,p)}
                 }
-                if(editor!=null && !placementActive && !panelsHidden && !zoomWindow)selectedElement?.let {e->
+                if(editor!=null && navigationTool==NavigationTool.SELECT && !placementActive && !panelsHidden && !zoomWindow)selectedElement?.let {e->
                     if(document.layers.none {it.id==e.layerId && it.locked})RouteEndHandles(e,viewport,orbit,is3D,size.width,size.height) {a,b->
                         (e.body as? ElementBody.Route)?.routing?.let {editor.onEditRoute(e.id,it.settings,a,b)}
                     }
@@ -975,7 +1052,7 @@ fun DrawingCanvasScreen(
                 }
                 if(measurementMode!=MeasurementMode.NONE) MeasurementGhostPreview(measurementPicks.map {it.point},pointerWorld,viewport,orbit=orbit,is3D=is3D)
                 libraryPlacement?.let { LibraryGhostPreview(document,it.item.id,libraryAim,viewport,orbit,is3D,placement=it) }
-                if (editor != null && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden && selectedRoomSide==null) {
+                if (editor != null && navigationTool==NavigationTool.SELECT && selectedBounds != null && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden && selectedRoomSide==null) {
                     SelectionGizmo(selectedBounds, viewport, orbit, is3D, preview,
                         onStart = { _, _ -> dragPivot = positionLockedPivot ?: selectedBounds.center(); dragResizeFrame = if(positionLockedSelection)null else selectionResizeFrame
                             waitingForCommit = null; preview = EditDelta(pivot = dragPivot) },
@@ -1029,152 +1106,6 @@ fun DrawingCanvasScreen(
                         resizeFrame = if(positionLockedSelection)null else selectionResizeFrame,allowResize=!selectionHasMeasurements,
                         mode=gizmoMode,rotationAngleDegrees=rotationAngle,pivotOverride=positionLockedPivot)
                 }
-                if(!zoomWindow && !panelsHidden) { Row(Modifier.align(Alignment.TopStart).padding(8.dp),verticalAlignment=Alignment.Top) {
-                    ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),
-                        onCorner={cubeDirection(it)},onOrbit={dx,dy->
-                            if(!is3D) {is3D=true;orbitLevel=level}
-                            orbit=orbit.orbit(-dx*.006*settings.gestureSensitivity,dy*.006*settings.gestureSensitivity)
-                        },onGestureActive={cameraOrbiting=it},
-                        onPlan={is3D=false;zoomWindow=false;window.value=null},
-                        onProjection={projection->
-                            if(!is3D) {is3D=true;orbitLevel=level}
-                            orbit=orbit.withProjection(projection);orbitShown=true
-                        })
-                    CanvasActionButton(Icons.Outlined.Home,stringResource(R.string.canvas_home),{homeView()},Modifier.testTag("canvas_home"))
-                }
-                }
-                // Library visibility changes only through explicit panel/full-screen controls.
-                if(!panelsHidden) editor?.let {actions->
-                    PersistentPanel(CanvasPanelId.LIBRARY,stringResource(R.string.panel_library),canvasLayout.panel(CanvasPanelId.LIBRARY),
-                        {setPanelPlacement(CanvasPanelId.LIBRARY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.LIBRARY,it)},icon=Icons.Outlined.Inventory2) {
-                        panelStates.SaveableStateProvider("library") {
-                        LibraryPanel(actions.libraryCatalog.effectiveItems(document.libraryItems),onInsert={id->
-                            cancelConstruction();pendingLibrary=id.value;libraryWallOptions=actions.libraryCatalog.find(id,document.libraryItems)?.takeIf {it.mounting==MountingType.WALL}?.let(::defaultWallDeviceOptions);actions.onSelect(emptySet());probe=false;zoomWindow=false
-                            pointerWorld=if(is3D)orbit.target.copy(z=floorZ) else Point3(viewport.center.x,viewport.center.y,floorZ)
-                        },onDismiss={setPanel(CanvasPanelId.LIBRARY,PanelVisibility.HIDDEN)},embedded=true,
-                            state=document.libraryState,onStateChange=actions.onLibraryState,
-                            units=document.project.settings.lengthUnit,decimalPlaces=document.project.settings.decimalPlaces,
-                            activeItemId=pendingLibrary?.let(::LibraryItemId),
-                            onSaveItem=actions.onSaveLibraryItem,onRestoreItem=actions.onRestoreLibraryItem,
-                            onDeleteItem=actions.onDeleteLibraryItem,onDuplicateItem=actions.onDuplicateLibraryItem,
-                            onFromDrawing={runCatching {libraryItemFromDrawing(document,actions.selectedIds,LibraryItemId(java.util.UUID.randomUUID().toString()))}.getOrNull()},
-                            onImportLibrary=actions.onImportLibrary,onExportLibrary=actions.onExportLibrary,
-                            onUndoLibrary=actions.onUndoLibrary,onRedoLibrary=actions.onRedoLibrary,
-                            canUndoLibrary=actions.libraryCanUndo,canRedoLibrary=actions.libraryCanRedo,
-                            authoringEnabled=actions.libraryReady && !busy,
-                            projectItemIds=document.libraryItems.mapTo(HashSet()) {it.id})
-                        }
-                    }
-                }
-                if(floatingPanelsVisible) {
-                    PersistentPanel(CanvasPanelId.VIEW,stringResource(R.string.panel_view),canvasLayout.panel(CanvasPanelId.VIEW),
-                        {setPanelPlacement(CanvasPanelId.VIEW,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VIEW,it)},width=520.dp,icon=Icons.Outlined.Visibility,compact=true) {viewToolbarContent()}
-                    editor?.let {actions->
-                        for(group in listOf(CanvasToolGroup.DRAW,CanvasToolGroup.EDIT)) {
-                            val id=if(group==CanvasToolGroup.DRAW)CanvasPanelId.DRAW else CanvasPanelId.EDIT
-                            PersistentPanel(id,stringResource(if(group==CanvasToolGroup.DRAW)R.string.panel_draw else R.string.panel_edit),canvasLayout.panel(id),
-                                {setPanelPlacement(id,it)},onBoundsChanged={recordPanelBounds(id,it)},icon=if(group==CanvasToolGroup.DRAW)Icons.Outlined.Draw else Icons.Outlined.Tune) {
-                                panelStates.SaveableStateProvider("tools:$group") {
-                                    ToolsPanel(tool,options,document.project.settings.lengthUnit,selectedIds.size,
-                                        actions.canUndo || canPointUndo,actions.canRedo || canPointRedo,actions.canPaste,points.size>=tool.minimumPoints && points.isNotEmpty(),
-                                        onTool={beginTool(it)},onOptions={options=it},onFinish={finishConstruction()},onCancel={cancelConstruction()},
-                                        onUndo={undoInputOrDocument()},onRedo={redoInputOrDocument()},onCopy=actions.onCopy,
-                                        onPaste={cancelConstruction();actions.onPaste()},onMirrorX={actions.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
-                                        onMirrorY={actions.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},onArray={arrayOpen=true},
-                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true,onBuilding={mode->
-                                            cancelConstruction();buildingTool=mode;tool=if(mode=="wall")DrawingTool.LINE else if(mode in setOf("room","slab"))DrawingTool.RECTANGLE else DrawingTool.POLYGON
-                                            actions.onSelect(emptySet())
-                                        },onRoute={kind->
-                                            cancelConstruction();routeKind=kind
-                                            val defaults=settings.projectDefaults
-                                            routeConfig=settings.lastRoutingSettings[kind] ?: (defaults.routeDefaults[kind] ?: defaultRoutingSettings(kind)).let {it.copy(elevation=defaults.defaultRouteElevations[kind] ?: it.elevation)}
-                                            if(routeConfig.floorInstallation!=null)is3D=false
-                                            actions.onSelect(emptySet());probe=false;zoomWindow=false
-                                        })
-                                }
-                            }
-                        }
-                        PersistentPanel(CanvasPanelId.MEASURE,stringResource(R.string.panel_measure),canvasLayout.panel(CanvasPanelId.MEASURE),
-                            {setPanelPlacement(CanvasPanelId.MEASURE,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.MEASURE,it)},icon=Icons.Outlined.Straighten) {
-                            MeasureTools({beginMeasurement(MeasurementMode.DISTANCE)},{beginMeasurement(MeasurementMode.REFERENCE)},
-                                {setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.OPEN)})
-                        }
-                        PersistentPanel(CanvasPanelId.PROPERTIES,stringResource(R.string.editing_properties),canvasLayout.panel(CanvasPanelId.PROPERTIES),
-                            {setPanelPlacement(CanvasPanelId.PROPERTIES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.PROPERTIES,it)},icon=Icons.Outlined.Tune) {
-                            val source=document.elements.singleOrNull {it.id in selectedIds}
-                            when {
-                                selectionHasMeasurements->MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
-                                    onDismiss={setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.HIDDEN)},embedded=true)
-                                selectedProperties!=null->panelStates.SaveableStateProvider("properties:$propertiesSession:${source?.id?.value}") {
-                                    PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,document.project.settings.decimalPlaces,
-                                        onApply=actions.onProperties,onDismiss={setPanel(CanvasPanelId.PROPERTIES,PanelVisibility.HIDDEN)},
-                                        lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true,
-                                        libraryProperties=selectedLibraryProperties,
-                                        onApplyLibrary={transform,parameters->actions.onLibraryProperties(transform,parameters,false)},
-                                        onUpdateAllOfType={transform,parameters->actions.onLibraryProperties(transform,parameters,true)},
-                                        onResetToLibraryDefault=actions.onResetLibraryProperties)
-                                }
-                                else->Text(stringResource(R.string.presentation_select_properties),Modifier.padding(12.dp))
-                            }
-                        }
-                        PersistentPanel(CanvasPanelId.MEASUREMENTS,stringResource(R.string.panel_saved_measurements),canvasLayout.panel(CanvasPanelId.MEASUREMENTS),
-                            {setPanelPlacement(CanvasPanelId.MEASUREMENTS,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.MEASUREMENTS,it)},icon=Icons.Outlined.Straighten) {
-                            MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
-                                onDismiss={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.HIDDEN)},embedded=true)
-                        }
-                        PersistentPanel(CanvasPanelId.SCHEDULES,"Schedules",canvasLayout.panel(CanvasPanelId.SCHEDULES),
-                            {setPanelPlacement(CanvasPanelId.SCHEDULES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.SCHEDULES,it)},width=with(LocalDensity.current){minOf(620.dp,size.width.toDp())}) {
-                            SchedulesPanel(document,!is3D,{ids->actions.onSelect(ids);scheduleFocus=ids;clashFocus=null;issueView=null;level=null;orbitLevel=null;if(ids.isNotEmpty()){val bounds=elementWorldBounds(document,ids);viewport=viewport.fit(bounds,size.width.toDouble(),size.height.toDouble());orbit=orbit.fit(bounds,size.width.toDouble()/size.height.coerceAtLeast(1))}},onTakeoffSettings,onTakeoffRate,onShareSchedule)
-                        }
-                        PersistentPanel(CanvasPanelId.ISSUES,"Issues",canvasLayout.panel(CanvasPanelId.ISSUES),{setPanelPlacement(CanvasPanelId.ISSUES,it)},width=380.dp) {
-                            IssuesPanel(document,::openIssue,{val ids=editor?.selectedIds.orEmpty();val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport)
-                            TextButton({issueView=null}){Text("Return to project visibility")}
-                        }
-                        PersistentPanel(CanvasPanelId.CLASHES,"Clashes",canvasLayout.panel(CanvasPanelId.CLASHES),
-                            {setPanelPlacement(CanvasPanelId.CLASHES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.CLASHES,it)},width=380.dp) {
-                            ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->
-                                clashFocus=issue.id;scheduleFocus=emptySet();actions.onSelect(emptySet());is3D=true;orbitLevel=null
-                                issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3))
-                                    orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/max(1,size.height))}
-                            },{clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})
-                        }
-                        PersistentPanel(CanvasPanelId.VISIBILITY,stringResource(R.string.panel_visibility),canvasLayout.panel(CanvasPanelId.VISIBILITY),
-                            {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
-                            ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},
-                                actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,
-                                onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
-                        }
-                    }
-                }
-                if(editor!=null && selectedIds.isNotEmpty() && !placementActive && !zoomWindow && !cameraOrbiting && !panelsHidden) {
-                    val pivot=selectedBounds?.center() ?: if(is3D)orbit.target else Point3(viewport.center.x,viewport.center.y,floorZ)
-                    val at=if(is3D)orbit.project(pivot,size.width.toDouble(),size.height.toDouble())?.let {Point2(it.x,it.y)}
-                        else viewport.worldToScreen(Point2(pivot.x,pivot.y),size.width.toDouble(),size.height.toDouble())
-                    val occupied=panelBounds.values.toList()+listOf(Rect(0f,0f,180*density,128*density),
-                        Rect(0f,(size.height-64*density).coerceAtLeast(0f),64*density,size.height.toFloat()))
-                    val toolbarOffset=selectionToolbarPosition(at ?: Point2(size.width/2.0,size.height/2.0),size.width,size.height,density,occupied)
-                    val selectedElements=document.elements.filter {it.id in selectedIds}
-                    val layerIsLocked=selectedElements.any {e->document.layers.any {it.id==e.layerId && it.locked}}
-                    SelectionToolbar(gizmoMode,!busy && !lockedSelection && selectedRoomSide==null,editor.canUndo,editor.canRedo,editor.canPaste,
-                        document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
-                        selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
-                        onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
-                        onGenerateWalls=if(selectedElements.any {it.body is ElementBody.Room})({generateWallsDialog=true})else null,onProperties={openProperties()},
-                        onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
-                        onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
-                        onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
-                        onLayer=editor.onSelectionLayer,onColour=editor.onSelectionColour,onLock=editor.onSelectionLocked,
-                        onRotationSnap=editor.onRotationSnap,modifier=Modifier.offset {toolbarOffset},
-                        keepProportions=options.keepProportions,onKeepProportions={options=options.copy(keepProportions=it)},layerLocked=layerIsLocked,
-                        lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
-                        onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
-                        display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
-                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
-                        room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
-                        onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
-                        onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout,
-                        onPanelVisibility={id,state->setPanel(id,state)},onHideAllPanels={updateLayout(canvasLayout.copy(hideAll=it))})
-                }
                 if(pendingLibraryItem!=null) LibraryPlacementFeedback(document,pendingLibraryItem,libraryPlacement,
                     libraryPlacementResult?.exceptionOrNull()?.message,Modifier.align(Alignment.TopCenter).padding(8.dp))
                 if(precisionActive && !zoomWindow) PrecisionPointerOverlay(displayedPrecisionPick,precisionFinger,precisionDragging,
@@ -1183,12 +1114,48 @@ fun DrawingCanvasScreen(
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
                     pickContext=ready?.pointPicks,viewMode=renderDocument.project.settings.viewMode,levelId=selectedLevel,
-                    canPlace=pendingLibrary==null || libraryPlacement!=null)
-                CanvasActionButton(if(panelsHidden)Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
-                    stringResource(if(panelsHidden)R.string.panel_show_panels else R.string.panel_hide_panels),
-                    {updateLayout(canvasLayout.copy(hideAll=!panelsHidden))},
-                    Modifier.align(if(precisionActive && settings.precisionPointer.side==PrecisionOffsetSide.ABOVE_RIGHT)Alignment.BottomEnd else Alignment.BottomStart)
-                        .padding(8.dp).testTag(if(panelsHidden)"canvas_show_panels"else"canvas_hide_panels"))
+                    canPlace=pendingLibrary==null || libraryPlacement!=null,controlsBottomInset=if(panelsHidden || !canvasLayout.bottomBarVisible)0.dp else with(LocalDensity.current){chromeHeight.toDp()},controlsVisible=!panelsHidden)
+                if(!is3D && (probe || placementActive))cursor.value?.mode?.let {mode->Surface(Modifier.align(Alignment.TopCenter).padding(top=140.dp),tonalElevation=3.dp){Text(stringResource(snapLabel(mode)),Modifier.padding(8.dp))}}
+                if(placedFeedback && !placementActive)Text(stringResource(R.string.placement_placed),Modifier.align(Alignment.TopCenter).padding(top=140.dp).testTag("placement_placed"))
+                if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}))
+                if(sectionOptions && !panelsHidden)sectionBox?.let {SectionBoxOverlay(it,viewport,orbit,is3D,size.width,size.height,{sectionBox=it})}
+                if(navigationTool==NavigationTool.WALK && !panelsHidden)WalkPad({right,forward->orbit=orbit.walk(right*.02*settings.gestureSensitivity,forward*.02*settings.gestureSensitivity)},Modifier.align(Alignment.BottomEnd).padding(end=8.dp,bottom=with(LocalDensity.current){chromeHeight.toDp()+12.dp}))
+                MobileCanvasChrome(canvasLayout,::updateLayout,stripActions,::requestClose,{undoInputOrDocument()},{redoInputOrDocument()},::fit,::toggle3D,
+                    editor?.canUndo==true || canPointUndo,editor?.canRedo==true || canPointRedo,is3D,canFit=geometryMatches && !busy,onBottomHeight={chromeHeight=it},
+                    cube={ViewCube(orbit,onFace={cubeDirection(it)},modifier=Modifier.size(112.dp),onCorner={cubeDirection(it)},onOrbit={dx,dy->if(!is3D){is3D=true;orbitLevel=level};val invert=if(settings.invertOrbit)-1 else 1;orbit=orbit.orbit(-dx*.006*settings.gestureSensitivity*invert,dy*.006*settings.gestureSensitivity*invert)},onGestureActive={cameraOrbiting=it},onPlan={is3D=false;zoomWindow=false;window.value=null},onProjection={projection->if(!is3D){is3D=true;orbitLevel=level};orbit=orbit.withProjection(projection);orbitShown=true},onCompass={yaw->orbit=orbit.copy(yaw=yaw);if(!is3D){is3D=true;orbitLevel=level}})},
+                    options=if(placementActive)({Column {
+                if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool !in setOf("wall","slab"),wallOnly=buildingTool in setOf("wall","slab"),slab=buildingTool=="slab")
+
+                if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
+                    Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
+                }
+                if(pendingLibraryItem?.mounting==MountingType.WALL) { WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()}) }
+                if(routeKind!=null) {
+                    RoutingSettingsBar(routeKind!!,routeConfig,{
+                        routeConfig=it
+                        if(it.floorInstallation!=null) { is3D=false }
+                        if(routeDraft.isNotEmpty()) { routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it) }
+                        editor?.onRoutingSettings?.invoke(routeKind!!,it)
+                        clearPrecisionCandidate()
+                    },floorDefaults=document.project.settings.floorServices)
+                    Text("${coordinate(if(routeConfig.floorInstallation!=null)-routeConfig.floorDepth else routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${if(routeConfig.floorInstallation!=null)"Above finished floor"else routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
+                        liveRouteLength,liveFittingCount),Modifier.testTag("route_live_label"))
+                }
+                if(placementActive) PlacementBanner(activeLabel,
+                    when {
+                        precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
+                        pendingLibrary!=null || buildingTool==null && options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
+                        measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_measure_pick_first)
+                        measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.canvas_measure_pick_second)
+                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_reference_pick_object)
+                        measurementMode==MeasurementMode.REFERENCE && measurementPicks.size==1->stringResource(R.string.canvas_reference_pick_reference)
+                        measurementMode==MeasurementMode.REFERENCE->stringResource(R.string.canvas_reference_place_label)
+                        points.isEmpty()->stringResource(R.string.placement_tap_to_start,activeLabel)
+                        else->stringResource(R.string.placement_add_points)
+                    },canDone=routeKind==null || routeDraft.size>=2,onCancel={cancelConstruction()},onDone={finishTool()},showCancel=!precisionActive)
+                if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
+                        if(tool!=DrawingTool.SELECT && buildingTool==null && routeKind==null)ToolOptionsFields(tool,options,document.project.settings.lengthUnit,{options=it})
+                    }})else null,detail=detailContent)
                 if(selectedIds.isNotEmpty() && document.elements.any {it.id in selectedIds && it.lockMode!=LockMode.NONE}) {
                     val p=selectedBounds?.center()
                     val at=p?.let {projectPrecisionPoint(it,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())}
@@ -1200,7 +1167,6 @@ fun DrawingCanvasScreen(
                 if (rendererFailed) Text(stringResource(R.string.canvas_renderer_error), Modifier.align(Alignment.Center).padding(32.dp))
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))
             }
-        }
     }
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,

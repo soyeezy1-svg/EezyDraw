@@ -2,6 +2,8 @@ package com.eezydraw.ui.canvas.panels
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ fun LibraryPanel(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     embedded: Boolean = false,
+    compactHeader:Boolean=false,
     state: LibraryState = LibraryState(),
     onStateChange: (LibraryState) -> Unit = {},
     units: LengthUnit = LengthUnit.MILLIMETRES,
@@ -83,7 +86,7 @@ fun LibraryPanel(
         }
     }
     val content: @Composable () -> Unit = {
-        Column(Modifier.width(320.dp).heightIn(max = 540.dp).testTag("library_panel")) {
+        Column((if(compactHeader)Modifier.fillMaxWidth()else Modifier.width(320.dp)).heightIn(max = 540.dp).testTag("library_panel")) {
             if (!embedded) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.panel_library), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -91,6 +94,7 @@ fun LibraryPanel(
                 }
                 HorizontalDivider()
             }
+            val search:@Composable ()->Unit={
             OutlinedTextField(
                 query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).testTag("library_search"),
                 label = { Text(stringResource(R.string.library_search)) }, singleLine = true,
@@ -99,6 +103,8 @@ fun LibraryPanel(
                     Icon(Icons.Outlined.Clear, stringResource(R.string.library_clear_search))
                 } },
             )
+            }
+            val switches:@Composable ()->Unit={
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(pluralStringResource(R.plurals.library_result_count,matches.size,matches.size), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
                 Box {
@@ -121,6 +127,8 @@ fun LibraryPanel(
                     Icon(Icons.AutoMirrored.Outlined.ViewList, stringResource(R.string.library_list))
                 }
             }
+            }
+            if(compactHeader)Row(Modifier.horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically){Box(Modifier.width(320.dp)){search()};Box(Modifier.width(300.dp)){switches()}}else {search();switches()}
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("library_items"), contentPadding = PaddingValues(bottom = 10.dp)) {
                 if (matches.isEmpty()) item("no_results") {

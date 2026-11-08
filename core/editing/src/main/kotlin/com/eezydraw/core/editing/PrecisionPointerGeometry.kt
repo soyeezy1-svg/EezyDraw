@@ -60,7 +60,7 @@ fun projectPrecisionPoint(point:Point3,viewport:Viewport2D,orbit:OrbitCamera,is3
 /** Nudge directions use screen convention: +X right, +Y down. The step is a physical SI length. */
 fun nudgePrecisionPoint(point:Point3,dx:Int,dy:Int,step:Double,viewport:Viewport2D,orbit:OrbitCamera,is3D:Boolean):Point3 {
     require(step.isFinite() && step>0)
-    if(!is3D)return Point3(point.x+dx*step,point.y-dy*step,point.z)
+    if(!is3D)return Point3(point.x+(cos(viewport.rotation)*dx-sin(viewport.rotation)*dy)*step,point.y+(-sin(viewport.rotation)*dx-cos(viewport.rotation)*dy)*step,point.z)
     val right=Point3(-sin(orbit.yaw),cos(orbit.yaw),0.0)
     val up=Point3(-sin(orbit.pitch)*cos(orbit.yaw),-sin(orbit.pitch)*sin(orbit.yaw),cos(orbit.pitch))
     return Point3(point.x+(right.x*dx-up.x*dy)*step,point.y+(right.y*dx-up.y*dy)*step,

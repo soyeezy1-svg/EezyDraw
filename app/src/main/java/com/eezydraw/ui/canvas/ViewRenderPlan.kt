@@ -51,8 +51,9 @@ internal fun filledPlanMatrix(
     val span = maxOf(1.0, maxRelativeZ - minRelativeZ)
     val middle = minRelativeZ / 2 + maxRelativeZ / 2
     return FloatArray(16).also {
-        it[0] = (2 * viewport.pixelsPerMetre / width).toFloat()
-        it[5] = (2 * viewport.pixelsPerMetre / height).toFloat()
+        val x=2*viewport.pixelsPerMetre/width;val y=2*viewport.pixelsPerMetre/height
+        val c=kotlin.math.cos(viewport.rotation);val s=kotlin.math.sin(viewport.rotation)
+        it[0]=(x*c).toFloat();it[4]=(-x*s).toFloat();it[1]=(y*s).toFloat();it[5]=(y*c).toFloat()
         it[10] = (-2 / (span * 1.02)).toFloat()
         it[14] = (2 * middle / (span * 1.02)).toFloat()
         it[15] = 1f

@@ -9,30 +9,33 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Double-precision, Y-up plan camera. Pixels are measured from the top-left of the surface. */
 data class Viewport2D(
     val center: Point2 = Point2(0.0, 0.0),
     val pixelsPerMetre: Double = 60.0,
+    val rotation:Double=0.0,
 ) {
-    init { require(pixelsPerMetre.isFinite() && pixelsPerMetre in MIN_SCALE..MAX_SCALE) }
+    init { require(pixelsPerMetre.isFinite() && pixelsPerMetre in MIN_SCALE..MAX_SCALE && rotation.isFinite()) }
 
     fun screenToWorld(x: Double, y: Double, width: Double, height: Double): Point2 {
         if (!validSurface(width, height) || !x.isFinite() || !y.isFinite()) return center
-        return Point2(finite(center.x + (x - width / 2) / pixelsPerMetre),
-            finite(center.y - (y - height / 2) / pixelsPerMetre))
+        val dx=(x-width/2)/pixelsPerMetre;val dy=-(y-height/2)/pixelsPerMetre
+        return Point2(finite(center.x+cos(rotation)*dx+sin(rotation)*dy),finite(center.y-sin(rotation)*dx+cos(rotation)*dy))
     }
 
     fun worldToScreen(point: Point2, width: Double, height: Double): Point2 = Point2(
-        finite((point.x - center.x) * pixelsPerMetre + finite(width) / 2),
-        finite(-(point.y - center.y) * pixelsPerMetre + finite(height) / 2),
+        finite((cos(rotation)*(point.x-center.x)-sin(rotation)*(point.y-center.y))*pixelsPerMetre+finite(width)/2),
+        finite(-(sin(rotation)*(point.x-center.x)+cos(rotation)*(point.y-center.y))*pixelsPerMetre+finite(height)/2),
     )
 
     /** Positive touch deltas move the drawing with the finger. */
     fun pan(dxPixels: Double, dyPixels: Double): Viewport2D {
         if (!dxPixels.isFinite() || !dyPixels.isFinite()) return this
-        return copy(center = Point2(finite(center.x - dxPixels / pixelsPerMetre),
-            finite(center.y + dyPixels / pixelsPerMetre)))
+        val dx=-dxPixels/pixelsPerMetre;val dy=dyPixels/pixelsPerMetre
+        return copy(center=Point2(finite(center.x+cos(rotation)*dx+sin(rotation)*dy),finite(center.y-sin(rotation)*dx+cos(rotation)*dy)))
     }
 
     fun zoom(factor: Double, anchorX: Double, anchorY: Double, width: Double, height: Double): Viewport2D {
@@ -40,17 +43,23 @@ data class Viewport2D(
             !anchorX.isFinite() || !anchorY.isFinite()) return this
         val scale = (pixelsPerMetre * factor).coerceIn(MIN_SCALE, MAX_SCALE)
         val anchor = screenToWorld(anchorX, anchorY, width, height)
-        return copy(center = Point2(
-            finite(anchor.x - (anchorX - width / 2) / scale),
-            finite(anchor.y + (anchorY - height / 2) / scale)), pixelsPerMetre = scale)
+        val after=copy(pixelsPerMetre=scale);val shifted=after.screenToWorld(anchorX,anchorY,width,height)
+        return after.copy(center=Point2(finite(center.x+anchor.x-shifted.x),finite(center.y+anchor.y-shifted.y)))
+    }
+
+    fun rotate(angle:Double,anchorX:Double,anchorY:Double,width:Double,height:Double):Viewport2D {
+        if(!angle.isFinite() || !validSurface(width,height))return this
+        val before=screenToWorld(anchorX,anchorY,width,height)
+        val next=copy(rotation=(rotation+angle)%(2*Math.PI));val after=next.screenToWorld(anchorX,anchorY,width,height)
+        return next.copy(center=Point2(center.x+before.x-after.x,center.y+before.y-after.y))
     }
 
     fun fit(bounds: Bounds3, width: Double, height: Double, paddingPixels: Double = 48.0): Viewport2D {
         if (!validSurface(width, height) || !paddingPixels.isFinite()) return this
         val usableWidth = max(1.0, width - 2 * max(0.0, paddingPixels))
         val usableHeight = max(1.0, height - 2 * max(0.0, paddingPixels))
-        val actualSpanX = finite(bounds.max.x - bounds.min.x)
-        val actualSpanY = finite(bounds.max.y - bounds.min.y)
+        val actualSpanX = abs(cos(rotation))*finite(bounds.max.x-bounds.min.x)+abs(sin(rotation))*finite(bounds.max.y-bounds.min.y)
+        val actualSpanY = abs(sin(rotation))*finite(bounds.max.x-bounds.min.x)+abs(cos(rotation))*finite(bounds.max.y-bounds.min.y)
         // Only a point needs an arbitrary viewing area. A short edge or tiny window must
         // retain its actual size, and a zero-width axis must not constrain the other axis.
         val pointBounds = actualSpanX == 0.0 && actualSpanY == 0.0
@@ -59,6 +68,7 @@ data class Viewport2D(
         return Viewport2D(
             Point2(bounds.min.x / 2 + bounds.max.x / 2, bounds.min.y / 2 + bounds.max.y / 2),
             min(usableWidth / spanX, usableHeight / spanY).coerceIn(MIN_SCALE, MAX_SCALE),
+            rotation,
         )
     }
 
@@ -67,17 +77,13 @@ data class Viewport2D(
         width: Double, height: Double): Viewport2D {
         if (!validSurface(width, height) || !listOf(startX, startY, endX, endY).all { it.isFinite() } ||
             abs(endX - startX) < 4 || abs(endY - startY) < 4) return this
-        val first = screenToWorld(startX, startY, width, height)
-        val last = screenToWorld(endX, endY, width, height)
-        return fit(Bounds3(Point3(min(first.x, last.x), min(first.y, last.y)),
-            Point3(max(first.x, last.x), max(first.y, last.y))), width, height, 0.0)
+        return copy(center=screenToWorld((startX+endX)/2,(startY+endY)/2,width,height),
+            pixelsPerMetre=(pixelsPerMetre*min(width/abs(endX-startX),height/abs(endY-startY))).coerceIn(MIN_SCALE,MAX_SCALE))
     }
 
     fun visibleBounds(width: Double, height: Double): Bounds3 {
-        val topLeft = screenToWorld(0.0, 0.0, width, height)
-        val bottomRight = screenToWorld(width, height, width, height)
-        return Bounds3(Point3(min(topLeft.x, bottomRight.x), min(topLeft.y, bottomRight.y)),
-            Point3(max(topLeft.x, bottomRight.x), max(topLeft.y, bottomRight.y)))
+        val points=listOf(screenToWorld(0.0,0.0,width,height),screenToWorld(width,0.0,width,height),screenToWorld(0.0,height,width,height),screenToWorld(width,height,width,height))
+        return Bounds3(Point3(points.minOf {it.x},points.minOf {it.y}),Point3(points.maxOf {it.x},points.maxOf {it.y}))
     }
 
     companion object {

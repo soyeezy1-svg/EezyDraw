@@ -54,11 +54,11 @@ class LibraryCanvasFlowTest {
     @Test fun libraryNeverAutoHidesAndPlacementReturnsToSelectWithoutChangingItsLayout() {
         startProject("Persistent library placement")
         val item = BuiltInLibrary.items.first { it.symbol == LibrarySymbol.FLOOR_BOX }
-        compose.onNodeWithTag("toolbar_library").performClick()
+        compose.cadLibrary()
         compose.onNodeWithTag("library_search").performTextInput(item.name)
         val opened = layout()
-        assertEquals(PanelVisibility.OPEN, opened.panel(CanvasPanelId.LIBRARY).state)
-        compose.onNodeWithTag("library_insert_${item.id.value}").performScrollTo().performClick()
+        assertEquals(CanvasGroup.LIBRARY,opened.openGroup)
+        compose.cadLibraryItem("library_insert_${item.id.value}").performClick()
         compose.onNodeWithTag("library_panel").assertIsDisplayed()
         compose.onNodeWithTag("library_ghost").assertExists()
         compose.onNodeWithTag("library_mounting_height").assertIsDisplayed()
@@ -93,21 +93,21 @@ class LibraryCanvasFlowTest {
     @Test fun explicitlyCollapsedOrHiddenLibraryStaysThatWayAfterCancelSelectionAndPlacement() {
         startProject("Explicit library state")
         val item = BuiltInLibrary.items.first { it.symbol == LibrarySymbol.FLOOR_BOX }
-        compose.onNodeWithTag("toolbar_library").performClick()
+        compose.cadLibrary()
         compose.onNodeWithTag("library_search").performTextInput(item.name)
-        compose.onNodeWithTag("library_insert_${item.id.value}").performScrollTo().performClick()
-        compose.onNodeWithTag("panel_library_collapse").performClick()
+        compose.cadLibraryItem("library_insert_${item.id.value}").performClick()
+        compose.cadCloseDetail()
         val collapsed = layout()
         compose.onNodeWithTag("library_panel").assertDoesNotExist()
-        compose.onNodeWithTag("panel_library_expand").assertIsDisplayed()
+        compose.onNodeWithTag("canvas_library").assertIsDisplayed()
         touchCanvas()
         compose.onNodeWithTag("precision_place").performClick()
         awaitElements(1)
-        compose.onNodeWithTag("panel_library_expand").assertIsDisplayed()
+        compose.onNodeWithTag("canvas_library").assertIsDisplayed()
         assertEquals(collapsed, layout())
-        compose.onNodeWithTag("panel_library_expand").performClick()
-        compose.onNodeWithTag("library_recent_insert_${item.id.value}").performScrollTo().performClick()
-        compose.onNodeWithTag("panel_library_hide").performClick()
+        compose.cadLibrary()
+        compose.cadLibraryItem("library_recent_insert_${item.id.value}").performClick()
+        compose.cadCloseDetail()
         val hidden = layout()
         compose.onNodeWithTag("panel_library").assertDoesNotExist()
         compose.onNodeWithTag("precision_cancel").performClick()
@@ -134,7 +134,7 @@ class LibraryCanvasFlowTest {
         compose.waitForIdle()
     }
     private fun touchCanvas() {
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .4f, height * .5f)) }
+        compose.cadTap(.4f, .5f)
         compose.waitForIdle()
     }
     private fun assertElements(count: Int) = compose.runOnIdle {

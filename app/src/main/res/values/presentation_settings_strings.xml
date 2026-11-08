@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="settings_auto_hide_panels">Auto-hide panels while drawing</string>
-    <string name="settings_auto_hide_panels_help">Off by default. Keep panels where you put them, or temporarily hide them during drawing when enabled.</string>
+    <string name="settings_auto_hide_panels">Canvas controls</string>
+    <string name="settings_auto_hide_panels_help">Bars and tool trays change only when tapped. The old auto-hide preference is retained for compatibility with older files.</string>
     <string name="settings_lock_walls">Lock walls by default after generating them</string>
     <string name="settings_lock_walls_help">Automatically lock newly generated walls. Existing walls keep their current lock state.</string>
 </resources>

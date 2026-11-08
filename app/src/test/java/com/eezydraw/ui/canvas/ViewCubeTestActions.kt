@@ -6,6 +6,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 
 /** Tests use the same face/corner navigation actions available to accessibility clients. */
@@ -24,6 +25,8 @@ internal fun ComposeContentTestRule.cubeIsometric() {
 }
 
 internal fun ComposeContentTestRule.cubeHome() {
-    onNodeWithTag("canvas_home").performClick()
+    cadGroup("view")
+    onNodeWithTag("canvas_home").performScrollTo().performClick()
+    cadCloseStrip("view")
     waitForIdle()
 }

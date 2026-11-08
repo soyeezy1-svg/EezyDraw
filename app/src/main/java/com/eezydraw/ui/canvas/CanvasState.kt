@@ -13,8 +13,8 @@ import kotlin.math.abs
 import kotlin.math.pow
 
 internal val PlanCameraSaver = listSaver<Viewport2D, Double>(
-    save = { listOf(it.center.x, it.center.y, it.pixelsPerMetre) },
-    restore = { Viewport2D(Point2(it[0], it[1]), it[2]) },
+    save = { listOf(it.center.x, it.center.y, it.pixelsPerMetre,it.rotation) },
+    restore = { Viewport2D(Point2(it[0], it[1]), it[2],it.getOrElse(3){0.0}) },
 )
 internal val OrbitCameraSaver = listSaver<OrbitCamera, Double>(
     save = { listOf(it.target.x, it.target.y, it.target.z, it.yaw, it.pitch, it.distance,
@@ -39,3 +39,5 @@ internal fun coordinate(value: Double, unit: LengthUnit, precision: Int): String
     val cleaned = if (abs(scaled) < .5 * 10.0.pow(-precision)) 0.0 else scaled
     return String.format(Locale.getDefault(), "%.${precision}f", cleaned)
 }
+
+internal val PlanRotation = SemanticsPropertyKey<Double>("PlanRotation")

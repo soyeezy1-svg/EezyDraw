@@ -184,6 +184,7 @@ class DrawingCanvasScreenTest {
     fun probeSnapsToDrawingGeometryWithoutPanningAndReferenceCanBeCleared() {
         showCanvas()
         toolbarClick("canvas_probe")
+        compose.onNodeWithTag("canvas_hide_panels").performClick()
         val before = camera()
         val bounds = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().boundsInRoot
         val endpoint = Offset(
@@ -196,6 +197,8 @@ class DrawingCanvasScreenTest {
         assertEquals(before, camera())
         compose.onNodeWithText(context.getString(R.string.canvas_snap_endpoint)).assertIsDisplayed()
         compose.onNodeWithTag("canvas_surface").performTouchInput { click(endpoint) }
+        compose.onNodeWithTag("canvas_show_panels").performClick()
+        compose.cadGroup("settings")
         compose.onNodeWithTag("canvas_clear_reference").performScrollTo().assertIsEnabled().performClick()
             .assertIsNotEnabled()
     }
@@ -205,7 +208,7 @@ class DrawingCanvasScreenTest {
         val snapChanges = mutableListOf<SnapSettings>()
         val unitChanges = mutableListOf<LengthUnit>()
         showCanvas(onSnap = snapChanges::add, onUnits = unitChanges::add)
-        compose.onNodeWithTag("canvas_status").assertIsDisplayed()
+        compose.cadGroup("level");compose.onNodeWithTag("level_units").performScrollTo().performClick();compose.onNodeWithTag("canvas_status").assertExists()
         toolbarClick("canvas_snaps")
         snapOption(R.string.canvas_snap_grid)
         assertFalse(snapChanges.last().modes.contains(SnapMode.GRID))
@@ -219,6 +222,7 @@ class DrawingCanvasScreenTest {
             SnapMode.ENDPOINT, SnapMode.MIDPOINT, SnapMode.INTERSECTION, SnapMode.PERPENDICULAR, SnapMode.ORTHO,
         )))
         compose.onNodeWithText(context.getString(R.string.close)).performClick()
+        compose.cadGroup("level");compose.onNodeWithTag("level_units").performScrollTo().performClick()
         compose.onNodeWithTag("canvas_units").performClick()
         compose.onNodeWithText(context.getString(R.string.project_unit_metres)).performClick()
         assertEquals(listOf(LengthUnit.METRES), unitChanges)
@@ -274,7 +278,8 @@ class DrawingCanvasScreenTest {
     }
 
     private fun toolbarClick(tag: String) {
-        compose.onNodeWithTag(tag).performScrollTo().performClick()
+        if(tag=="canvas_zoom_window")compose.cadGroup("navigate")else if(tag in setOf("canvas_probe","canvas_snaps","canvas_clear_reference"))compose.cadGroup("settings")
+        if(tag=="canvas_extents")compose.onNodeWithTag(tag).performClick()else compose.onNodeWithTag(tag).performScrollTo().performClick()
     }
 
     private fun snapOption(label: Int) {

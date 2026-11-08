@@ -46,7 +46,7 @@ class WallServicesFlowTest {
         }
         compose.waitUntil(10000){model.state.value.document!!.elements.size==2}
         assertTrue(wallDepthWarnings(model.state.value.document!!).isNotEmpty())
-        compose.onNodeWithTag("wall_service_properties").assertIsDisplayed()
+        compose.cadGroup("route");compose.onNodeWithTag("canvas_route_list").performScrollTo().performClick();compose.onNodeWithTag("wall_service_properties").assertExists()
         compose.onNodeWithTag("wall_schedule_open").performClick()
         compose.onNodeWithTag("wall_schedule").assertIsDisplayed()
         compose.onNodeWithTag("wall_depth_threshold").performTextReplacement("90")
@@ -60,8 +60,8 @@ class WallServicesFlowTest {
     }
     @Test fun concealedConduitLauncherUsesSharedGhostAndCancelWithoutChangingWall() {
         start()
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_route_CONDUIT").performScrollTo().performClick()
+        compose.cadGroup("draw")
+        compose.cadGroup("route");compose.onNodeWithTag("tool_route_CONDUIT").performScrollTo().performClick()
         compose.onNodeWithTag("route_choice_Wall route").performClick()
         compose.onNodeWithText("Concealed (chase)").performClick()
         for((label,angle) in listOf("45°" to WallSnapAngles.FORTY_FIVE,"Free" to WallSnapAngles.FREE,"0°" to WallSnapAngles.HORIZONTAL,"90°" to WallSnapAngles.NINETY)) {
@@ -69,9 +69,9 @@ class WallServicesFlowTest {
             compose.onNodeWithText(label).performClick()
             assertEquals(angle,model.state.value.settings.lastRoutingSettings[RouteKind.CONDUIT]!!.effectiveWallSnapAngles())
         }
-        compose.onNodeWithTag("tools_collapse").performClick()
+        compose.cadCloseStrip("draw")
         compose.onNodeWithTag("route_ghost").assertExists()
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.4f,height*.5f))}
+        compose.cadTap(.4f, .5f)
         compose.onNodeWithTag("placement_cancel").performClick()
         assertEquals(listOf(wall),model.state.value.document!!.elements)
         assertTrue(wallServiceCuts(model.state.value.document!!).isEmpty())

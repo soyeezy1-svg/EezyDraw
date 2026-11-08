@@ -66,7 +66,7 @@ class CanvasProjectFlowTest {
         compose.onNodeWithTag("confirm_create_project").performScrollTo().performClick()
 
         awaitCanvas()
-        compose.onNodeWithText("Coordination plan").assertIsDisplayed()
+        compose.onNodeWithTag("cad_bottom_bar").assertIsDisplayed()
         compose.onNodeWithTag("project_name").assertDoesNotExist()
         val projectId = compose.runOnIdle {
             val document = checkNotNull(model.state.value.document)
@@ -77,14 +77,14 @@ class CanvasProjectFlowTest {
             document.project.id
         }
 
-        compose.onNodeWithContentDescription(context.getString(R.string.canvas_back)).performClick()
+        compose.onNodeWithTag("canvas_close").performClick()
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
         compose.onNodeWithTag("drawing_canvas").assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.continue_project))
             .performScrollTo().assertIsEnabled().performClick()
 
         awaitCanvas()
-        compose.onNodeWithText("Coordination plan").assertIsDisplayed()
+        compose.onNodeWithTag("cad_bottom_bar").assertIsDisplayed()
         compose.onNodeWithTag("project_name").assertDoesNotExist()
         compose.onNodeWithTag("create_project_screen").assertDoesNotExist()
         compose.runOnIdle {

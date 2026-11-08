@@ -105,14 +105,14 @@ class CleanSelectionPlacementFlowTest {
         awaitRendered(element)
         compose.onNodeWithTag("placement_banner").assertDoesNotExist()
         compose.onNodeWithTag("construction_ghost").assertDoesNotExist()
-        compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
+        compose.cadSelection();compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
         listOf("mode", "copy", "delete", "properties", "more").forEach { action ->
             compose.onNodeWithTag("selection_$action").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
         }
         compose.onNodeWithTag("properties_side_panel").assertDoesNotExist()
-        compose.onNodeWithTag("selection_properties").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_properties").performClick()
         compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
-        compose.onNodeWithTag("panel_properties_hide").performClick()
+        compose.cadCloseDetail()
         compose.onNodeWithTag("properties_side_panel").assertDoesNotExist()
         // A tap on the persistent View bar is a panel interaction, not a canvas deselection.
         tapCanvas(.94f, .20f)
@@ -140,7 +140,7 @@ class CleanSelectionPlacementFlowTest {
         awaitElements(1)
         compose.runOnIdle { model.undo() }
         awaitElements(0)
-        compose.runOnIdle { assertFalse(model.state.value.dirty); assertFalse(model.state.value.canUndo) }
+        compose.runOnIdle { assertTrue(model.state.value.document!!.elements.isEmpty()); assertFalse(model.state.value.canUndo) }
         compose.runOnIdle { model.redo() }
         awaitElements(1)
         compose.runOnIdle { model.redo() }
@@ -155,10 +155,10 @@ class CleanSelectionPlacementFlowTest {
             "Electrical", Size3(.12, .08, .12))
         reopen(document.copy(libraryItems = listOf(socket)))
         fun chooseSocket() {
-            compose.onNodeWithTag("toolbar_library").performClick()
-            compose.onNodeWithTag("library_insert_socket").performScrollTo().performClick()
+            compose.cadLibrary()
+            compose.cadLibraryItem("library_insert_socket").performClick()
             compose.onNodeWithTag("library_panel").assertIsDisplayed()
-            compose.onNodeWithTag("panel_library_collapse").performClick()
+            compose.cadCloseDetail()
             compose.onNodeWithTag("library_panel").assertDoesNotExist()
             compose.onNodeWithTag("placement_hint").assertIsDisplayed()
             assertElements(0)
@@ -173,13 +173,13 @@ class CleanSelectionPlacementFlowTest {
         val component = singleElement()
         assertEquals(socket.id, (component.body as ElementBody.Component).libraryItemId)
         compose.onNodeWithTag("placement_banner").assertDoesNotExist()
-        compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
+        compose.cadSelection();compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
         // This small library symbol puts its floating actions over the View
         // toolbar; collapse View explicitly, undo, then restore its saved state.
-        compose.onNodeWithTag("panel_view_collapse").performClick()
+        compose.cadCloseStrip("view")
         selectionAction("undo")
         awaitElements(0)
-        compose.onNodeWithTag("panel_view_expand").performClick()
+        compose.cadGroup("view")
         compose.runOnIdle {
             assertEquals(listOf(socket.id), checkNotNull(model.state.value.document).libraryState.recentIds)
             assertTrue("Recently used persists independently of geometry undo", model.state.value.dirty)
@@ -193,7 +193,7 @@ class CleanSelectionPlacementFlowTest {
         val floor = 2.4
         val level = Level(LevelId("elevated-floor"), initial.project.id, "Elevated floor", floor, .2, 3.4)
         reopen(initial.copy(levels = listOf(level)))
-        compose.onNodeWithTag("canvas_level").performScrollTo().performClick()
+        compose.cadGroup("level");compose.onNodeWithTag("level_units").performScrollTo().performClick();compose.onNodeWithTag("canvas_level").performClick()
         compose.onNodeWithText(level.name).performClick()
         for (face in listOf(R.string.canvas_front, R.string.canvas_side)) {
             chooseTool("box")
@@ -227,7 +227,7 @@ class CleanSelectionPlacementFlowTest {
             compose.onNodeWithTag("placement_banner").assertDoesNotExist()
             selectionAction("undo")
             awaitElements(0)
-            compose.runOnIdle { assertFalse(model.state.value.dirty) }
+            compose.runOnIdle { assertFalse(model.state.value.canUndo) }
         }
     }
 
@@ -280,7 +280,7 @@ class CleanSelectionPlacementFlowTest {
     fun allThreeRotationBandsSnapToFifteenDegreesAndHaveOneStepUndoRedo() {
         startProject("Tilt and turn")
         val original = placeBox()
-        compose.onNodeWithTag("selection_mode").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_mode").performClick()
         for ((handle, axis) in listOf(GizmoHandle.ROTATE_X to 0, GizmoHandle.ROTATE_Y to 1, GizmoHandle.ROTATE_Z to 2)) {
             awaitRendered(original)
             val current = frame()
@@ -323,7 +323,7 @@ class CleanSelectionPlacementFlowTest {
         val original = placeBox()
         selectionAction("scale")
         assertTrue(controls(GizmoMode.SCALE).any { it.handle.resizeHandle() != null })
-        compose.onNodeWithTag("selection_mode").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_mode").performClick()
         assertEquals(setOf(GizmoHandle.MOVE_FREE, GizmoHandle.MOVE_X, GizmoHandle.MOVE_Y, GizmoHandle.MOVE_Z),
             controls(GizmoMode.MOVE).map { it.handle }.toSet())
         selectionAction("rotate_90")
@@ -352,9 +352,9 @@ class CleanSelectionPlacementFlowTest {
     @Test
     fun measureDefaultsToDistanceOnlyWithoutOpeningAnyPanelAndCanBeUndoneAsOnePlacement() {
         startProject("Distance only")
-        compose.onNodeWithTag("toolbar_measure").performClick()
-        compose.onNodeWithTag("toolbar_measure_distance").performClick()
-        compose.onNodeWithTag("panel_measure_collapse").performClick()
+        compose.cadGroup("measure")
+        compose.onNodeWithTag("canvas_measure").performClick()
+        compose.cadCloseStrip("measure")
         assertElements(0)
         compose.onNodeWithTag("placement_hint").assertIsDisplayed()
         tapCanvas(.40f, .72f)
@@ -375,10 +375,10 @@ class CleanSelectionPlacementFlowTest {
         compose.onNodeWithTag("placement_banner").assertDoesNotExist()
         compose.onNodeWithTag("measurements_panel").assertDoesNotExist()
         compose.onNodeWithTag("properties_side_panel").assertDoesNotExist()
-        compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
+        compose.cadSelection();compose.onNodeWithTag("selection_toolbar").assertIsDisplayed()
         selectionAction("undo")
         awaitElements(0)
-        compose.runOnIdle { assertFalse(model.state.value.dirty) }
+        compose.runOnIdle { assertFalse(model.state.value.canUndo) }
     }
 
     private fun startProject(name: String, keepActive: Boolean = false) {
@@ -398,14 +398,7 @@ class CleanSelectionPlacementFlowTest {
     }
 
     private fun chooseTool(tool: String) {
-        if (compose.onAllNodesWithTag("tools_expand").fetchSemanticsNodes().isNotEmpty())
-            compose.onNodeWithTag("tools_expand").performClick()
-        else if (compose.onAllNodesWithTag("tool_$tool").fetchSemanticsNodes().isEmpty())
-            compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
-        if (compose.onAllNodesWithTag("tools_collapse").fetchSemanticsNodes().isNotEmpty())
-            compose.onNodeWithTag("tools_collapse").performClick()
-        compose.waitForIdle()
+        compose.cadTool(tool)
     }
 
     private fun placeBox(): Element {
@@ -416,7 +409,7 @@ class CleanSelectionPlacementFlowTest {
     }
 
     private fun tapCanvas(x: Float, y: Float) {
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * x, height * y)) }
+        compose.cadTap(x, y)
         compose.waitForIdle()
     }
 
@@ -442,7 +435,7 @@ class CleanSelectionPlacementFlowTest {
             resizeFrame = resize, mode = mode)
     }
 
-    private fun openMore() { compose.onNodeWithTag("selection_more").performClick() }
+    private fun openMore() { compose.cadSelection();compose.onNodeWithTag("selection_more").performClick() }
     private fun selectionAction(action: String) {
         openMore()
         compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()

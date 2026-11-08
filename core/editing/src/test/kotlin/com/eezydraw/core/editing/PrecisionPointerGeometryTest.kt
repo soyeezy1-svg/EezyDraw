@@ -45,6 +45,10 @@ class PrecisionPointerGeometryTest {
         val point=Point3(1e9,-1e9,2.4)
         val viewport=Viewport2D(pixelsPerMetre=80.0)
         assertEquals(Point3(point.x+.1,point.y+.1,point.z),nudgePrecisionPoint(point,1,-1,.1,viewport,OrbitCamera(),false))
+        val rotated=viewport.copy(center=Point2(point.x,point.y),rotation=Math.PI/2)
+        val planOrigin=projectPrecisionPoint(point,rotated,OrbitCamera(),false,1000.0,800.0)!!
+        val planRight=projectPrecisionPoint(nudgePrecisionPoint(point,1,0,.1,rotated,OrbitCamera(),false),rotated,OrbitCamera(),false,1000.0,800.0)!!
+        assertTrue(planRight.x>planOrigin.x);assertEquals(planOrigin.y,planRight.y,1e-4)
         for(projection in Projection.entries)for(preset in ViewPreset.entries) {
             val camera=OrbitCamera(target=Point3(1e9,-1e9,2.4),projection=projection).preset(preset)
             val origin=projectPrecisionPoint(point,viewport,camera,true,1000.0,800.0)!!

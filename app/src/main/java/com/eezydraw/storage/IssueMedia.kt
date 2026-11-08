@@ -52,7 +52,7 @@ object IssueMedia {
   val view=i.capture
   val snapshot=i.screenshot?.let {decode(context,Uri.fromFile(file(context,doc,it)))} ?: run {
    val position=i.position ?: Point3()
-   val f=if(view!=null)CanvasFrame(Viewport2D(view.centre,view.pixelsPerMetre),OrbitCamera(view.target,view.yaw,view.pitch,view.distance,view.orthographicHeight,view.projection),view.is3D,view.levelId?.value,showGrid=view.grid,viewMode=view.settings.viewMode) else CanvasFrame(Viewport2D(Point2(position.x,position.y),100.0),OrbitCamera(target=position),levelId=i.levelId?.value)
+   val f=if(view!=null)CanvasFrame(Viewport2D(view.centre,view.pixelsPerMetre,view.planRotation),OrbitCamera(view.target,view.yaw,view.pitch,view.distance,view.orthographicHeight,view.projection),view.is3D,view.levelId?.value,showGrid=view.grid,viewMode=view.settings.viewMode,sectionBox=view.sectionBox) else CanvasFrame(Viewport2D(Point2(position.x,position.y),100.0),OrbitCamera(target=position),levelId=i.levelId?.value)
    ViewExport.render(ViewExportRequest(restoreIssuePresentation(doc,view),f,view?.width ?: 1000,view?.height ?: 650)).also {image->if(i.markupVisible)paintIssueMarkups(Canvas(image),i.annotations.filter {it.viewId==view?.id || it.viewId.isEmpty()},image.width,image.height)}
   }
   try {draw(snapshot,RectF(24f,y+10,976f,y+510))}finally {snapshot.recycle()};y+=530

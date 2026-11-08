@@ -85,9 +85,7 @@ class ShapeDimensionsFlowTest {
             compose.runOnIdle { model.changeUnits(units[index % units.size]) }
             chooseTool(tool)
             // Deliberately vary the screen location. Placement pixels must never become dimensions.
-            compose.onNodeWithTag("canvas_surface").performTouchInput {
-                click(Offset(width * (.36f + .025f * index), height * .62f))
-            }
+            compose.cadTap((.36f + .025f * index), .62f)
             awaitElements(index + 1)
             val placed = compose.runOnIdle { checkNotNull(model.state.value.document).elements.last() }
             val size = properties(placed).size
@@ -178,14 +176,14 @@ class ShapeDimensionsFlowTest {
         compose.onNodeWithTag("property_width").performScrollTo().performTextReplacement("2500")
         compose.onNodeWithTag("properties_apply").performClick()
         compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
-        compose.onNodeWithTag("panel_properties_hide").performClick()
+        compose.cadCloseDetail()
         val edited = singleElement()
         val editedSize = properties(edited).size
         assertEquals(2.5, editedSize.x, 1e-10)
         assertEquals(physical.size.y, editedSize.y, 1e-10)
         assertEquals(physical.size.z, editedSize.z, 1e-10)
         collapseTools()
-        compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
+        compose.cadGroup("settings");compose.onNodeWithTag("canvas_save").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
         val projectId = compose.runOnIdle { checkNotNull(model.state.value.document).project.id.value }
         compose.runOnIdle { model.open(projectId) }
@@ -199,7 +197,7 @@ class ShapeDimensionsFlowTest {
         placeSingle("rectangle")
         chooseTool("select")
         compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
-        compose.onNodeWithTag("selection_more").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_more").performClick()
         compose.onNodeWithTag("selection_keep_proportions").performScrollTo().performClick()
         dragHandle(GizmoHandle.RESIZE_CORNER_MAX_MAX, Offset(-50f, 25f))
         val rectangle = singleElement()
@@ -233,41 +231,32 @@ class ShapeDimensionsFlowTest {
 
     private fun placeSingle(tool: String) {
         chooseTool(tool)
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .43f, height * .62f)) }
+        compose.cadTap(.43f, .62f)
         awaitElements(1)
         awaitRendered(singleElement())
     }
 
     private fun chooseTool(tool: String) {
-        if (tool == "select") { collapseTools(); return }
-        compose.runOnIdle { model.select(emptySet()) }
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
-        collapseTools()
+        compose.cadTool(tool)
     }
 
     private fun toolsAction(action: String) {
-        if (action in setOf("copy", "delete", "properties")) {
-            compose.onNodeWithTag("selection_$action").assertIsEnabled().performClick()
-        } else {
-            compose.onNodeWithTag("selection_more").performClick()
-            compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
-        }
-        compose.waitForIdle()
+        compose.cadAction(action)
     }
 
     private fun collapseTools() {
-        if (compose.onAllNodesWithTag("tools_collapse").fetchSemanticsNodes().isNotEmpty()) compose.onNodeWithTag("tools_collapse").performClick()
+        compose.cadCloseStrip("draw")
     }
 
     private fun dragHandle(handle: GizmoHandle, change: Offset) {
         toolsAction("scale")
+        compose.onNodeWithTag("canvas_extents").assertIsEnabled().performClick()
         val before = singleElement()
         awaitRendered(before)
         val control = controls().single { it.handle == handle }
         val start = Offset(control.center.x.toFloat(), control.center.y.toFloat())
         compose.onNodeWithTag("canvas_surface").performTouchInput { swipe(start, start + change, 240) }
-        compose.waitUntil(10_000) { model.state.value.document?.elements?.single() != before }
+        try {compose.waitUntil(10_000) { model.state.value.document?.elements?.single() != before }}catch(error:Throwable){throw AssertionError("Resize $handle at $start by $change; bar=${compose.onNodeWithTag("cad_bottom_controls").fetchSemanticsNode().boundsInRoot}; old=${before.transform}; frame=${frame().viewport}",error)}
         awaitRendered(singleElement())
     }
 

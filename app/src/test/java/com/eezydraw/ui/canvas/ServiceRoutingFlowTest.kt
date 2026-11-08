@@ -32,21 +32,21 @@ class ServiceRoutingFlowTest {
         compose.runOnIdle {model.create("Service routes",ProjectTemplate.EMPTY,LengthUnit.MILLIMETRES)}
         compose.waitUntil(10000){model.state.value.document!=null && !model.state.value.busy}
         compose.setContent {EezyDrawApp(model,canvasSurface={_,_,modifier->Box(modifier)})}
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_route_CABLE_TRAY").performScrollTo().performClick()
+        compose.cadGroup("route")
+        compose.cadGroup("route");compose.onNodeWithTag("tool_route_CABLE_TRAY").performScrollTo().performClick()
         compose.onNodeWithTag("routing_settings").assertIsDisplayed()
-        compose.onNodeWithTag("tools_collapse").performClick()
+        compose.cadCloseStrip("route")
     }
     @Test fun routeUsesGhostCancelRiserAndRememberedSettingsThenUndoRedo() {
         start(false)
         val before=compose.runOnIdle {model.state.value.document!!.project.settings.canvasLayout}
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.4f,height*.6f))}
+        compose.cadTap(.4f, .6f)
         compose.onNodeWithTag("route_ghost").assertExists()
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.7f,height*.6f))}
+        compose.cadTap(.7f, .6f)
         compose.onNodeWithTag("route_input_Elevation").performTextReplacement("3000")
         compose.waitForIdle()
         assertEquals(AppScreen.PROJECT,model.state.value.screen)
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.7f,height*.8f))}
+        compose.cadTap(.7f, .8f)
         compose.onNodeWithTag("placement_done").performClick()
         compose.waitUntil(10000){model.state.value.document!!.elements.count {it.body is ElementBody.Route}==3}
         assertEquals(3.0,model.state.value.settings.lastRoutingSettings.getValue(RouteKind.CABLE_TRAY).elevation.value,1e-8)
@@ -58,7 +58,7 @@ class ServiceRoutingFlowTest {
     }
     @Test fun precisionPointerRequiresPlaceAndCancelLeavesNoObjects() {
         start(true)
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.5f,height*.65f))}
+        compose.cadTap(.5f, .65f)
         assertTrue(model.state.value.document!!.elements.isEmpty())
         compose.onNodeWithTag("precision_place").performClick()
         assertTrue(model.state.value.document!!.elements.isEmpty())

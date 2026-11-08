@@ -60,7 +60,7 @@ internal fun PrecisionPointerOverlay(
     onPlace: () -> Unit, onCancel: () -> Unit, onNudge: (Int, Int) -> Unit, enabled: Boolean,
     modifier: Modifier = Modifier, pickContext: PointPickContext? = null,
     viewMode: ViewMode = ViewMode.WIREFRAME, levelId: String? = null,
-    canPlace:Boolean=true,
+    canPlace:Boolean=true,controlsBottomInset:androidx.compose.ui.unit.Dp=0.dp,controlsVisible:Boolean=true,
 ) {
     val density = LocalDensity.current.density
     val accent = MaterialTheme.colorScheme.primary
@@ -148,23 +148,15 @@ internal fun PrecisionPointerOverlay(
                 }
             }
         }
-        Surface(Modifier.align(if(settings.side==PrecisionOffsetSide.ABOVE_LEFT)Alignment.BottomEnd else Alignment.BottomStart)
-            .padding(12.dp).testTag("precision_controls").pointerInput(Unit) {detectTapGestures(onTap={})},
+        if(controlsVisible)Surface(Modifier.align(if(settings.side==PrecisionOffsetSide.ABOVE_LEFT)Alignment.BottomEnd else Alignment.BottomStart)
+            .padding(bottom=controlsBottomInset).padding(12.dp).testTag("precision_controls").pointerInput(Unit) {detectTapGestures(onTap={})},
             shape=RoundedCornerShape(18.dp),tonalElevation=5.dp,shadowElevation=3.dp) {
             Column(Modifier.padding(4.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                IconButton({onNudge(0,-1)},Modifier.size(48.dp).testTag("precision_nudge_up"),enabled=enabled && pick!=null) {
-                    Icon(Icons.Outlined.ArrowUpward,stringResource(R.string.precision_nudge_up))
-                }
                 Row {
-                    IconButton({onNudge(-1,0)},Modifier.size(48.dp).testTag("precision_nudge_left"),enabled=enabled && pick!=null) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack,stringResource(R.string.precision_nudge_left))
-                    }
-                    IconButton({onNudge(0,1)},Modifier.size(48.dp).testTag("precision_nudge_down"),enabled=enabled && pick!=null) {
-                        Icon(Icons.Outlined.ArrowDownward,stringResource(R.string.precision_nudge_down))
-                    }
-                    IconButton({onNudge(1,0)},Modifier.size(48.dp).testTag("precision_nudge_right"),enabled=enabled && pick!=null) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowForward,stringResource(R.string.precision_nudge_right))
-                    }
+                    IconButton({onNudge(-1,0)},Modifier.size(48.dp).testTag("precision_nudge_left"),enabled=enabled && pick!=null){Icon(Icons.AutoMirrored.Outlined.ArrowBack,stringResource(R.string.precision_nudge_left))}
+                    IconButton({onNudge(0,-1)},Modifier.size(48.dp).testTag("precision_nudge_up"),enabled=enabled && pick!=null){Icon(Icons.Outlined.ArrowUpward,stringResource(R.string.precision_nudge_up))}
+                    IconButton({onNudge(0,1)},Modifier.size(48.dp).testTag("precision_nudge_down"),enabled=enabled && pick!=null){Icon(Icons.Outlined.ArrowDownward,stringResource(R.string.precision_nudge_down))}
+                    IconButton({onNudge(1,0)},Modifier.size(48.dp).testTag("precision_nudge_right"),enabled=enabled && pick!=null){Icon(Icons.AutoMirrored.Outlined.ArrowForward,stringResource(R.string.precision_nudge_right))}
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                     OutlinedButton(onCancel,Modifier.defaultMinSize(minWidth=64.dp,minHeight=56.dp).testTag("precision_cancel")) {

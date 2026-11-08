@@ -244,7 +244,7 @@ private fun ToolChoices(tools: List<DrawingTool>, selected: DrawingTool, onTool:
     }
 }
 
-private fun drawingToolIcon(tool: DrawingTool): ImageVector = when (tool) {
+internal fun drawingToolIcon(tool: DrawingTool): ImageVector = when (tool) {
     DrawingTool.SELECT -> Icons.Outlined.NearMe
     DrawingTool.LINE -> Icons.Outlined.HorizontalRule
     DrawingTool.POLYLINE -> Icons.Outlined.Polyline
@@ -263,7 +263,7 @@ private fun drawingToolIcon(tool: DrawingTool): ImageVector = when (tool) {
 }
 
 @Composable
-private fun ToolOptionsFields(tool: DrawingTool, options: ToolOptions, units: LengthUnit, onOptions: (ToolOptions) -> Unit) {
+internal fun ToolOptionsFields(tool: DrawingTool, options: ToolOptions, units: LengthUnit, onOptions: (ToolOptions) -> Unit) {
     if (supportsDefaultPlacement(tool)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(!options.useDefaultDimensions, { onOptions(options.copy(useDefaultDimensions = !it)) },

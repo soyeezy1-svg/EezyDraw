@@ -87,10 +87,11 @@ class PrecisionPointerFlowTest {
         compose.onNodeWithTag("precision_cancel").assertHeightIsAtLeast(56.dp)
         val current = frame()
         val area = canvasSize()
-        val finger = Point2(area.x * .40 + 12, area.y * .80 + 6)
+        val start=compose.cadPoint(.40f,.80f)
+        val finger = Point2(start.x.toDouble()+12,start.y.toDouble()+6)
         val expected = expectedPlanPoint(finger, current, area)
         compose.onNodeWithTag("canvas_surface").performTouchInput {
-            down(Offset(width * .40f, height * .80f))
+            down(start)
             moveTo(Offset(finger.x.toFloat(), finger.y.toFloat()), delayMillis = 48)
         }
         compose.onNodeWithTag("precision_loupe").assertIsDisplayed()
@@ -108,10 +109,10 @@ class PrecisionPointerFlowTest {
         val atFinger = current.viewport.screenToWorld(finger.x, finger.y, area.x, area.y)
         assertTrue("The confirmed point must stay away from the finger", hypot(expected.x - atFinger.x, expected.y - atFinger.y) > .01)
         compose.onNodeWithTag("precision_place").assertDoesNotExist()
-        compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_undo").performClick()
         awaitElements(0)
         compose.runOnIdle { assertFalse(model.state.value.dirty) }
-        compose.onNodeWithTag("view_redo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_redo").performClick()
         awaitElements(1)
         assertEquals(placed, singleElement())
     }
@@ -140,9 +141,9 @@ class PrecisionPointerFlowTest {
         assertElements(0)
         confirm()
         assertElements(0)
-        compose.onNodeWithTag("view_undo").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("view_undo").assertIsEnabled().performClick()
         assertElements(0)
-        compose.onNodeWithTag("view_redo").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("view_redo").assertIsEnabled().performClick()
         touch(.40f, .88f)
         assertElements(0)
         compose.onNodeWithTag("precision_distance").assertExists()
@@ -152,16 +153,16 @@ class PrecisionPointerFlowTest {
         val shape = (line.body as ElementBody.DrawingShape).shape as Shape.Line
         assertPoint(first, measurementToWorld(line.transform, shape.start))
         assertTrue(hypot(shape.end.x - shape.start.x, shape.end.y - shape.start.y) > .01)
-        compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_undo").performClick()
         awaitElements(0)
     }
 
     @Test
     fun measureUsesConfirmedPointsAndNeverSavesOnFingerRelease() {
         startProject("Confirmed measurement")
-        compose.onNodeWithTag("toolbar_measure").performClick()
-        compose.onNodeWithTag("toolbar_measure_distance").performClick()
-        compose.onNodeWithTag("panel_measure_collapse").performClick()
+        compose.cadGroup("measure")
+        compose.onNodeWithTag("canvas_measure").performClick()
+        compose.cadCloseStrip("measure")
         touch(.40f, .80f)
         assertElements(0)
         confirm()
@@ -175,7 +176,7 @@ class PrecisionPointerFlowTest {
             val document = checkNotNull(model.state.value.document)
             assertTrue(checkNotNull(resolveMeasurement(document, document.elements.single())).distance > .01)
         }
-        compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_undo").performClick()
         awaitElements(0)
     }
 
@@ -187,10 +188,10 @@ class PrecisionPointerFlowTest {
             "Electrical", Size3(.12, .08, .12))
         reopen(initial.copy(libraryItems = listOf(socket), project = initial.project.copy(settings = initial.project.settings.copy(
             snap = initial.project.settings.snap.copy(enabled = false)))))
-        compose.onNodeWithTag("toolbar_library").performClick()
-        compose.onNodeWithTag("library_insert_precision-socket").performScrollTo().performClick()
+        compose.cadLibrary()
+        compose.cadLibraryItem("library_insert_precision-socket").performClick()
         compose.onNodeWithTag("library_panel").assertIsDisplayed()
-        compose.onNodeWithTag("panel_library_collapse").performClick()
+        compose.cadCloseDetail()
         compose.onNodeWithTag("library_panel").assertDoesNotExist()
         assertElements(0)
         val expected = expectedPlanPoint(finger(.40f, .80f), frame(), canvasSize())
@@ -203,7 +204,7 @@ class PrecisionPointerFlowTest {
         assertEquals(socket.id, (component.body as ElementBody.Component).libraryItemId)
         assertPoint(expected, component.transform.translation)
         compose.onNodeWithTag("precision_place").assertDoesNotExist()
-        compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_undo").performClick()
         awaitElements(0)
         compose.runOnIdle {
             assertEquals(listOf(socket.id), checkNotNull(model.state.value.document).libraryState.recentIds)
@@ -214,9 +215,9 @@ class PrecisionPointerFlowTest {
     @Test
     fun aPlanReferenceShowsAndSavesTheRaisedComponentInsertionHeight() {
         startProject("Raised socket reference")
-        compose.onNodeWithTag("toolbar_measure").performClick()
-        compose.onNodeWithTag("toolbar_reference_dimension").performClick()
-        compose.onNodeWithTag("panel_measure_collapse").performClick()
+        compose.cadGroup("measure")
+        compose.onNodeWithTag("canvas_reference_dimension").performClick()
+        compose.cadCloseStrip("measure")
         // Build the host around a safe raw aim point in the active tool layout.
         // Grid is enabled deliberately: a grid candidate must not replace the
         // component's mounting/insertion position with a floor-plane position.
@@ -252,7 +253,7 @@ class PrecisionPointerFlowTest {
             assertPoint(insertion, summary.start)
             assertEquals(1.2, checkNotNull(summary.heightAboveFloorMetres), 1e-9)
         }
-        compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+        compose.onNodeWithTag("view_undo").performClick()
         awaitElements(1)
         compose.runOnIdle { assertEquals(host, checkNotNull(model.state.value.document).elements.single()) }
     }
@@ -328,7 +329,7 @@ class PrecisionPointerFlowTest {
         val level = Level(LevelId("pointer-floor"), initial.project.id, "Pointer floor", 2.4, .2, 3.4)
         reopen(initial.copy(levels = listOf(level), project = initial.project.copy(settings = initial.project.settings.copy(
             snap = initial.project.settings.snap.copy(enabled = false)))))
-        compose.onNodeWithTag("canvas_level").performScrollTo().performClick()
+        compose.cadGroup("level");compose.onNodeWithTag("level_units").performScrollTo().performClick();compose.onNodeWithTag("canvas_level").performClick()
         compose.onNodeWithText(level.name).performClick()
         for (face in listOf(R.string.canvas_front, R.string.canvas_side)) {
             chooseTool("box")
@@ -348,7 +349,7 @@ class PrecisionPointerFlowTest {
             // Edge-on front/side picks use the camera-facing construction plane;
             // its Z can vary above the active floor and must not be flattened on commit.
             assertPoint(candidate, placed.transform.translation)
-            compose.onNodeWithTag("view_undo").performScrollTo().performClick()
+            compose.onNodeWithTag("view_undo").performClick()
             awaitElements(0)
         }
     }
@@ -423,18 +424,11 @@ class PrecisionPointerFlowTest {
     }
 
     private fun chooseTool(name: String) {
-        if (compose.onAllNodesWithTag("tools_expand").fetchSemanticsNodes().isNotEmpty())
-            compose.onNodeWithTag("tools_expand").performClick()
-        else if (compose.onAllNodesWithTag("tool_$name").fetchSemanticsNodes().isEmpty())
-            compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_$name").performScrollTo().performClick()
-        if (compose.onAllNodesWithTag("tools_collapse").fetchSemanticsNodes().isNotEmpty())
-            compose.onNodeWithTag("tools_collapse").performClick()
-        compose.waitForIdle()
+        compose.cadTool(name)
     }
 
     private fun touch(x: Float, y: Float) {
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * x, height * y)) }
+        compose.cadTap(x, y)
         compose.waitForIdle()
     }
     private fun confirm() { compose.onNodeWithTag("precision_place").assertIsEnabled().performClick(); compose.waitForIdle() }
@@ -462,7 +456,7 @@ class PrecisionPointerFlowTest {
     private fun singleElement(): Element = document().elements.single()
     private fun frame(): CanvasFrame = compose.runOnIdle { checkNotNull(rendered.get()) }
     private fun canvasSize(): Point2 = compose.onNodeWithTag("canvas_surface").fetchSemanticsNode().boundsInRoot.let { Point2(it.width.toDouble(), it.height.toDouble()) }
-    private fun finger(x: Float, y: Float): Point2 = canvasSize().let { Point2(it.x * x, it.y * y) }
+    private fun finger(x: Float, y: Float): Point2 = compose.cadPoint(x,y).let { Point2(it.x.toDouble(),it.y.toDouble()) }
     private fun expectedPlanPoint(finger: Point2, frame: CanvasFrame, size: Point2): Point3 {
         val settings = compose.runOnIdle { model.state.value.settings.precisionPointer }
         val screen = offsetCrosshair(finger, size.x, size.y, context.resources.displayMetrics.density.toDouble(), settings)

@@ -39,21 +39,21 @@ class FloorServicesFlowTest {
     }
     @Test fun installationDepthGhostDrawingScheduleVisibilityAndUndoUseTheExistingFlow() {
         start()
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_route_CONDUIT").performScrollTo().performClick()
-        compose.onNodeWithTag("tools_collapse").performClick()
+        compose.cadGroup("draw")
+        compose.cadGroup("route");compose.onNodeWithTag("tool_route_CONDUIT").performScrollTo().performClick()
+        compose.cadCloseStrip("draw")
         compose.onNodeWithTag("route_choice_Installation").performScrollTo().performClick()
         compose.onNodeWithText("In screed").performClick()
         compose.onNodeWithTag("route_input_Depth below finished floor").performTextReplacement("20")
         compose.onNodeWithTag("route_live_label").assertTextContains("-20",substring=true)
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.35f,height*.65f));click(Offset(width*.65f,height*.65f))}
+        compose.cadTap(.35f,.65f);compose.cadTap(.65f,.65f)
         compose.onNodeWithTag("route_ghost").assertExists()
         compose.onNodeWithTag("placement_done").performClick()
         compose.waitUntil(10000){model.state.value.document!!.elements.any {it.body is ElementBody.Route}}
         val doc=model.state.value.document!!
         assertEquals(.02,doc.elements.first {it.body is ElementBody.Route}.floorRouting()!!.floorDepth,1e-9)
         compose.runOnIdle {model.select(setOf(doc.elements.first {it.body is ElementBody.Route}.id))}
-        compose.onNodeWithTag("rise_to_floor_box").performClick()
+        compose.cadGroup("route");compose.onNodeWithTag("canvas_route_list").performScrollTo().performClick();compose.onNodeWithTag("rise_to_floor_box").performScrollTo().performClick()
         compose.onNodeWithText("Place a floor box or floor socket from the library first.").assertExists()
         compose.onNodeWithText("Cancel").performClick()
         val routeId=doc.elements.first {it.body is ElementBody.Route}.id.value
@@ -67,11 +67,11 @@ class FloorServicesFlowTest {
     }
     @Test fun slabLauncherAndFloorLibraryAreAvailable() {
         start()
-        compose.onNodeWithTag("toolbar_draw").performClick()
+        compose.cadGroup("draw")
         compose.onNodeWithTag("tool_slab").performScrollTo().performClick()
-        compose.onNodeWithTag("tools_collapse").performClick()
+        compose.cadCloseStrip("draw")
         compose.onNodeWithTag("route_input_Slab thickness").performTextReplacement("220")
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.35f,height*.55f));click(Offset(width*.65f,height*.8f))}
+        compose.cadTap(.35f,.55f);compose.cadTap(.65f,.8f)
         compose.waitUntil(10000){model.state.value.document!!.elements.any {it.body is ElementBody.Slab}}
         assertEquals(.22,(model.state.value.document!!.elements.first {it.body is ElementBody.Slab}.body as ElementBody.Slab).thickness,1e-9)
         assertTrue(BuiltInLibrary.items.any {it.floorService==FloorDeviceKind.SLAB_SLEEVE})

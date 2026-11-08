@@ -51,6 +51,24 @@ data class OrbitCamera(
             orthographicHeight = (orthographicHeight / factor).coerceIn(MIN_SIZE, MAX_SIZE))
     }
 
+    fun zoomAt(factor:Double,x:Double,y:Double,width:Double,height:Double):OrbitCamera =
+        pan(width/2-x,height/2-y,width,height).zoom(factor).pan(x-width/2,y-height/2,width,height)
+
+    fun eye():Point3 = (vector(target)+basis().outward*distance).point()
+
+    /** Turn the viewing direction while retaining the eye, unlike orbit around a target. */
+    fun lookAround(dxRadians:Double,dyRadians:Double):OrbitCamera {
+        val eye=vector(eye());val next=orbit(dxRadians,dyRadians)
+        return next.copy(target=(eye-next.basis().outward*distance).point())
+    }
+
+    /** Walk in the horizontal view direction; no collision or gravity is inferred. */
+    fun walk(right:Double,forward:Double,up:Double=0.0):OrbitCamera {
+        if(!listOf(right,forward,up).all {it.isFinite()})return this
+        val moved=vector(target)+Vec(-sin(yaw)*right-cos(yaw)*forward,cos(yaw)*right-sin(yaw)*forward,up)
+        return if(moved.finite())copy(target=moved.point())else this
+    }
+
     /** Preserve the target plane's apparent height while switching between lens types. */
     fun withProjection(value: Projection): OrbitCamera = when {
         value == projection -> this
