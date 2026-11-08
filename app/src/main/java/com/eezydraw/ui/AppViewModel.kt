@@ -611,6 +611,19 @@ class AppViewModel(
             (document.project.settings.showMeasurements || !isMeasurement(it)) }.map {it.id}.toSet()
     }
 
+    private var pendingDrawingExport:Pair<ViewExportRequest,com.eezydraw.storage.DrawingExportOptions>?=null
+    fun prepareDrawingExport(request:ViewExportRequest,options:com.eezydraw.storage.DrawingExportOptions) {pendingDrawingExport=request to options}
+    fun cancelDrawingExport() {pendingDrawingExport=null}
+    fun exportDrawing(uri:String) = operation {
+        val (request,options)=pendingDrawingExport ?: error("Choose Export 2D drawing again.")
+        withContext(Dispatchers.IO) {
+            val assets=java.io.File(application.filesDir,"projects/${request.document.project.id.value}/assets")
+            application.contentResolver.openOutputStream(uri.toUri(),"w")?.use {com.eezydraw.storage.DrawingExport.write(request,options,assets,it)} ?: error("The drawing export file cannot be opened.")
+        }
+        pendingDrawingExport=null
+        mutableState.update {it.copy(notice="2D drawing exported",noticeUndo=false)}
+    }
+
     private var pendingModelExport:Pair<ProjectDocument,com.eezydraw.core.geometry.ModelExportOptions>?=null
     fun prepareModelExport(options:com.eezydraw.core.geometry.ModelExportOptions) {
         state.value.document?.let {pendingModelExport=it to options.copy(appVersion=application.packageManager.getPackageInfo(application.packageName,0).versionName ?: "unknown")}

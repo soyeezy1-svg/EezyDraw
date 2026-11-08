@@ -98,11 +98,19 @@ fun EezyDrawApp(
         uri?.let { viewModel.exportProject(it.toString()) }
     }
     val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        if(uri!=null)viewModel.exportView(uri.toString()) else viewModel.cancelViewExport()
+        if(uri!=null)viewModel.exportDrawing(uri.toString()) else viewModel.cancelDrawingExport()
     }
     val exportPdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        if(uri!=null)viewModel.exportView(uri.toString()) else viewModel.cancelViewExport()
+        if(uri!=null)viewModel.exportDrawing(uri.toString()) else viewModel.cancelDrawingExport()
     }
+    var drawingRequest by remember {mutableStateOf<com.eezydraw.storage.ViewExportRequest?>(null)}
+    var drawingOptions by remember {mutableStateOf(com.eezydraw.storage.DrawingExportOptions())}
+    val exportDxf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/dxf")) {uri->if(uri!=null)viewModel.exportDrawing(uri.toString())else viewModel.cancelDrawingExport()}
+    drawingRequest?.let {request->com.eezydraw.ui.canvas.DrawingExportDialog(request,drawingOptions,{snapshot,options->
+        viewModel.prepareDrawingExport(snapshot,options);drawingRequest=null
+        val name=snapshot.document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)+"."+options.format.extension
+        when(options.format){com.eezydraw.storage.DrawingFormat.PDF->exportPdf.launch(name);com.eezydraw.storage.DrawingFormat.PNG->exportPng.launch(name);com.eezydraw.storage.DrawingFormat.DXF->exportDxf.launch(name)}
+    },{drawingRequest=null})}
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let { viewModel.chooseFolder(it.toString()) }
     }
@@ -198,11 +206,8 @@ fun EezyDrawApp(
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
                                         onExportModel={level,plan->modelOptions=com.eezydraw.core.geometry.ModelExportOptions(levelId=level?.let {com.eezydraw.core.model.LevelId(it)},selected=state.selectedIds,planView=plan);modelDialog=true},
-                                        onExportView={request,format->
-                                            viewModel.prepareViewExport(request,format)
-                                            val base=document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)
-                                            if(format==ViewExportFormat.PNG)exportPng.launch("$base-view.png") else exportPdf.launch("$base-view.pdf")
-                                        },
+                                        onExportDrawing={request->drawingOptions=com.eezydraw.storage.DrawingExportOptions();drawingRequest=request},
+                                        onExportView={request,format->drawingOptions=com.eezydraw.storage.DrawingExportOptions(format=if(format==ViewExportFormat.PNG)com.eezydraw.storage.DrawingFormat.PNG else com.eezydraw.storage.DrawingFormat.PDF);drawingRequest=request},
                                     )
                                 }
                             } ?: LoadingIndicator()
