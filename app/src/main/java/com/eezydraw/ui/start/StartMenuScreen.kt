@@ -198,6 +198,7 @@ private fun Introduction() {
 @Composable
 private fun ProjectActions(canContinue: Boolean, onAction: (StartMenuAction) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedCard(onClick={onAction(StartMenuAction.SampleProjects)},modifier=Modifier.fillMaxWidth().testTag("sample_projects"),shape=RoundedCornerShape(20.dp)){ActionContent(Icons.AutoMirrored.Outlined.ViewQuilt,"Sample projects","EEZY Test Building · 3 levels of editable architecture and services")}
         Card(
             onClick = { onAction(StartMenuAction.CreateProject) },
             modifier = Modifier.fillMaxWidth().testTag("create_project"),

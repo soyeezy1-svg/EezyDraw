@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -119,6 +120,7 @@ fun EezyDrawApp(
     var photoIssue by remember {mutableStateOf<com.eezydraw.core.model.Issue?>(null)}
     var photoIssueKey by rememberSaveable {mutableStateOf<String?>(null)}
     var cameraUriText by rememberSaveable {mutableStateOf<String?>(null)}
+    var samplesOpen by rememberSaveable {mutableStateOf(false)}
     var settingsReturnToProject by rememberSaveable {mutableStateOf(false)}
     var issueExportFormat by remember {mutableStateOf("pdf")}
     val issuePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){uri->uri?.let {viewModel.exportIssues(it.toString(),"pdf")}}
@@ -172,6 +174,7 @@ fun EezyDrawApp(
                                         StartMenuAction.ContinueProject -> viewModel.continueProject()
                                         StartMenuAction.OpenFile -> openFile.launch(arrayOf("*/*"))
                                         StartMenuAction.Settings -> viewModel.navigate(AppScreen.SETTINGS)
+                                        StartMenuAction.SampleProjects -> samplesOpen=true
                                         StartMenuAction.Help -> viewModel.navigate(AppScreen.HELP)
                                         is StartMenuAction.OpenRecent -> viewModel.open(action.projectId)
                                     }
@@ -219,6 +222,7 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        benchmark=state.stressRun,onBenchmarkComplete=viewModel::completeStress,onDismissBenchmark=viewModel::dismissStress,
                                         onSaveCameraView=viewModel::saveCameraView,onDeleteCameraView=viewModel::deleteCameraView,onDiscardExit=viewModel::discardProjectAndExit,
                                         onOpenSettings={settingsReturnToProject=true;viewModel.navigate(AppScreen.SETTINGS)},onNavigationSettings=viewModel::navigationSettings,
                                         onTakeoffSettings=viewModel::takeoffSettings,onTakeoffRate=viewModel::takeoffRate,onShareSchedule=viewModel::shareSchedule,
@@ -241,7 +245,7 @@ fun EezyDrawApp(
                                 )
                             } ?: LoadingIndicator()
                             AppScreen.SETTINGS -> SettingsScreen(
-                                settings = state.settings,
+                                settings = state.settings,onGenerateStress={viewModel.createTestBuilding(it)},
                                 onSave = {value->viewModel.saveSettings(value,settingsReturnToProject);settingsReturnToProject=false},
                                 onBack = {viewModel.navigate(if(settingsReturnToProject)AppScreen.PROJECT else AppScreen.MENU);settingsReturnToProject=false},
                                 onChooseSaveLocation = { chooseFolder.launch(state.settings.saveLocationUri?.toUri()) },
@@ -284,10 +288,18 @@ fun EezyDrawApp(
                                 .pointerInput(Unit) { awaitPointerEventScope {
                                     while (true) awaitPointerEvent().changes.forEach { it.consume() }
                                 } },
-                        ) { LoadingIndicator() }
+                        ) {
+                            LoadingIndicator()
+                            state.generationProgress?.let {progress->androidx.compose.foundation.layout.Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp)) {
+                                Text("Generating EEZY Test Building · ${(progress*100).toInt()}%")
+                                androidx.compose.material3.LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth())
+                            }}
+                        }
                     }
                 }
             }
+            if(samplesOpen)AlertDialog(onDismissRequest={samplesOpen=false},title={Text("Sample projects")},text={Text("EEZY Test Building contains three levels, coordinated services, deliberate clashes, views and issues. Opening creates your own editable copy.")},
+                confirmButton={TextButton({samplesOpen=false;viewModel.createTestBuilding()},Modifier.testTag("open_test_building")){Text("EEZY Test Building")}},dismissButton={TextButton({samplesOpen=false}){Text("Cancel")}})
             state.error?.let { error ->
                 AlertDialog(
                     onDismissRequest = viewModel::clearError,

@@ -12,6 +12,7 @@ sealed interface StartMenuAction {
     data object CreateProject : StartMenuAction
     data object ContinueProject : StartMenuAction
     data object OpenFile : StartMenuAction
+    data object SampleProjects : StartMenuAction
     data object Templates : StartMenuAction
     data object Settings : StartMenuAction
     data object Help : StartMenuAction

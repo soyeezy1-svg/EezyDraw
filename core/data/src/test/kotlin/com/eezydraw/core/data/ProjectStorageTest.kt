@@ -1,5 +1,6 @@
 package com.eezydraw.core.data
 
+import com.eezydraw.core.editing.TestBuilding
 import android.content.Context
 import androidx.room.Room
 import com.eezydraw.core.model.*
@@ -26,6 +27,21 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ProjectStorageTest {
+    @Test fun testBuildingLoadsSavesExportsImportsAndRestoresWithAllReferences() = runBlocking {
+        val base=repository.create(TestBuilding.NAME,ProjectTemplate.EMPTY,ProjectSettings())
+        val sample=TestBuilding.build(base)
+        val saved=repository.save(sample,backupEnabled=false)
+        assertEquals(saved,repository.load(saved.project.id.value))
+        val out=ByteArrayOutputStream();repository.exportProject(saved.project.id.value,out)
+        val imported=repository.importProject(ByteArrayInputStream(out.toByteArray()))
+        assertEquals(3,imported.levels.size);assertEquals(saved.elements.size,imported.elements.size)
+        assertEquals(saved.issues.size,imported.issues.size);assertEquals(saved.views.map {it.name},imported.views.map {it.name})
+        assertEquals(saved.libraryItems,imported.libraryItems)
+        repository.save(saved.copy(project=saved.project.copy(description="Edited sample")))
+        val restored=repository.restoreBackup(saved.project.id.value)
+        assertEquals(saved.copy(project=saved.project.copy(updatedAtEpochMillis=restored.project.updatedAtEpochMillis)),restored)
+    }
+
     @Test fun mobileLayoutAndNamedCameraRotationSectionSurviveSaveArchiveAndBackup() = runBlocking {
         val source=repository.create("Mobile canvas",ProjectTemplate.EMPTY,ProjectSettings())
         val box=Bounds3(Point3(-1.0,-2.0,-3.0),Point3(4.0,5.0,6.0))

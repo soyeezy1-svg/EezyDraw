@@ -36,6 +36,7 @@ data class CanvasFrame(
     /** Presentation-only camera classification of the front sides of rooms. */
     val autoXrayFrontWalls: Boolean = false,
     val sectionBox:com.eezydraw.core.model.Bounds3?=null,
+    val performanceCounter:com.eezydraw.ui.developer.RenderFrameCounter?=null,
 ) {
     init {
         require(gridSpacing.isFinite() && gridSpacing > 0)
