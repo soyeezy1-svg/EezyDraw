@@ -1,5 +1,6 @@
 package com.eezydraw.ui
 
+import com.eezydraw.ui.developer.*
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -95,6 +96,8 @@ data class AppUiState(
     val libraryCanRedo: Boolean = false,
     val clashProgress: Float? = null,
     val clashSummary: String? = null,
+    val generationProgress:Float?=null,
+    val stressRun:StressRun?=null,
 )
 
 class AppViewModel(
@@ -206,6 +209,26 @@ class AppViewModel(
         showProject(document)
         mirror(document)
     }
+
+    fun createTestBuilding(levels:Int=3) = operation {
+        require(levels==3 || levels in TestBuilding.stressLevels)
+        if(state.value.dirty)check(persistCurrent()) {"Save the active project before generating the sample"}
+        mutableState.update {it.copy(generationProgress=0f,stressRun=null)}
+        try {
+            val began=System.nanoTime()
+            val base=projects.create(if(levels==3)TestBuilding.NAME else "${TestBuilding.NAME} — $levels levels",ProjectTemplate.EMPTY,state.value.settings.projectDefaults)
+            val built=withContext(Dispatchers.Default) {val context=coroutineContext
+                TestBuilding.build(base,levels,progress={value->mutableState.update {it.copy(generationProgress=value)}},cancel={context.ensureActive()})}
+            val saved=projects.save(built,backupEnabled=false)
+            mirror(saved)
+            val generated=(System.nanoTime()-began)/1e6
+            val loadStart=System.nanoTime();val loaded=projects.load(base.project.id.value);val loadMillis=(System.nanoTime()-loadStart)/1e6
+            showProject(loaded)
+            if(levels!=3)mutableState.update {it.copy(stressRun=StressRun(loaded.project.id,levels,loaded.elements.size,generated,loadMillis,RenderFrameCounter(loadStart)))}
+        } finally {mutableState.update {it.copy(generationProgress=null)}}
+    }
+    fun completeStress(result:StressResult) {mutableState.update {state->state.copy(stressRun=state.stressRun?.copy(result=result))}}
+    fun dismissStress() {mutableState.update {it.copy(stressRun=null)}}
 
     fun open(id: String) = openProject(id, AppScreen.PROJECT)
 
@@ -903,7 +926,7 @@ class AppViewModel(
         savedState["screen"] = AppScreen.PROJECT.name
         mutableState.update {
             it.copy(
-                screen = AppScreen.PROJECT, document = document, dirty = false, failedProjectId = null,
+                screen = AppScreen.PROJECT, document = document, dirty = false, failedProjectId = null,stressRun=null,
                 selectedIds = emptySet(), canUndo = false, canRedo = false, canPaste = false,
             )
         }

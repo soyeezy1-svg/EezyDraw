@@ -1,4 +1,5 @@
 package com.eezydraw.ui.canvas
+import com.eezydraw.ui.developer.*
 import androidx.compose.foundation.gestures.detectTapGestures
 
 import androidx.compose.foundation.Canvas
@@ -158,6 +159,7 @@ fun DrawingCanvasScreen(
     onExportView: (ViewExportRequest,ViewExportFormat)->Unit = { _,_-> },
     onDiscardExit:()->Unit=onBack,onOpenSettings:()->Unit={},onNavigationSettings:(AppSettings)->Unit={},
     onSaveCameraView:(SavedView)->Unit={},onDeleteCameraView:(ViewId)->Unit={},
+    benchmark:StressRun?=null,onBenchmarkComplete:(StressResult)->Unit={},onDismissBenchmark:()->Unit={},
 ) {
     var viewport by rememberSaveable(document.project.id.value, stateSaver = PlanCameraSaver) { mutableStateOf(Viewport2D()) }
     var orbit by rememberSaveable(document.project.id.value, stateSaver = OrbitCameraSaver) { mutableStateOf(OrbitCamera()) }
@@ -721,12 +723,17 @@ fun DrawingCanvasScreen(
         else->""
     }
     val accent = MaterialTheme.colorScheme.primary
+    val activeBenchmark=benchmark?.takeIf {it.projectId==document.project.id}
+    var benchmarkOrbit by remember {mutableStateOf(OrbitCamera())}
     val frame = CanvasFrame(viewport, orbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
-        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,sectionBox=sectionBox)
+        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,sectionBox=sectionBox,performanceCounter=activeBenchmark?.takeIf {it.result==null}?.counter)
+    StressBenchmarkEffect(activeBenchmark,geometryMatches && initialized && !busy && ready!=null,
+        onPrepare={cancelConstruction();level=null;orbitLevel=null;is3D=true;benchmarkOrbit=orbit.preset(ViewPreset.ISOMETRIC).fit(ready!!.scene.bounds,size.width.toDouble()/size.height.coerceAtLeast(1));orbit=benchmarkOrbit},
+        onOrbit={orbit=benchmarkOrbit.copy(yaw=benchmarkOrbit.yaw+it*PI/2)},onComplete=onBenchmarkComplete)
     val issueRequest=com.eezydraw.storage.ViewExportRequest(renderDocument,frame,size.width.coerceAtLeast(1),size.height.coerceAtLeast(1))
     fun freshIssue(position:Point3,links:Set<ElementId> = emptySet(),source:Issue?=null):Issue = Issue(IssueId(java.util.UUID.randomUUID().toString()),document.project.id,source?.title ?: "New issue",System.currentTimeMillis(),elementIds=links,position=position,levelId=selectedLevel?.let(::LevelId) ?: links.firstNotNullOfOrNull {id->document.elements.find {it.id==id}?.levelId} ?: source?.clash?.levelIds?.singleOrNull(),sourceClashId=source?.id)
     fun openIssue(issue:Issue) {
@@ -1184,6 +1191,7 @@ fun DrawingCanvasScreen(
                 if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
                         if(tool!=DrawingTool.SELECT && buildingTool==null && routeKind==null)ToolOptionsFields(tool,options,document.project.settings.lengthUnit,{options=it})
                     }})else null,detail=detailContent)
+                activeBenchmark?.let {run->Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top=136.dp)){StressStatus(run,onDismissBenchmark)}}
                 if(selectedIds.isNotEmpty() && document.elements.any {it.id in selectedIds && it.lockMode!=LockMode.NONE}) {
                     val p=selectedBounds?.center()
                     val at=p?.let {projectPrecisionPoint(it,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())}

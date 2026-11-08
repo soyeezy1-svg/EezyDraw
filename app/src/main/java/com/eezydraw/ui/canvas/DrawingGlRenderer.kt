@@ -302,6 +302,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         disableLineAttributes()
+        if(pendingScene?.segments?.isNotEmpty()==true)current.performanceCounter?.frame(System.nanoTime())
     }
 
     private fun useLineShader(matrix: FloatArray, dark: Boolean) {

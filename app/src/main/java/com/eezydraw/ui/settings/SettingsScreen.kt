@@ -78,9 +78,12 @@ fun SettingsScreen(
     onResetSaveLocation: () -> Unit,
     onOpenPermissions: () -> Unit,
     modifier: Modifier = Modifier,
+    onGenerateStress:(Int)->Unit={},
 ) {
     var draft by rememberSaveable(stateSaver = SettingsDraft.saver) { mutableStateOf(SettingsDraft.from(settings)) }
     var baseline by rememberSaveable(stateSaver = SettingsDraft.saver) { mutableStateOf(SettingsDraft.from(settings)) }
+    var stressDialog by rememberSaveable {mutableStateOf(false)}
+    var stressLevels by rememberSaveable {androidx.compose.runtime.mutableIntStateOf(5)}
     var discard by rememberSaveable { mutableStateOf(false) }
     // Folder pickers leave this composition. Merge only the returned folder into the existing draft.
     LaunchedEffect(settings.saveLocationUri) {
@@ -375,6 +378,11 @@ fun SettingsScreen(
                 }
             }
             item {
+                SectionHeading("Developer")
+                OutlinedButton({stressDialog=true},enabled=!dirty,modifier=Modifier.testTag("generate_stress_test")){Text("Generate stress test")}
+                Text(if(dirty)"Save your settings before generating a stress test."else "Create a separate 5, 10 or 20-level test building and measure load, rendering and memory.",style=MaterialTheme.typography.bodySmall)
+            }
+            item {
                 Button(
                     onClick = { draft.toSettings()?.let(onSave) }, enabled = errors.isEmpty(),
                     modifier = Modifier.fillMaxWidth(),
@@ -383,6 +391,10 @@ fun SettingsScreen(
         }
         }
     }
+    if(stressDialog)AlertDialog(onDismissRequest={stressDialog=false},title={Text("Generate stress test")},text={Column {
+        Text("Creates a new editable project and runs a 5-second orbit benchmark. Existing projects are kept.")
+        listOf(5,10,20).forEach {n->Row(verticalAlignment=Alignment.CenterVertically){androidx.compose.material3.RadioButton(stressLevels==n,{stressLevels=n},Modifier.testTag("stress_levels_$n"));Text("$n levels")}}
+    }},confirmButton={TextButton({stressDialog=false;onGenerateStress(stressLevels)},Modifier.testTag("stress_generate")){Text("Generate")}},dismissButton={TextButton({stressDialog=false}){Text("Cancel")}})
     if (discard) {
         AlertDialog(
             onDismissRequest = { discard = false },
