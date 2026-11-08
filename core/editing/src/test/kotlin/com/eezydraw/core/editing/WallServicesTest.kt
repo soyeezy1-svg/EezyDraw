@@ -78,7 +78,7 @@ class WallServicesTest {
         val cleaned=ServiceRouting.reconcile(moved,WallServices.reconcile(moved,deleted))
         assertTrue(cleaned.elements.none {it.body is ElementBody.Route});assertTrue(wallServiceCuts(cleaned).isEmpty())
     }
-    @Test fun `wall bends retain the in-face profile and their curved centreline receives a chase`() {
+    @Test fun `wall bends retain the in-face profile while chase corners follow logical mitres`() {
         val settings=defaultRoutingSettings(RouteKind.TRUNKING).copy(wallOptions=WallServiceOptions(WallServiceMode.CHASE))
         var points=appendRoutingPick(doc,RouteKind.TRUNKING,emptyList(),Point3(1.0,.1,1.0),settings,level)
         points=appendRoutingPick(doc,RouteKind.TRUNKING,points,Point3(3.0,.1,1.0),settings,level)
@@ -88,16 +88,10 @@ class WallServicesTest {
         val elbow=routed.elements.first {e->(e.body as? ElementBody.Component)?.let {definitions[it.libraryItemId]?.fitting?.kind==FittingKind.ELBOW_90}==true}
         val component=elbow.body as ElementBody.Component
         val item=definitions.getValue(component.libraryItemId)
-        val local=item.fitting!!.centreline[item.fitting!!.centreline.size/2]
-        val world=measurementToWorld(elbow.transform,local)
-        val q=wallFrames(routed).single().coordinates(world)
-        fun inside(ring:List<Point2>):Boolean {
-            var result=false
-            for(i in ring.indices){val a=ring[i];val b=ring[(i+1)%ring.size]
-                if((a.y>q.z)!=(b.y>q.z) && q.x<(b.x-a.x)*(q.z-a.y)/(b.y-a.y)+a.x)result=!result}
-            return result
-        }
-        assertTrue(wallServiceCuts(routed).any {inside(it.outline)})
+        assertTrue(item.fitting!!.centreline.size>2) // Fittings retain their curved library geometry.
+        val cuts=wallServiceCuts(routed)
+        assertTrue(cuts.flatMap {it.outline}.any {kotlin.math.abs(it.x-3.055)<1e-8 && kotlin.math.abs(it.y-.945)<1e-8})
+        assertTrue(cuts.all {it.outline.size<=4})
         assertEquals(.05,item.fitting!!.section.let {(it as RouteSection.Rectangular).height},1e-8)
     }
 
