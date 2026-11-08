@@ -205,6 +205,7 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        clashProgress=state.clashProgress,clashSummary=state.clashSummary,onRunClash=viewModel::runClashCheck,onCancelClash=viewModel::cancelClashCheck,onClashStatus=viewModel::updateClashStatus,
                                         onExportModel={level,plan->modelOptions=com.eezydraw.core.geometry.ModelExportOptions(levelId=level?.let {com.eezydraw.core.model.LevelId(it)},selected=state.selectedIds,planView=plan);modelDialog=true},
                                         onExportDrawing={request->drawingOptions=com.eezydraw.storage.DrawingExportOptions();drawingRequest=request},
                                         onExportView={request,format->drawingOptions=com.eezydraw.storage.DrawingExportOptions(format=if(format==ViewExportFormat.PNG)com.eezydraw.storage.DrawingFormat.PNG else com.eezydraw.storage.DrawingFormat.PDF);drawingRequest=request},

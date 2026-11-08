@@ -26,6 +26,25 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ProjectStorageTest {
+    @Test fun clashStatusesNotesOptionsAndResolvedAuditSurviveSaveLoadArchiveAndBackup() = runBlocking {
+        val created=repository.create("Coordination",ProjectTemplate.EMPTY,ProjectSettings())
+        val p=created.project.id;val layer=created.layers.first().id
+        fun element(id:String)=Element(ElementId(id),p,layer,ElementBody.DrawingShape(Shape.Box(Size3(1.0,1.0,1.0))))
+        val a=element("a");val b=element("b")
+        val clash=Clash(a.id,b.id,ClashKind.DUPLICATE,Point3(.5,.5,.5),status=ClashStatus.ACTIVE,note="Check bracket",checkKey="all",firstName="A",secondName="B")
+        val issue=Issue(IssueId("clash-stable"),p,"Duplicate",1,elementIds=setOf(a.id,b.id),clash=clash)
+        val checked=repository.save(created.copy(elements=listOf(a,b),issues=listOf(issue),project=created.project.copy(settings=created.project.settings.copy(clashCheck=ClashCheckOptions(clearance=.1,tolerance=.002)))))
+        assertEquals(checked,repository.load(p.value))
+        val archive=ByteArrayOutputStream();repository.exportProject(p.value,archive)
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()))
+        assertEquals(checked.issues.single().clash,imported.issues.single().clash)
+        val approved=repository.save(checked.copy(issues=listOf(issue.copy(clash=clash.copy(status=ClashStatus.APPROVED,note="Accepted")))))
+        assertEquals(ClashStatus.APPROVED,repository.load(p.value).issues.single().clash!!.status)
+        assertEquals(ClashStatus.ACTIVE,repository.restoreBackup(p.value).issues.single().clash!!.status)
+        val audit=approved.copy(elements=listOf(a),issues=listOf(issue.copy(elementIds=setOf(a.id),clash=clash.copy(status=ClashStatus.RESOLVED))))
+        assertEquals(ClashStatus.RESOLVED,repository.save(audit).issues.single().clash!!.status)
+        assertEquals(ClashStatus.RESOLVED,repository.load(p.value).issues.single().clash!!.status)
+    }
     private lateinit var context: Context
     private lateinit var database: ProjectDatabase
     private lateinit var repository: RoomProjectRepository

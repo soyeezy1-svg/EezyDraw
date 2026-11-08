@@ -61,8 +61,7 @@ object EditCommands {
         if (deleted.isNotEmpty()) {
             require(after.groups.none { group -> group.elementIds.any { it in deleted } } &&
                 after.issues.none { issue ->
-                    issue.elementIds.any { it in deleted } || issue.clash?.firstElementId in deleted ||
-                        issue.clash?.secondElementId in deleted
+                    issue.elementIds.any { it in deleted } || ((issue.clash?.firstElementId in deleted || issue.clash?.secondElementId in deleted) && !(issue.clash?.checkKey!=null && issue.clash?.status==ClashStatus.RESOLVED))
                 }
             ) { "Deleting objects must also remove their group and issue links" }
         }
@@ -177,9 +176,9 @@ object EditCommands {
             if (group.elementIds.any { it in ids }) group.copy(elementIds = group.elementIds - ids) else group
         }
         val issues = document.issues.map { issue ->
-            val clash = issue.clash?.takeUnless { it.firstElementId in ids || it.secondElementId in ids }
+            val clash = issue.clash?.let { c -> if(c.firstElementId !in ids && c.secondElementId !in ids)c else if(c.checkKey!=null)c.copy(status=ClashStatus.RESOLVED) else null }
             if (issue.elementIds.any { it in ids } || clash != issue.clash) {
-                issue.copy(elementIds = issue.elementIds - ids, clash = clash)
+                issue.copy(elementIds = issue.elementIds - ids, clash = clash,status=if(clash?.checkKey!=null && clash.status==ClashStatus.RESOLVED)IssueStatus.RESOLVED else issue.status)
             } else issue
         }
         return command(document, "Delete objects", replacements, groups = groups, issues = issues)
