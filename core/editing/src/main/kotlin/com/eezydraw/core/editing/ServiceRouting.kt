@@ -95,7 +95,7 @@ object ServiceRouting {
         val beveled=mutableListOf<RoutePick>()
         picks.forEachIndexed {i,p->
             val a=picks.getOrNull(i-1);val b=picks.getOrNull(i+1)
-            if(a!=null && b!=null && p.settings.autoFittings && p.settings.bendDegrees==45 &&
+            if(a!=null && b!=null && p.settings.wallOptions==null && p.settings.autoFittings && p.settings.bendDegrees==45 &&
                 abs(a.point.z-p.point.z)<EPS && abs(b.point.z-p.point.z)<EPS) {
                 val incoming=unit(minus(p.point,a.point));val outgoing=unit(minus(b.point,p.point))
                 if(abs(incoming.x*outgoing.x+incoming.y*outgoing.y)<EPS) {
@@ -238,7 +238,7 @@ object ServiceRouting {
         val offsetSections=mutableSetOf<ElementId>()
         for(e in routes) {
             val b=e.body as? ElementBody.Route ?: continue;val t=b.routing ?: continue
-            if(!t.settings.autoFittings || t.settings.bendDegrees!=45)continue
+            if(b.wallService!=null || !t.settings.autoFittings || t.settings.bendDegrees!=45)continue
             val a=measurementToWorld(e.transform,b.path.first());val z=measurementToWorld(e.transform,b.path.last())
             if(abs(a.z-z.z)>EPS)continue
             val left=nodes[t.startNode].orEmpty().singleOrNull {it.first.id!=e.id}?.first ?: continue

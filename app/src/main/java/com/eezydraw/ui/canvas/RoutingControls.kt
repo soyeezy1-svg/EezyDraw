@@ -63,9 +63,11 @@ internal fun RoutingSettingsBar(kind:RouteKind,settings:RoutingSettings,onChange
         }
         RouteChoice("System",settings.system,listOf("Power","ICT","HVAC","Plumbing","Fire"),{onChange(settings.copy(system=it,colourArgb=when(it){"ICT"->0xFF9C67C4;"HVAC"->0xFF459E95;"Plumbing"->0xFF377FBD;"Fire"->0xFFCF4545;else->0xFFCA8735}))})
         RouteChoice("Colour",settings.colourArgb,listOf(0xFFCA8735,0xFF9C67C4,0xFF459E95,0xFF377FBD,0xFFCF4545,0xFF777777),{onChange(settings.copy(colourArgb=it))}){"#${it.toString(16).takeLast(6)}"}
-        FilterChip(settings.ortho,{onChange(settings.copy(ortho=!settings.ortho))},{Text("Ortho")},Modifier.testTag("route_ortho"))
+        if(settings.wallOptions!=null)RouteChoice("Snap angles",settings.effectiveWallSnapAngles(),WallSnapAngles.entries,{onChange(settings.copy(wallSnapAngles=it))}) {
+            when(it){WallSnapAngles.HORIZONTAL->"0°";WallSnapAngles.FORTY_FIVE->"45°";WallSnapAngles.NINETY->"90°";WallSnapAngles.FREE->"Free"}
+        } else FilterChip(settings.ortho,{onChange(settings.copy(ortho=!settings.ortho))},{Text("Ortho")},Modifier.testTag("route_ortho"))
         FilterChip(settings.autoFittings,{onChange(settings.copy(autoFittings=!settings.autoFittings))},{Text("Auto fittings")},Modifier.testTag("route_auto_fittings"))
-        RouteChoice("Bend",settings.bendDegrees,listOf(45,90),{onChange(settings.copy(bendDegrees=it))}){"$it°"}
+        if(settings.wallOptions==null)RouteChoice("Bend",settings.bendDegrees,listOf(45,90),{onChange(settings.copy(bendDegrees=it))}){"$it°"}
     }}
 }
 

@@ -2,6 +2,10 @@ package com.eezydraw.core.model
 
 import kotlinx.serialization.Serializable
 
+/** Wall-plane directions: horizontal only, 45-degree increments, orthogonal, or unconstrained. */
+@Serializable
+enum class WallSnapAngles { HORIZONTAL, FORTY_FIVE, NINETY, FREE }
+
 @Serializable
 data class RoutingSettings(
     val width: Double = .1,
@@ -15,12 +19,14 @@ data class RoutingSettings(
     val autoFittings: Boolean = true,
     val bendDegrees: Int = 90,
     val wallOptions:WallServiceOptions? = null,
+    val wallSnapAngles:WallSnapAngles? = null,
 ) {
     init {
         require(listOf(width,height,diameter).all {it.isFinite() && it > 0 && it <= 100})
         require(system in listOf("Power","ICT","HVAC","Plumbing","Fire"))
         require(bendDegrees == 45 || bendDegrees == 90)
     }
+    fun effectiveWallSnapAngles():WallSnapAngles = wallSnapAngles ?: if(ortho)WallSnapAngles.NINETY else WallSnapAngles.FREE
     fun section(kind:RouteKind):RouteSection = if(round || kind==RouteKind.PIPE || kind==RouteKind.CONDUIT)
         RouteSection.Circular(diameter) else RouteSection.Rectangular(width,height)
 }
