@@ -104,6 +104,7 @@ fun ToolsPanel(
     focusGroup: CanvasToolGroup? = null,
     embedded: Boolean = false,
     onRoute: (com.eezydraw.core.model.RouteKind)->Unit = {},
+    onBuilding:(String)->Unit={},
 ) {
     var localExpanded by rememberSaveable { mutableStateOf(false) }
     var drawExpanded by rememberSaveable { mutableStateOf(true) }
@@ -171,6 +172,7 @@ fun ToolsPanel(
                     if(!embedded || focusGroup!=CanvasToolGroup.EDIT) {
                     if(!embedded) ToolGroupHeader(R.string.panel_draw, drawExpanded, { drawExpanded = !drawExpanded }, "tools_draw_group")
                     if (embedded || drawExpanded) {
+                        Row {listOf("wall" to "Wall","room" to "Room","room_polygon" to "Room polygon").forEach {(id,label)->TextButton({onBuilding(id)},Modifier.testTag("tool_$id")){Text(label)}}}
                         Text("Services", style=MaterialTheme.typography.titleSmall)
                         FlowRow { com.eezydraw.core.model.RouteKind.entries.forEach {kind->
                             TextButton({onRoute(kind)},Modifier.testTag("tool_route_${kind.name}")) {Text(kind.name.replace('_',' '))}

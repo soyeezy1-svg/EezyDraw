@@ -252,6 +252,7 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_auto_hide_panels_help), style=MaterialTheme.typography.bodySmall)
             }
             item {
+                SettingSwitch("Create walls automatically",current.projectDefaults.autoCreateWalls,{update(current.copy(projectDefaults=current.projectDefaults.copy(autoCreateWalls=it)))},"settings_auto_walls")
                 SettingSwitch(stringResource(R.string.settings_lock_walls), current.lockWallsByDefault,
                     { update(current.copy(lockWallsByDefault=it)) }, "settings_lock_walls")
                 Text(stringResource(R.string.settings_lock_walls_help), style=MaterialTheme.typography.bodySmall)

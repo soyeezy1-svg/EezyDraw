@@ -64,6 +64,9 @@ data class CanvasEditorActions(
     val onInsertWallLibrary:(LibraryItemId,Point3,String?,WallServiceOptions)->Boolean={id,p,l,_->onInsertLibrary(id,p,l)},
     val onEditWallService:(ElementId,WallServiceOptions?)->Unit={_,_->},
     val onWallSettings:(WallServiceSettings)->Unit={},
+    val onRoomCorner:(ElementId,Int,Point3)->Unit={_,_,_->},
+    val onGenerateWalls:(Set<ElementId>,RoomWallOptions)->Unit={_,_->},
+    val onCreateBuilding:(String,List<Point3>,String?,RoomWallOptions,Boolean)->Boolean={_,_,_,_,_->false},
     val libraryCanUndo:Boolean=false,
     val libraryCanRedo:Boolean=false,
 )

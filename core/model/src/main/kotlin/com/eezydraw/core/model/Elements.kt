@@ -39,6 +39,7 @@ sealed interface ElementBody {
         val thickness: Double,
         val height: Double,
         val reference: WallReference = WallReference.CENTERLINE,
+        val joinProfile:Polygon2?=null,
     ) : ElementBody {
         init {
             require(start != end)
@@ -53,6 +54,7 @@ sealed interface ElementBody {
         val number: String = "",
         val ceilingHeight: Double = 3.0,
         val wallFaces: List<RoomWallFace> = emptyList(),
+        val wallOptions:RoomWallOptions?=null,
     ) : ElementBody {
         init {
             require(ceilingHeight.isFinite() && ceilingHeight > 0)

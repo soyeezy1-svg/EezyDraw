@@ -183,6 +183,7 @@ private fun surfaceBox(size: Size3, emit: SurfaceEmitter) = surfaceExtrusion(Pol
 )), 0.0, size.height, emit)
 
 private fun surfaceWall(body: ElementBody.Wall, emit: SurfaceEmitter) {
+    body.joinProfile?.let {surfaceExtrusion(it,0.0,body.height,emit);return}
     val dx = body.end.x - body.start.x; val dy = body.end.y - body.start.y
     val length = hypot(dx, dy)
     require(length.isFinite() && length > 0.0) { "Wall face exceeds finite coordinate limits." }

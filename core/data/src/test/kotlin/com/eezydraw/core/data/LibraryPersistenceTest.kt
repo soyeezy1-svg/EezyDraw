@@ -3,6 +3,7 @@ package com.eezydraw.core.data
 import android.content.Context
 import androidx.room.Room
 import com.eezydraw.core.model.*
+import com.eezydraw.core.editing.RoomWalls
 import com.eezydraw.core.editing.WallServices
 import com.eezydraw.core.editing.LibraryCommands
 import com.eezydraw.core.editing.previewLibraryPlacement
@@ -227,6 +228,18 @@ class LibraryPersistenceTest {
         val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
         assertEquals(schedule,wallServiceCuts(imported));assertEquals(saved.project.settings.wallServices,imported.project.settings.wallServices)
         assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+    }
+
+    @Test fun `generated room wall identities options profiles and materials survive native storage`() = runBlocking {
+        val base=repository.create("Generated rooms",ProjectTemplate.EMPTY,ProjectSettings());projectIds+=base.project.id.value
+        val built=RoomWalls.create(base,"room",listOf(Point3(),Point3(4.0,3.0)),base.levels.first().id,RoomWallOptions(.18,2.9,"Brick"),true).preview(base)
+        val saved=repository.save(built)
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(4,loaded.elements.count {it.body is ElementBody.Wall})
+        assertTrue(loaded.elements.filter {it.body is ElementBody.Wall}.all {(it.body as ElementBody.Wall).joinProfile!=null})
+        assertEquals(saved,RoomWalls.reconcile(saved,saved))
     }
 
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {

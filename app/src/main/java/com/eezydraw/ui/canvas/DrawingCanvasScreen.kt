@@ -158,6 +158,11 @@ fun DrawingCanvasScreen(
     var size by remember { mutableStateOf(IntSize.Zero) }
     var loading: SceneLoad by remember(document.project.id.value) { mutableStateOf(SceneLoad.Loading) }
     var prepared: SceneLoad.Ready? by remember(document.project.id.value) { mutableStateOf(null) }
+    var buildingTool by remember {mutableStateOf<String?>(null)}
+    var generateWallsDialog by remember {mutableStateOf(false)}
+    var wallOptions by remember {mutableStateOf(RoomWallOptions(document.project.settings.defaultWallThickness,document.project.settings.defaultWallHeight))}
+    var automaticWalls by remember {mutableStateOf(settings.projectDefaults.autoCreateWalls)}
+    LaunchedEffect(settings.projectDefaults.autoCreateWalls){automaticWalls=settings.projectDefaults.autoCreateWalls}
     var wallSchedule by remember {mutableStateOf(false)}
     var libraryWallOptions by remember {mutableStateOf<WallServiceOptions?>(null)}
     var routeKind by remember(document.project.id) {mutableStateOf<RouteKind?>(null)}
@@ -385,7 +390,7 @@ fun DrawingCanvasScreen(
         pointerWorld=precisionPick?.point ?: snapshot.points.lastOrNull() ?: snapshot.measurements.lastOrNull()?.point
     }
     fun cancelConstruction() {
-        routeKind=null;routeDraft=emptyList();points = emptyList(); preview = null; waitingForCommit = null
+        buildingTool=null;routeKind=null;routeDraft=emptyList();points = emptyList(); preview = null; waitingForCommit = null
         pointUndo=emptyList();pointRedo=emptyList();clearPrecisionCandidate()
         measurementPicks=emptyList();measurementMode=MeasurementMode.NONE
         pendingLibrary=null;tool=DrawingTool.SELECT;rotationAngle=null
@@ -422,6 +427,15 @@ fun DrawingCanvasScreen(
     }
     fun finishConstruction(picks: List<Point3> = points) {
         if (busy) return
+        if(buildingTool!=null) {
+            val mode=buildingTool!!
+            if(editor?.onCreateBuilding?.invoke(mode,picks,selectedLevel,wallOptions,automaticWalls)==true) {
+                val last=picks.last();placed()
+                if(mode=="wall"){buildingTool=mode;tool=DrawingTool.LINE;points=listOf(last);anchorX=last.x;anchorY=last.y}
+                else buildingTool=null
+            }
+            return
+        }
         if(routeKind!=null) {
             if(editor?.onCreateRoute?.invoke(routeKind!!,routeDraft)==true)placed()
             return
@@ -498,7 +512,7 @@ fun DrawingCanvasScreen(
                     val picks = points + (confirmed?.point ?: Point3(point.x, point.y, latestFloorZ.value))
                     points = picks
                     anchorX = point.x; anchorY = point.y
-                    if (options.useDefaultDimensions && supportsDefaultPlacement(latestTool.value) ||
+                    if (buildingTool==null && options.useDefaultDimensions && supportsDefaultPlacement(latestTool.value) ||
                         latestTool.value.autoFinishPoints == picks.size) finishConstruction(picks)
                 }
             }
@@ -651,6 +665,7 @@ fun DrawingCanvasScreen(
     val liveRouteLength=liveRoutePicks.map {it.point}.zipWithNext().sumOf {(a,b)->kotlin.math.sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z))}
     val liveFittingCount=liveRouteDocument?.elements?.count {e->ROUTING_OWNER in e.properties && document.elements.none {it.id==e.id && it==e}} ?: 0
     val activeLabel=when {
+        buildingTool!=null->if(buildingTool=="wall")"Wall"else "Room"
         routeKind!=null->routeKind!!.name.replace('_',' ')
         pendingLibrary!=null->pendingLibraryItem?.name ?: "Library item"
         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.panel_measure_distance)
@@ -731,6 +746,11 @@ fun DrawingCanvasScreen(
                     activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
                     libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
                     onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
+                if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool!="wall",wallOnly=buildingTool=="wall")
+
+                if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
+                    Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
+                }
                 if(pendingLibraryItem?.mounting==MountingType.WALL)WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()})
                 if(routeKind!=null) {
                     RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()})
@@ -745,7 +765,7 @@ fun DrawingCanvasScreen(
                 if(placementActive) PlacementBanner(activeLabel,
                     when {
                         precisionActive->stringResource(R.string.precision_aim_hint,activeLabel)
-                        pendingLibrary!=null || options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
+                        pendingLibrary!=null || buildingTool==null && options.useDefaultDimensions && supportsDefaultPlacement(tool)->stringResource(R.string.placement_tap_to_place,activeLabel)
                         measurementMode==MeasurementMode.DISTANCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_measure_pick_first)
                         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.canvas_measure_pick_second)
                         measurementMode==MeasurementMode.REFERENCE && measurementPicks.isEmpty()->stringResource(R.string.canvas_reference_pick_object)
@@ -875,13 +895,16 @@ fun DrawingCanvasScreen(
                 if(routeKind!=null) {
                     RouteGhost(document,routeKind!!,liveRoutePicks,viewport,orbit,is3D,preview=liveRouteDocument)
                 }
+                if(editor!=null && !placementActive && !panelsHidden && !zoomWindow)document.elements.singleOrNull {it.id in selectedIds && it.body is ElementBody.Room}?.let {e->
+                    RoomCornerHandles(e,viewport,orbit,is3D,size.width,size.height){i,p->editor.onRoomCorner(e.id,i,p)}
+                }
                 if(editor!=null && !placementActive && !panelsHidden && !zoomWindow)selectedElement?.let {e->
                     if(document.layers.none {it.id==e.layerId && it.locked})RouteEndHandles(e,viewport,orbit,is3D,size.width,size.height) {a,b->
                         (e.body as? ElementBody.Route)?.routing?.let {editor.onEditRoute(e.id,it.settings,a,b)}
                     }
                 }
                 if (editor != null && tool != DrawingTool.SELECT) {
-                    ConstructionPreview(document,tool,options,points,cursor.value?.point,floorZ,viewport,
+                    ConstructionPreview(document,tool,if(buildingTool==null)options else options.copy(useDefaultDimensions=false),points,cursor.value?.point,floorZ,viewport,
                         orbit=orbit,is3D=is3D,cursorWorld=pointerWorld)
                 }
                 if(measurementMode!=MeasurementMode.NONE) MeasurementGhostPreview(measurementPicks.map {it.point},pointerWorld,viewport,orbit=orbit,is3D=is3D)
@@ -991,7 +1014,10 @@ fun DrawingCanvasScreen(
                                         onUndo={undoInputOrDocument()},onRedo={redoInputOrDocument()},onCopy=actions.onCopy,
                                         onPaste={cancelConstruction();actions.onPaste()},onMirrorX={actions.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
                                         onMirrorY={actions.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},onArray={arrayOpen=true},
-                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true,onRoute={kind->
+                                        onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true,onBuilding={mode->
+                                            cancelConstruction();buildingTool=mode;tool=if(mode=="wall")DrawingTool.LINE else if(mode=="room")DrawingTool.RECTANGLE else DrawingTool.POLYGON
+                                            actions.onSelect(emptySet())
+                                        },onRoute={kind->
                                             cancelConstruction();routeKind=kind
                                             val defaults=settings.projectDefaults
                                             routeConfig=settings.lastRoutingSettings[kind] ?: (defaults.routeDefaults[kind] ?: defaultRoutingSettings(kind)).let {it.copy(elevation=defaults.defaultRouteElevations[kind] ?: it.elevation)}
@@ -1049,7 +1075,7 @@ fun DrawingCanvasScreen(
                         document.layers.filter {it.visible && !it.locked},selectedElements.map {it.layerId}.distinct().singleOrNull(),
                         selectedElements.any {it.objectLocked},document.project.settings.rotationSnapDegrees,
                         onMode={gizmoMode=it;preview=null;rotationAngle=null},onCopy=editor.onCopy,onDelete=editor.onDelete,
-                        onProperties={openProperties()},
+                        onGenerateWalls=if(selectedElements.any {it.body is ElementBody.Room})({generateWallsDialog=true})else null,onProperties={openProperties()},
                         onMirrorX={editor.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
                         onMirrorY={editor.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
                         onArray={arrayOpen=true},onRotate90=editor.onRotate90,onUndo=editor.onUndo,onRedo=editor.onRedo,onPaste=editor.onPaste,
@@ -1095,6 +1121,7 @@ fun DrawingCanvasScreen(
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,
         onApply = { columns, rows, dx, dy -> editor.onArray(columns,rows,dx,dy); arrayOpen = false },onDismiss = { arrayOpen = false })
+    if(generateWallsDialog)GenerateWallsDialog(wallOptions,{wallOptions=it},{editor?.onGenerateWalls?.invoke(selectedIds.filter {id->document.elements.any {it.id==id && it.body is ElementBody.Room}}.toSet(),wallOptions);generateWallsDialog=false},{generateWallsDialog=false})
     if(wallSchedule)WallScheduleDialog(document,{editor?.onWallSettings?.invoke(it)},{editor?.onViewMode?.invoke(ViewMode.SECTION);wallSchedule=false},{wallSchedule=false})
     toolError?.let { error -> AlertDialog(onDismissRequest = { toolError = null },title = { Text(stringResource(R.string.canvas_tool_error)) },
         text = { Text(error) },confirmButton = { TextButton({ toolError = null }) { Text(stringResource(R.string.close)) } }) }

@@ -60,7 +60,7 @@ fun previewLibraryPlacement(
     var host: HostAttachment? = null
     if (item.mounting == MountingType.WALL) {
         val face = requireNotNull(nearestWallFace(document, translation, level?.id, item.defaultSize)) {
-            "A wall-mounted item needs a visible wall on this level."
+            "No wall on this level. Draw a room or wall first."
         }
         translation = face.origin
         rotation = Rotation3(z = atan2(-face.normalX, face.normalY))
