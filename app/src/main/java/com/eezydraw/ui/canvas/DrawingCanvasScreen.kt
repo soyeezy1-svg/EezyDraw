@@ -135,6 +135,7 @@ fun DrawingCanvasScreen(
     modifier: Modifier = Modifier,
     surface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
     editor: CanvasEditorActions? = null,
+    onExportDrawing:(ViewExportRequest)->Unit={},
     onExportModel:(String?,Boolean)->Unit={_,_->},
     onExportView: (ViewExportRequest,ViewExportFormat)->Unit = { _,_-> },
 ) {
@@ -729,6 +730,7 @@ fun DrawingCanvasScreen(
                     var exportMenu by remember {mutableStateOf(false)}
                     Box {TextButton({exportMenu=true},Modifier.testTag("project_export_menu")){Text("Export")}
                         DropdownMenu(exportMenu,{exportMenu=false}) {
+                            DropdownMenuItem(text={Text("Export 2D drawing")},onClick={exportMenu=false;onExportDrawing(ViewExportRequest(renderDocument,frame,size.width,size.height))},enabled=size.width>0 && size.height>0 && !placementActive)
                             DropdownMenuItem(text={Text("Export 3D model")},onClick={exportMenu=false;onExportModel(selectedLevel,!is3D)})
                             DropdownMenuItem(text={Text("Export project archive")},onClick={exportMenu=false;onExport()})
                         }

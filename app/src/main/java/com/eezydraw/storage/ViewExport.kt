@@ -45,6 +45,7 @@ data class ViewExportRequest(
     val frame: CanvasFrame,
     val width: Int,
     val height: Int,
+    val underlayBackground:Bitmap?=null,
 ) {
     init { require(width > 0 && height > 0) { "The drawing view has no exportable size." } }
 }
@@ -164,6 +165,7 @@ object ViewExport {
     private class Raster(val request: ViewExportRequest, val width: Int, val height: Int) {
         private var hiddenCoverage:BooleanArray?=null
         val pixels = IntArray(width * height) { if (request.frame.dark) Color.rgb(14, 18, 26) else Color.rgb(247, 250, 252) }
+        init {request.underlayBackground?.let {require(it.width==width && it.height==height);it.getPixels(pixels,0,width,0,0,width,height)}}
         private val depths = FloatArray(width * height) { Float.POSITIVE_INFINITY }
         private val frame = request.frame
         private val projector = Projector(request, width, height)
