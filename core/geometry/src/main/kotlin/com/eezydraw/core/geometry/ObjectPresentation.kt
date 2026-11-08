@@ -18,6 +18,7 @@ class ScenePresentation(private val document: ProjectDocument,private val planVi
         element.levelId in document.project.settings.hiddenLevelIds
 
     fun display(element: Element): ObjectDisplay {
+        if((element.properties["eezydraw.clashInspection"] as? ParameterValue.Flag)?.value==true)return element.objectDisplay
         if (hierarchyHidden(element) || element.objectDisplay == ObjectDisplay.HIDDEN) return ObjectDisplay.HIDDEN
         val owner=(element.properties["routingOwner"] as? ParameterValue.Text)?.value?.let {elements[ElementId(it)]}
         val floor=(owner ?: element).floorRouting()

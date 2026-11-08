@@ -100,7 +100,7 @@ internal fun validateDocument(document: ProjectDocument) {
         valid(issue.elementIds.all(elementIds::contains) && (issue.viewId == null || issue.viewId in views),
             "An issue refers to missing project data.")
         issue.clash?.let {
-            valid(it.firstElementId in elementIds && it.secondElementId in elementIds,
+            valid(it.checkKey!=null && it.status==ClashStatus.RESOLVED || it.firstElementId in elementIds && it.secondElementId in elementIds,
                 "A clash refers to a missing element.")
         }
         unique(issue.comments.map { it.id }, "comment")

@@ -23,7 +23,7 @@ private const val SURFACE_TAU = PI * 2
  * Open shapes remain line geometry. Polygon caps use even/odd scanline trapezoids, preserving
  * concavities and holes without requiring ring winding. Call off the main thread.
  */
-fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = null): SurfaceScene {
+fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = null, checkCancelled: () -> Unit = {}): SurfaceScene {
     val layers = document.layers.associateBy { it.id }
     val systems = document.systems.associateBy { it.id }
     val materials = document.materials.associateBy { it.id }
@@ -35,6 +35,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
     val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
     val presentation = ScenePresentation(document)
     for (element in document.elements) {
+        checkCancelled()
         if (elementIds != null && element.id !in elementIds) continue
         val layer = layers[element.layerId]
         val system = element.systemId?.let(systems::get)
@@ -49,7 +50,9 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val roomCenter=presentation.roomCenter(element)
         fun emitter(mode:ObjectDisplay,side:RoomSideRef?,surfaceTransform:SurfaceTransform=transform):SurfaceEmitter? {
             if(mode==ObjectDisplay.HIDDEN || mode==ObjectDisplay.WIREFRAME)return null
+            var emitted=0
             return SurfaceEmitter(surfaceTransform) {a,b,c,na,nb,nc->
+                if(emitted++ % 256 == 0)checkCancelled()
                 val plane=sectionHeight?.plus(document.levels.find {it.id==element.levelId}?.elevation ?: 0.0)
                 clipSurfaceAtHeight(a,b,c,na,nb,nc,plane) {pa,pb,pc,pna,pnb,pnc->collector.triangle(pa,pb,pc,pna,pnb,pnc,element.id.value,element.levelId?.value,colour,mode,side,roomCenter)}
             }

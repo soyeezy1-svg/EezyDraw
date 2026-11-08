@@ -2,7 +2,8 @@ package com.eezydraw.core.model
 
 import kotlinx.serialization.Serializable
 
-@Serializable enum class ClashKind { HARD, SOFT, CLEARANCE }
+@Serializable enum class ClashKind { HARD, SOFT, CLEARANCE, DUPLICATE }
+@Serializable enum class ClashStatus { NEW, ACTIVE, RESOLVED, APPROVED, IGNORED }
 @Serializable enum class IssueStatus { OPEN, IN_PROGRESS, RESOLVED, CLOSED }
 
 /** Stored coordination result, separate from a future clash-detection algorithm. */
@@ -13,8 +14,17 @@ data class Clash(
     val kind: ClashKind,
     val position: Point3,
     val requiredClearance: Double = 0.0,
+    val distance: Double = 0.0,
+    val overlap: Double = 0.0,
+    val status: ClashStatus = ClashStatus.NEW,
+    val note: String = "",
+    val checkKey: String? = null,
+    val firstName: String = "",
+    val secondName: String = "",
+    val levelIds: Set<LevelId> = emptySet(),
 ) {
     init {
+        require(distance.isFinite() && distance >= 0 && overlap.isFinite() && overlap >= 0 && note.length <= 4000)
         require(firstElementId != secondElementId)
         require(requiredClearance.isFinite() && requiredClearance >= 0)
     }

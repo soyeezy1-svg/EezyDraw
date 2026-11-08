@@ -44,6 +44,7 @@ data class ProjectSettings(
     val floorServices:FloorServiceSettings = FloorServiceSettings(),
     val autoXrayFrontWalls: Boolean = false,
     val canvasLayout: CanvasLayout = CanvasLayout(),
+    val clashCheck: ClashCheckOptions = ClashCheckOptions(),
 ) {
     init {
         require(decimalPlaces in 0..8)

@@ -2,7 +2,7 @@ package com.eezydraw.core.model
 
 import kotlinx.serialization.Serializable
 
-@Serializable enum class CanvasPanelId { DRAW, EDIT, VIEW, MEASURE, LIBRARY, PROPERTIES, MEASUREMENTS, VISIBILITY }
+@Serializable enum class CanvasPanelId { DRAW, EDIT, VIEW, MEASURE, LIBRARY, PROPERTIES, MEASUREMENTS, VISIBILITY, CLASHES }
 @Serializable enum class PanelVisibility { OPEN, COLLAPSED, HIDDEN }
 
 /** The top-left anchor is normalized to the viewport; content resizes below it without moving the panel. */
@@ -33,5 +33,6 @@ fun defaultCanvasPanels(): Map<CanvasPanelId, PanelPlacement> = mapOf(
     CanvasPanelId.LIBRARY to PanelPlacement(x=.68,y=.23),
     CanvasPanelId.PROPERTIES to PanelPlacement(PanelVisibility.HIDDEN,x=.98,y=.36),
     CanvasPanelId.MEASUREMENTS to PanelPlacement(PanelVisibility.HIDDEN,x=.68,y=.36),
+    CanvasPanelId.CLASHES to PanelPlacement(PanelVisibility.HIDDEN,x=.68,y=.10),
     CanvasPanelId.VISIBILITY to PanelPlacement(PanelVisibility.HIDDEN,x=.03,y=.42),
 )

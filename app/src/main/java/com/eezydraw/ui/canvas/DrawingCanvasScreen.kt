@@ -95,6 +95,7 @@ private sealed interface SceneLoad {
         val pointPicks:PointPickContext,
         val componentReferences:Map<ElementId,Point3>,
         val planSymbols:Boolean,
+        val inspectionKey:String?=null,
     ) : SceneLoad
     data object Failed : SceneLoad
 }
@@ -135,6 +136,11 @@ fun DrawingCanvasScreen(
     modifier: Modifier = Modifier,
     surface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
     editor: CanvasEditorActions? = null,
+    clashProgress:Float?=null,
+    clashSummary:String?=null,
+    onRunClash:(ClashCheckOptions)->Unit={},
+    onCancelClash:()->Unit={},
+    onClashStatus:(IssueId,ClashStatus,String)->Unit={_,_,_->},
     onExportDrawing:(ViewExportRequest)->Unit={},
     onExportModel:(String?,Boolean)->Unit={_,_->},
     onExportView: (ViewExportRequest,ViewExportFormat)->Unit = { _,_-> },
@@ -220,8 +226,13 @@ fun DrawingCanvasScreen(
     val fallbackSnaps = remember { SnapEngine(SpatialIndex(emptyList())) }
     val window = remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
     val ready = prepared
-    val renderDocument=remember(document,settings.showDetailedMeasurement) {document.copy(project=document.project.copy(
-        settings=document.project.settings.copy(showDetailedMeasurements=settings.showDetailedMeasurement)))}
+    var clashDialog by remember {mutableStateOf(false)}
+    var clashFocus by remember(document.project.id) {mutableStateOf<IssueId?>(null)}
+    var clashXray by remember {mutableStateOf(true)}
+    val focusClash=document.issues.find {it.id==clashFocus}?.clash
+    val inspectionKey=focusClash?.let {"${clashFocus?.value}:$clashXray"}
+    val renderDocument=remember(document,settings.showDetailedMeasurement,inspectionKey) {clashInspection(document.copy(project=document.project.copy(
+        settings=document.project.settings.copy(showDetailedMeasurements=settings.showDetailedMeasurement))),focusClash,clashXray)}
     val selectedIds = editor?.selectedIds ?: emptySet()
     val density = LocalDensity.current.density
     val haptics=LocalHapticFeedback.current
@@ -283,7 +294,7 @@ fun DrawingCanvasScreen(
     val latestLocked = rememberUpdatedState(lockedSelection)
     val latestPositionLocked=rememberUpdatedState(positionLockedSelection)
     val latestBusy = rememberUpdatedState(busy)
-    val needsSurfaces = document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
+    val needsSurfaces = focusClash!=null || document.project.settings.viewMode != ViewMode.WIREFRAME || measurementMode != MeasurementMode.NONE ||
         document.project.settings.autoXrayFrontWalls || document.elements.any {element->element.objectDisplay==ObjectDisplay.XRAY ||
             element.properties.any {(key,value)->key.startsWith(ROOM_SIDE_DISPLAY_PREFIX) && (value as? ParameterValue.Text)?.value==ObjectDisplay.XRAY.name}}
     val placementActive=routeKind!=null || tool!=DrawingTool.SELECT || measurementMode!=MeasurementMode.NONE || pendingLibrary!=null
@@ -310,19 +321,19 @@ fun DrawingCanvasScreen(
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
         document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
-        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D) {
+        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
                 val planSymbols=!is3D
-                val sameGeometry = previous != null && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
+                val sameGeometry = previous != null && previous.inspectionKey==inspectionKey && sameCanvasGeometry(previous.document,document) && previous.detailedMeasurements==settings.showDetailedMeasurement && previous.planSymbols==planSymbols
                 val scene = if (sameGeometry) previous!!.scene else buildDrawingScene(renderDocument,planSymbols=planSymbols)
                 val index = SpatialIndex(scene.segments)
                 val allIds=document.elements.mapTo(HashSet()) {it.id}
                 val mainIds=allIds-selectedIds
                 val main = if (selectedIds.isEmpty()) scene else buildDrawingScene(renderDocument,mainIds,planSymbols)
                 val selected = if (selectedIds.isEmpty()) null else buildDrawingScene(renderDocument,selectedIds,planSymbols)
-                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)buildSurfaceScene(document) else null
+                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)buildSurfaceScene(renderDocument) else null
                 val mainSurfaces=surfaces?.let {if(selectedIds.isEmpty())it else it.partition(selectedIds,false)}
                 val selectedSurfaces=if(selectedIds.isEmpty())null else surfaces?.partition(selectedIds,true)
                 val surfacedIds=surfaces?.chunks.orEmpty().mapTo(HashSet()) {ElementId(it.elementId)}
@@ -339,7 +350,7 @@ fun DrawingCanvasScreen(
                     if (sameGeometry) previous!!.picker else EditorPicker(document, scene, index),resize,
                     MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement,
                     if(sameGeometry)previous!!.pointPicks else PointPickContext(document,scene),
-                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols)
+                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols,inspectionKey)
             }
             prepared = compiled
             loading = compiled
@@ -679,7 +690,7 @@ fun DrawingCanvasScreen(
     val accent = MaterialTheme.colorScheme.primary
     val frame = CanvasFrame(viewport, orbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
-        surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=document.project.settings.viewMode,
+        surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
         autoXrayFrontWalls=document.project.settings.autoXrayFrontWalls)
@@ -705,6 +716,7 @@ fun DrawingCanvasScreen(
                     CanvasActionButton(Icons.Outlined.PictureAsPdf,stringResource(R.string.canvas_export_pdf),{onExportView(ViewExportRequest(renderDocument,frame,size.width,size.height),ViewExportFormat.PDF)},Modifier.testTag("canvas_export_pdf"),enabled=geometryMatches && size.width>0 && !placementActive)
                 }
     }
+    if(clashDialog)ClashCheckDialog(document,selectedLevel,{options->clashDialog=false;setPanel(CanvasPanelId.CLASHES,PanelVisibility.OPEN);onRunClash(options.copy(planView=!is3D))},{clashDialog=false})
     Scaffold(
         modifier = modifier.testTag("drawing_canvas").focusRequester(focus).onPreviewKeyEvent { event ->
             val actions = editor
@@ -727,6 +739,7 @@ fun DrawingCanvasScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
                 } },
                 actions = {
+                    TextButton({clashDialog=true},Modifier.testTag("clash_check_tool"),enabled=!busy && clashProgress==null){Text("Clash check")}
                     var exportMenu by remember {mutableStateOf(false)}
                     Box {TextButton({exportMenu=true},Modifier.testTag("project_export_menu")){Text("Export")}
                         DropdownMenu(exportMenu,{exportMenu=false}) {
@@ -1066,6 +1079,14 @@ fun DrawingCanvasScreen(
                             MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,
                                 onDismiss={setPanel(CanvasPanelId.MEASUREMENTS,PanelVisibility.HIDDEN)},embedded=true)
                         }
+                        PersistentPanel(CanvasPanelId.CLASHES,"Clashes",canvasLayout.panel(CanvasPanelId.CLASHES),
+                            {setPanelPlacement(CanvasPanelId.CLASHES,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.CLASHES,it)},width=380.dp) {
+                            ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->
+                                clashFocus=issue.id;actions.onSelect(emptySet());is3D=true;orbitLevel=null
+                                issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3))
+                                    orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/max(1,size.height))}
+                            },{clashFocus=null},clashXray,{clashXray=it},onClashStatus)
+                        }
                         PersistentPanel(CanvasPanelId.VISIBILITY,stringResource(R.string.panel_visibility),canvasLayout.panel(CanvasPanelId.VISIBILITY),
                             {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
                             ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},
@@ -1110,7 +1131,7 @@ fun DrawingCanvasScreen(
                     measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
-                    pickContext=ready?.pointPicks,viewMode=document.project.settings.viewMode,levelId=selectedLevel,
+                    pickContext=ready?.pointPicks,viewMode=renderDocument.project.settings.viewMode,levelId=selectedLevel,
                     canPlace=pendingLibrary==null || libraryPlacement!=null)
                 CanvasActionButton(if(panelsHidden)Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
                     stringResource(if(panelsHidden)R.string.panel_show_panels else R.string.panel_hide_panels),

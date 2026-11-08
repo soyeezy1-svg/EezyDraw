@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -92,6 +93,8 @@ data class AppUiState(
     val libraryReady: Boolean = false,
     val libraryCanUndo: Boolean = false,
     val libraryCanRedo: Boolean = false,
+    val clashProgress: Float? = null,
+    val clashSummary: String? = null,
 )
 
 class AppViewModel(
@@ -609,6 +612,38 @@ class AppViewModel(
         val presentation=ScenePresentation(document,planView=true)
         return document.elements.asSequence().filter { it.id in ids && presentation.shown(presentation.display(it)) &&
             (document.project.settings.showMeasurements || !isMeasurement(it)) }.map {it.id}.toSet()
+    }
+
+    private var clashJob: Job? = null
+    fun cancelClashCheck() { clashJob?.cancel() }
+    fun runClashCheck(options:ClashCheckOptions) {
+        if(clashJob?.isCompleted==false)return
+        val snapshot=state.value.document ?: return
+        mutableState.update {it.copy(clashProgress=0f,clashSummary="Preparing geometry…")}
+        clashJob=viewModelScope.launch {
+            try {
+                val run=withContext(Dispatchers.Default) {
+                    val context=kotlin.coroutines.coroutineContext
+                    com.eezydraw.core.geometry.ClashDetection.run(snapshot,options,
+                        {p->mutableState.update {it.copy(clashProgress=p)}},{context.ensureActive()})
+                }
+                val current=state.value;val doc=current.document ?: return@launch
+                require(doc.project.id==snapshot.project.id && doc.elements==snapshot.elements && doc.layers==snapshot.layers && doc.systems==snapshot.systems && doc.levels==snapshot.levels && doc.libraryItems==snapshot.libraryItems && doc.project.settings.copy(canvasLayout=snapshot.project.settings.canvasLayout)==snapshot.project.settings) {"The drawing changed during the check. Run Clash check again."}
+                val command=ClashCommands.reconcile(doc,run,System.currentTimeMillis())
+                publishDrawing(current,history.execute(doc,command),current.selectedIds)
+                mutableState.update {it.copy(clashSummary="${run.clashes.size} clashes · ${run.checkedObjects} objects · ${run.candidatePairs} nearby pairs")}
+            } catch(cancelled:CancellationException) {
+                mutableState.update {it.copy(clashSummary="Clash check cancelled; previous results kept")}
+            } catch(error:Exception) {reportError(error.message ?: "Clash check failed")}
+            finally {mutableState.update {it.copy(clashProgress=null)}}
+        }
+        val running=clashJob
+        running?.invokeOnCompletion {error->if(error is CancellationException && clashJob===running)mutableState.update {it.copy(clashProgress=null,clashSummary="Clash check cancelled; previous results kept")}}
+    }
+    fun updateClashStatus(id:IssueId,status:ClashStatus,note:String) {
+        val current=state.value;val doc=current.document ?: return
+        try {publishDrawing(current,history.execute(doc,ClashCommands.status(doc,id,status,note)),current.selectedIds)}
+        catch(error:Exception){reportError(error.message ?: "Could not update the clash")}
     }
 
     private var pendingDrawingExport:Pair<ViewExportRequest,com.eezydraw.storage.DrawingExportOptions>?=null
