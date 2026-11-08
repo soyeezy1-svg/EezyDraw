@@ -267,6 +267,7 @@ fun canvasPanelLabel(id:CanvasPanelId):Int=when(id) {
     CanvasPanelId.LIBRARY->R.string.panel_library
     CanvasPanelId.PROPERTIES->R.string.editing_properties
     CanvasPanelId.MEASUREMENTS->R.string.panel_saved_measurements
+    CanvasPanelId.SCHEDULES->R.string.panel_schedules
     CanvasPanelId.ISSUES->R.string.panel_issues
     CanvasPanelId.CLASHES->R.string.panel_clashes
     CanvasPanelId.VISIBILITY->R.string.panel_visibility

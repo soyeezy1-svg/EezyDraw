@@ -646,6 +646,32 @@ class AppViewModel(
         catch(error:Exception){reportError(error.message ?: "Could not update the clash")}
     }
 
+    fun takeoffSettings(value:TakeoffSettings) {drawingEdit {_,doc->TakeoffCommands.settings(doc,value)}}
+    fun takeoffRate(key:String,ids:Set<LibraryItemId>,amount:Double?,reusable:Boolean) = operation {
+        val current=state.value;val doc=current.document ?: return@operation
+        val command=TakeoffCommands.rate(doc,key,amount,ids)
+        if(reusable) {
+            val currency=doc.project.settings.takeoff.currency
+            var catalog=current.libraryCatalog
+            for(id in ids) {
+                val definition=doc.libraryItems.find {it.id==id} ?: BuiltInLibrary.find(id) ?: continue
+                val sourceId=definition.catalogSourceId ?: definition.fitting?.baseTypeId ?: id
+                val item=catalog.find(sourceId,doc.libraryItems) ?: definition.copy(builtIn=BuiltInLibrary.find(definition.id)!=null)
+                catalog=catalog.save(item.copy(unitRates=if(amount==null)item.unitRates-currency else item.unitRates+(currency to amount)))
+            }
+            deviceLibrary.save(catalog);libraryHistory.record(current.libraryCatalog);publishLibrary(catalog)
+        }
+        publishDrawing(state.value,history.execute(doc,command),current.selectedIds)
+    }
+    fun shareSchedule(definition:ScheduleDefinition,planView:Boolean,format:com.eezydraw.storage.ScheduleFormat) = operation {
+        val doc=state.value.document ?: return@operation
+        val table=withContext(Dispatchers.Default){com.eezydraw.core.geometry.ScheduleEngine.build(doc,definition,planView)}
+        val file=withContext(Dispatchers.IO){java.io.File(application.cacheDir,"issue-share/schedule-${UUID.randomUUID()}.${format.extension}").also {file->file.parentFile!!.mkdirs();file.outputStream().use {com.eezydraw.storage.ScheduleExport.write(doc,table,format,it)}}}
+        val uri=androidx.core.content.FileProvider.getUriForFile(application,application.packageName+".issues",file)
+        val send=Intent(Intent.ACTION_SEND).setType(format.mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        application.startActivity(Intent.createChooser(send,"Share schedule").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     fun saveIssue(issue:Issue) {
         val current=state.value;val doc=current.document ?: return
         try {publishDrawing(current,history.execute(doc,IssueCommands.put(doc,issue)),current.selectedIds)}catch(e:Exception){reportError(e.message ?: "Cannot save issue")}

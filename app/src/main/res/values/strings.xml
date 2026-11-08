@@ -27,4 +27,5 @@
 <string name="panel_mode_wall_section">Wall section</string>
     <string name="panel_clashes">Clashes</string>
     <string name="panel_issues">Issues</string>
+    <string name="panel_schedules">Schedules</string>
 </resources>

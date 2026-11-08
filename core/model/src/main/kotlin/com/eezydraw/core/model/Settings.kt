@@ -45,6 +45,7 @@ data class ProjectSettings(
     val autoXrayFrontWalls: Boolean = false,
     val canvasLayout: CanvasLayout = CanvasLayout(),
     val clashCheck: ClashCheckOptions = ClashCheckOptions(),
+    val takeoff:TakeoffSettings = TakeoffSettings(),
 ) {
     init {
         require(decimalPlaces in 0..8)
