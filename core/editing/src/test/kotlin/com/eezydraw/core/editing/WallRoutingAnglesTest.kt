@@ -112,4 +112,40 @@ class WallRoutingAnglesTest {
         assertNotEquals(wallServiceCuts(routed),wallServiceCuts(moved))
         assertEquals(3,bends(moved).size)
     }
+    @Test fun `mitres follow connected edits and moves while fitting geometry remains curved`() {
+        for(kind in listOf(RouteKind.CONDUIT,RouteKind.TRUNKING)) {
+            val routed=draw(kind)
+            val radius=if(kind==RouteKind.CONDUIT).0175 else .055
+            val horizontal=routed.elements.first {it.body is ElementBody.Route}
+            val oldEnd=measurementToWorld(horizontal.transform,(horizontal.body as ElementBody.Route).path.last())
+            val edited=ServiceRouting.edit(routed,horizontal.id,settings(kind),end=oldEnd.copy(x=4.0)).preview(routed)
+            val corners=wallServiceCuts(edited).flatMap {it.outline}
+            assertTrue(corners.any {abs(it.x-(4+radius))<1e-8 && abs(it.y-(.5-radius))<1e-8})
+            assertFalse(corners.any {abs(it.x-(3+radius*tan(PI/8)))<1e-8 && abs(it.y-(.5-radius))<1e-8})
+            val ids=edited.elements.filter {it.body is ElementBody.Route}.mapTo(hashSetOf()){it.id}
+            val shifted=EditCommands.transform(edited,ids,EditDelta(translation=Point3(.2,0.0,.1))).preview(edited)
+            val moved=ServiceRouting.reconcile(edited,WallServices.reconcile(edited,shifted))
+            val beforeCuts=wallServiceCuts(edited);val afterCuts=wallServiceCuts(moved)
+            assertEquals(beforeCuts.size,afterCuts.size)
+            beforeCuts.zip(afterCuts).forEach {(a,b)->
+                assertEquals(a.depth,b.depth,0.0)
+                a.outline.zip(b.outline).forEach {(p,q)->assertEquals(p.x+.2,q.x,1e-8);assertEquals(p.y+.1,q.y,1e-8)}
+            }
+            assertTrue(bends(moved).all {it.second.centreline.size>2})
+            val history=EditHistory();val command=EditCommands.between(edited,moved,"Move mitred chase")
+            assertEquals(moved,history.execute(edited,command));assertEquals(edited,history.undo(moved));assertEquals(moved,history.redo(edited))
+        }
+    }
+    @Test fun `engine tees retain a clean union alongside mitred bends and unchanged fitting definitions`() {
+        val routed=draw(RouteKind.CONDUIT)
+        val config=settings(RouteKind.CONDUIT)
+        val tee=ServiceRouting.create(routed,RouteKind.CONDUIT,listOf(RoutePick(Point3(2.0,.0825,.5),config,level.id),RoutePick(Point3(2.0,.0825,2.0),config,level.id))).preview(routed)
+        val definitions=tee.libraryItems.associateBy {it.id}
+        assertEquals(1,tee.elements.count {e->(e.body as? ElementBody.Component)?.let {definitions[it.libraryItemId]?.fitting?.kind==FittingKind.TEE}==true})
+        val cuts=wallServiceCuts(tee)
+        assertTrue(cuts.all {it.outline.size<=4})
+        assertNotNull(wallCutMesh(wallFrames(tee).single(),cuts))
+        assertEquals(tee,ServiceRouting.reconcile(tee,tee))
+    }
+
 }

@@ -94,7 +94,7 @@ fun wallServiceCuts(document:ProjectDocument):List<WallCut> {
             is ElementBody.Route -> {
                 val width=when(val s=body.section){is RouteSection.Circular->s.diameter;is RouteSection.Rectangular->s.width}+2*options.clearance
                 val depth=options.depth ?: (when(val s=body.section){is RouteSection.Circular->s.diameter;is RouteSection.Rectangular->s.height}+2*options.clearance)
-                (body.fabricationPath ?: body.path).map {frame.coordinates(measurementToWorld(e.transform,it))}.zipWithNext().mapNotNull {(a,b)->
+                (if(options.mode==WallServiceMode.CHASE)body.path else body.fabricationPath ?: body.path).map {frame.coordinates(measurementToWorld(e.transform,it))}.zipWithNext().mapNotNull {(a,b)->
                     val length=hypot(b.x-a.x,b.z-a.z);if(length<1e-9)null else {
                         val x=-(b.z-a.z)/length*width/2;val z=(b.x-a.x)/length*width/2
                         cut(listOf(Point2(a.x+x,a.z+z),Point2(b.x+x,b.z+z),Point2(b.x-x,b.z-z),Point2(a.x-x,a.z-z)),depth)
@@ -112,34 +112,7 @@ fun wallServiceCuts(document:ProjectDocument):List<WallCut> {
             else->emptyList()
         }
     }
-    return direct+wallFittingCuts(document,frames)
-}
-private fun wallFittingCuts(document:ProjectDocument,frames:Map<Pair<ElementId,RoomSideRef?>,WallFrame>):List<WallCut> {
-    val elements=document.elements.associateBy {it.id};val library=document.libraryItems.associateBy {it.id}
-    return document.elements.flatMap {e->
-        val ownerId=(e.properties["routingOwner"] as? ParameterValue.Text)?.value?.let(::ElementId) ?: return@flatMap emptyList()
-        val owner=elements[ownerId] ?: return@flatMap emptyList();val mount=owner.wallService() ?: return@flatMap emptyList()
-        if(mount.options.mode!=WallServiceMode.CHASE)return@flatMap emptyList()
-        val body=e.body as? ElementBody.Component ?: return@flatMap emptyList();val item=library[body.libraryItemId] ?: return@flatMap emptyList()
-        val definition=item.fitting ?: return@flatMap emptyList()
-        if(definition.kind !in setOf(FittingKind.ELBOW_45,FittingKind.ELBOW_90,FittingKind.BEND_90_VERTICAL_INSIDE,FittingKind.BEND_90_VERTICAL_OUTSIDE,FittingKind.TEE,FittingKind.CROSS,FittingKind.OFFSET,FittingKind.REDUCER,FittingKind.RISER_UP,FittingKind.RISER_DOWN))return@flatMap emptyList()
-        val frame=frames[mount.wallId to mount.roomSide] ?: return@flatMap emptyList()
-        val width=when(val s=definition.section){is RouteSection.Circular->s.diameter;is RouteSection.Rectangular->s.width}+2*mount.options.clearance
-        val depth=mount.options.depth ?: (when(val s=definition.section){is RouteSection.Circular->s.diameter;is RouteSection.Rectangular->s.height}+2*mount.options.clearance)
-        val envelope=item.geometrySize ?: item.defaultSize
-        fun project(p:Point3)=frame.coordinates(measurementToWorld(e.transform,Point3(p.x*body.size.width/envelope.width,p.y*body.size.depth/envelope.depth,p.z*body.size.height/envelope.height)))
-        val paths=listOf(definition.centreline)+definition.ports.filter {it.id.startsWith("branch")}.map {listOf(definition.centreline[definition.centreline.size/2],it.position)}
-        fun cut(outline:List<Point2>)=WallCut(frame.host.id,owner.id,frame.roomSide,WallServiceMode.CHASE,outline,
-            if(mount.side==WallFaceSide.LEFT)0.0 else (frame.thickness-depth).coerceAtLeast(0.0),
-            if(mount.side==WallFaceSide.LEFT)depth.coerceAtMost(frame.thickness)else frame.thickness,frame.thickness,owner.name,depth,mount.side)
-        paths.flatMap {path->val points=path.map(::project)
-            points.zipWithNext().mapNotNull {(a,b)->val length=hypot(b.x-a.x,b.z-a.z)
-                if(length<1e-9)null else {val x=-(b.z-a.z)/length*width/2;val z=(b.x-a.x)/length*width/2
-                    cut(listOf(Point2(a.x+x,a.z+z),Point2(b.x+x,b.z+z),Point2(b.x-x,b.z-z),Point2(a.x-x,a.z-z)))
-                }
-            }+points.map {p->cut(List(24){i->val angle=2*PI*i/24;Point2(p.x+width/2*cos(angle),p.z+width/2*sin(angle))})}
-        }
-    }
+    return direct+wallChaseMitres(document,frames)
 }
 fun wallDepthWarnings(document:ProjectDocument):List<String> = wallServiceCuts(document).filter {it.exceeds(document.project.settings.wallServices.maxDepthFraction)}.map {cut->
     "${cut.description.ifBlank {cut.sourceId.value}}: cut depth ${"%.0f".format(java.util.Locale.ROOT,cut.depth*1000)} mm exceeds ${"%.0f".format(java.util.Locale.ROOT,document.project.settings.wallServices.maxDepthFraction*100)}% of wall thickness."

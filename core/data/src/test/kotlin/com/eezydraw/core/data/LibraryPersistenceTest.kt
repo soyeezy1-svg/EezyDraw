@@ -242,7 +242,7 @@ class LibraryPersistenceTest {
         assertEquals(saved,RoomWalls.reconcile(saved,saved))
     }
 
-    @Test fun `wall angle choices diagonal chases and both bend sizes survive native storage and import`() = runBlocking {
+    @Test fun `wall angles mitred chases and both bend sizes survive native storage and import`() = runBlocking {
         val base=repository.create("Wall angles",ProjectTemplate.EMPTY,ProjectSettings());projectIds+=base.project.id.value
         val level=base.levels.first().id
         val wall=Element(ElementId("angle-wall"),base.project.id,base.layers.first().id,
@@ -256,7 +256,15 @@ class LibraryPersistenceTest {
                 .map {RoutePick(it.copy(x=it.x+index*6),config,level)}
             document=ServiceRouting.create(document,kind,picks).preview(document)
         }
-        val saved=repository.save(document.copy(project=document.project.copy(settings=document.project.settings.copy(routeDefaults=configs))))
+        val conduit=configs.getValue(RouteKind.CONDUIT)
+        document=ServiceRouting.create(document,RouteKind.CONDUIT,listOf(RoutePick(Point3(2.0,.0825,.5),conduit,level),RoutePick(Point3(2.0,.0825,2.0),conduit,level))).preview(document)
+        val routes=document.elements.filter {it.body is ElementBody.Route}.mapTo(hashSetOf()){it.id}
+        val shifted=com.eezydraw.core.editing.EditCommands.transform(document,routes,com.eezydraw.core.editing.EditDelta(translation=Point3(.1,0.0,.1))).preview(document)
+        document=ServiceRouting.reconcile(document,WallServices.reconcile(document,shifted))
+        val cuts=wallServiceCuts(document)
+        assertTrue(cuts.any {it.outline.size==3});assertTrue(cuts.all {it.outline.size<=4})
+        val saved=repository.save(document.copy(project=document.project.copy(settings=document.project.settings.copy(routeDefaults=configs,
+            viewMode=ViewMode.XRAY,wallServices=WallServiceSettings(sectionHeight=1.4)))))
         database.close();reopen()
         val loaded=repository.load(saved.project.id.value)
         assertEquals(saved,loaded)
