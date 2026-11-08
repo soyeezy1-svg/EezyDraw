@@ -4,6 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable enum class CanvasPanelId { DRAW, EDIT, VIEW, MEASURE, LIBRARY, PROPERTIES, MEASUREMENTS, VISIBILITY, CLASHES, ISSUES, SCHEDULES }
 @Serializable enum class PanelVisibility { OPEN, COLLAPSED, HIDDEN }
+@Serializable enum class CanvasGroup { DRAW, EDIT, LIBRARY, ROUTE, LEVEL, MEASURE, VIEW, NAVIGATE, DISPLAY, LAYERS, ISSUES, SCHEDULE, EXPORT, SETTINGS }
+@Serializable enum class NavigationTool { SELECT, PAN, ORBIT, LOOK_AROUND, WALK }
 
 /** The top-left anchor is normalized to the viewport; content resizes below it without moving the panel. */
 @Serializable
@@ -20,7 +22,10 @@ data class PanelPlacement(
 data class CanvasLayout(
     val panels: Map<CanvasPanelId, PanelPlacement> = defaultCanvasPanels(),
     val hideAll: Boolean = false,
+    val openGroup:CanvasGroup?=null,
+    val bottomBarVisible:Boolean=true,
 ) {
+    fun toggleGroup(group:CanvasGroup)=copy(openGroup=if(openGroup==group)null else group)
     fun panel(id: CanvasPanelId): PanelPlacement = panels[id] ?: defaultCanvasPanels().getValue(id)
     fun withPanel(id: CanvasPanelId, placement: PanelPlacement): CanvasLayout = copy(panels = panels + (id to placement))
 }

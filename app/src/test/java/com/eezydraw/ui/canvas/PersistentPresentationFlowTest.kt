@@ -62,10 +62,10 @@ class PersistentPresentationFlowTest {
     @Test fun selectionMovingPlacingAndMeasuringNeverRewriteTheUserPanelLayout() {
         startProject("Panels remain where placed")
         compose.runOnIdle {assertFalse(model.state.value.settings.autoHidePanelsWhileDrawing)}
-        compose.onNodeWithTag("toolbar_draw").performClick()
+        compose.cadGroup("draw")
         compose.onNodeWithTag("tool_box").performScrollTo().performClick()
-        assertEquals(PanelVisibility.OPEN,layout().panel(CanvasPanelId.DRAW).state)
-        compose.onNodeWithTag("tools_collapse").performClick()
+        assertEquals(CanvasGroup.DRAW,layout().openGroup)
+        compose.cadCloseStrip("draw")
         collapseView()
         val before=layout()
         tapCanvas(.40f,.50f)
@@ -80,10 +80,10 @@ class PersistentPresentationFlowTest {
         compose.onNodeWithTag("selection_gizmo").performCustomAccessibilityActionWithLabel(context.getString(R.string.gizmo_move_x))
         compose.waitUntil(10_000) {model.state.value.document?.elements?.single()?.transform!=box.transform}
         assertEquals("A completed move must retain each state and position",before,layout())
-        compose.onNodeWithTag("toolbar_measure").performClick()
-        compose.onNodeWithTag("toolbar_measure_distance").performClick()
-        assertEquals("Choosing Measure must leave its panel open",PanelVisibility.OPEN,layout().panel(CanvasPanelId.MEASURE).state)
-        compose.onNodeWithTag("panel_measure_collapse").performClick()
+        compose.cadGroup("measure")
+        compose.onNodeWithTag("canvas_measure").performClick()
+        assertEquals("Choosing Measure keeps its strip open",CanvasGroup.MEASURE,layout().openGroup)
+        compose.cadCloseStrip("measure")
         val measureLayout=layout()
         tapCanvas(.40f,.50f)
         assertEquals(measureLayout,layout())
@@ -95,23 +95,23 @@ class PersistentPresentationFlowTest {
     @Test fun propertiesStayOpenForEmptySelectionAndFullscreenRestoresExactlyTheSamePanels() {
         startProject("Explicit panel visibility")
         val box=placeBox()
-        compose.onNodeWithTag("selection_properties").performClick()
-        assertEquals(PanelVisibility.OPEN,layout().panel(CanvasPanelId.PROPERTIES).state)
+        compose.cadSelection();compose.onNodeWithTag("selection_properties").performClick()
+        assertEquals(CanvasGroup.EDIT,layout().openGroup)
         compose.runOnIdle {model.select(emptySet())}
-        compose.onNodeWithTag("panel_properties").assertIsDisplayed()
+        compose.onNodeWithTag("cad_detail_close").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.presentation_select_properties)).assertIsDisplayed()
         val before=layout()
         compose.onNodeWithTag("canvas_hide_panels").performClick()
         assertTrue(layout().hideAll)
         assertEquals(before.panels,layout().panels)
-        compose.onNodeWithTag("panel_properties").assertDoesNotExist()
+        compose.onNodeWithTag("cad_detail_close").assertDoesNotExist()
         compose.onNodeWithTag("canvas_show_panels").assertIsDisplayed()
         compose.runOnIdle {model.select(setOf(box.id))}
         assertTrue("Selection cannot bring hidden panels back",layout().hideAll)
-        compose.onNodeWithTag("panel_properties").assertDoesNotExist()
+        compose.onNodeWithTag("cad_detail_close").assertDoesNotExist()
         compose.onNodeWithTag("canvas_show_panels").performClick()
         assertEquals(before,layout())
-        compose.onNodeWithTag("panel_properties").assertIsDisplayed()
+        compose.onNodeWithTag("cad_detail_close").assertIsDisplayed()
         compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
     }
 
@@ -119,7 +119,7 @@ class PersistentPresentationFlowTest {
         startProject("Durable layout")
         val id=document().project.id.value
         val custom=layout().withPanel(CanvasPanelId.DRAW,PanelPlacement(PanelVisibility.COLLAPSED,.73,.61))
-            .withPanel(CanvasPanelId.VISIBILITY,PanelPlacement(PanelVisibility.OPEN,.18,.46)).copy(hideAll=true)
+            .withPanel(CanvasPanelId.VISIBILITY,PanelPlacement(PanelVisibility.OPEN,.18,.46)).copy(hideAll=true,openGroup=CanvasGroup.NAVIGATE,bottomBarVisible=false)
         compose.runOnIdle {model.setCanvasLayout(custom)}
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250))
         compose.waitUntil(5_000) {repositories.settings.settings.value.canvasLayouts[id]==custom}
@@ -151,10 +151,10 @@ class PersistentPresentationFlowTest {
             assertEquals(locked,checkNotNull(model.state.value.document).elements.single())
             model.clearError();model.clearNotice()
         }
-        compose.onNodeWithTag("selection_properties").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_properties").performClick()
         compose.onNodeWithText("Object is locked. Unlock to edit.").assertIsDisplayed()
         compose.onNodeWithTag("property_x").assertIsNotEnabled()
-        compose.runOnIdle {model.setCanvasLayout(layoutWithoutProperties(checkNotNull(model.state.value.document).project.settings.canvasLayout))}
+        compose.cadCloseDetail()
         more("lock")
         compose.waitUntil(10_000) {model.state.value.document?.elements?.single()?.lockMode==LockMode.NONE}
         compose.runOnIdle {
@@ -217,25 +217,22 @@ class PersistentPresentationFlowTest {
         ready()
     }
     private fun chooseBox() {
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_box").performScrollTo().performClick()
-        compose.onNodeWithTag("tools_collapse").performClick()
-        collapseView()
+        compose.cadTool("box")
     }
     private fun placeBox():Element {
         chooseBox();tapCanvas(.40f,.50f);awaitElements(1)
         return document().elements.single().also {awaitSelected(it.id)}
     }
     private fun collapseView() {
-        if(compose.onAllNodesWithTag("panel_view_collapse").fetchSemanticsNodes().isNotEmpty())
-            compose.onNodeWithTag("panel_view_collapse").performClick()
+        compose.cadCloseStrip("view")
     }
     private fun tapCanvas(x:Float,y:Float) {
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*x,height*y))}
+        compose.cadTap(x, y)
         compose.waitForIdle()
     }
     private fun more(action:String) {
-        compose.onNodeWithTag("selection_more").performClick()
+        compose.cadSelection()
+        compose.cadSelection();compose.onNodeWithTag("selection_more").performClick()
         compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
         compose.waitForIdle()
     }

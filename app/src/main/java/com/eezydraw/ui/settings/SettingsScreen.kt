@@ -251,8 +251,7 @@ fun SettingsScreen(
                 )
             }
             item {
-                SettingSwitch(stringResource(R.string.settings_auto_hide_panels), current.autoHidePanelsWhileDrawing,
-                    { update(current.copy(autoHidePanelsWhileDrawing=it)) }, "settings_auto_hide_panels")
+                Text(stringResource(R.string.settings_auto_hide_panels),style=MaterialTheme.typography.titleSmall)
                 Text(stringResource(R.string.settings_auto_hide_panels_help), style=MaterialTheme.typography.bodySmall)
             }
             item {
@@ -295,6 +294,9 @@ fun SettingsScreen(
                 SettingSwitch(stringResource(R.string.settings_pointer_haptic), current.precisionPointer.hapticFeedback,
                     { update(current.copy(precisionPointer=current.precisionPointer.copy(hapticFeedback=it))) }, "settings_pointer_haptic")
             }
+            item { SettingSwitch("Invert orbit",current.invertOrbit,{update(current.copy(invertOrbit=it))},"settings_invert_orbit") }
+            item { SettingSwitch("Zoom toward finger (off: center)",current.zoomTowardFinger,{update(current.copy(zoomTowardFinger=it))},"settings_zoom_anchor") }
+            item { SettingSwitch("Show axis indicator",current.showAxisIndicator,{update(current.copy(showAxisIndicator=it))},"settings_axis_indicator") }
             item { NumericField("gesture", R.string.settings_gesture, draft, errors, input, help = R.string.settings_gesture_help) }
             item {
                 SettingSwitch(

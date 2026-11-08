@@ -33,6 +33,7 @@ data class SavedView(
     val hiddenSystemIds: Set<SystemId> = emptySet(),
     val sectionBox: Bounds3? = null,
     val cutPlane: CutPlane? = null,
+    val capture:IssueView?=null,
 )
 
 @Serializable

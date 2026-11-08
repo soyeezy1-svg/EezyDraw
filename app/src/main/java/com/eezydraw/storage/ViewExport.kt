@@ -77,11 +77,11 @@ object ViewExport {
         val width = max(1, (request.width * scale).toInt())
         val height = max(1, (request.height * scale).toInt())
         val raster = Raster(request, width, height)
-        val scene = buildDrawingScene(request.document,planSymbols=!request.frame.is3D)
+        val scene = com.eezydraw.core.geometry.SectionClip.drawing(buildDrawingScene(request.document,planSymbols=!request.frame.is3D),request.frame.sectionBox)
         val mode = request.frame.viewMode
         val autoWalls = request.frame.autoXrayFrontWalls || request.document.project.settings.autoXrayFrontWalls
         val surfaces = if (mode != ViewMode.WIREFRAME || autoWalls && request.frame.is3D || hasXrayOverrides(request.document))
-            buildSurfaceScene(request.document) else null
+            com.eezydraw.core.geometry.SectionClip.surfaces(buildSurfaceScene(request.document),request.frame.sectionBox) else null
         val parts = scene.chunks.map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) } +
             surfaces?.chunks.orEmpty().map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) }
         val walls = RoomWallIndex(parts)
@@ -330,8 +330,9 @@ object ViewExport {
         fun clip(point: Point3, r: Double = 0.0, g: Double = 0.0, b: Double = 0.0, alpha: Double = 1.0): Vertex {
             if (!request.frame.is3D) {
                 val viewport = request.frame.viewport
-                val x = (point.x - viewport.center.x) * viewport.pixelsPerMetre * 2 / request.width
-                val y = (point.y - viewport.center.y) * viewport.pixelsPerMetre * 2 / request.height
+                val dx=point.x-viewport.center.x;val dy=point.y-viewport.center.y
+                val x=(cos(viewport.rotation)*dx-sin(viewport.rotation)*dy)*viewport.pixelsPerMetre*2/request.width
+                val y=(sin(viewport.rotation)*dx+cos(viewport.rotation)*dy)*viewport.pixelsPerMetre*2/request.height
                 return Vertex(x, y, 0.0, 1.0, r, g, b, alpha)
             }
             val x = point.x - camera.target.x; val y = point.y - camera.target.y; val z = point.z - camera.target.z

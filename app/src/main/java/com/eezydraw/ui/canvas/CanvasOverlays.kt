@@ -147,6 +147,7 @@ internal fun ViewCube(
     onGestureActive: (Boolean) -> Unit = {},
     onPlan: () -> Unit = {},
     onProjection: (Projection) -> Unit = {},
+    onCompass:(Double)->Unit={},
 ) {
     val cubeLabel = stringResource(R.string.canvas_view_cube)
     val top = stringResource(R.string.canvas_top)
@@ -171,6 +172,7 @@ internal fun ViewCube(
     val currentGesture by rememberUpdatedState(onGestureActive)
     val currentPlan by rememberUpdatedState(onPlan)
     val currentProjection by rememberUpdatedState(onProjection)
+    val currentCompass by rememberUpdatedState(onCompass)
     val touchDensity = LocalDensity.current.density.toDouble()
     val currentDensity by rememberUpdatedState(touchDensity)
     Box(modifier.testTag("canvas_view_cube").semantics {
@@ -227,10 +229,9 @@ internal fun ViewCube(
                         previous = change.position
                         change.consume()
                         if (!change.pressed) {
-                            if (!orbiting && !longPressed) cubeNavigationHit(change.position, startCamera,
-                                size.width.toDouble(), size.height.toDouble(), currentDensity)?.let { direction ->
-                                if (direction.x != 0.0 && direction.y != 0.0 && direction.z != 0.0)
-                                    currentCorner(direction) else currentFace(direction)
+                            if(!orbiting && !longPressed){
+                                val compass=cubeCompassHit(change.position,startCamera,size.width.toDouble(),size.height.toDouble(),currentDensity)
+                                if(compass!=null)currentCompass(compass)else cubeNavigationHit(change.position,startCamera,size.width.toDouble(),size.height.toDouble(),currentDensity)?.let {direction->if(direction.x!=0.0 && direction.y!=0.0 && direction.z!=0.0)currentCorner(direction)else currentFace(direction)}
                             }
                             break
                         }
@@ -257,6 +258,10 @@ internal fun ViewCube(
                 drawContext.canvas.nativeCanvas.drawText(labels[face.index], center.x,
                     center.y + paint.textSize / 3, paint)
             }
+            val centre=Offset(size.width/2,size.height/2);val radius=min(size.width,size.height)*.44f
+            drawCircle(stroke,radius,centre,style=Stroke(density))
+            listOf("N","E","S","W").forEachIndexed {i,label->val angle=camera.yaw+i*Math.PI/2;val at=centre+Offset((kotlin.math.cos(angle)*radius*.91).toFloat(),(kotlin.math.sin(angle)*radius*.91).toFloat());drawContext.canvas.nativeCanvas.drawText(label,at.x,at.y+paint.textSize/3,paint)}
+
         }
         DropdownMenu(menuOpen, { menuOpen = false }) {
             DropdownMenuItem(text = { Text(plan) }, modifier = Modifier.testTag("cube_plan_2d"),
@@ -340,4 +345,12 @@ private fun inPolygon(point: Offset, vertices: List<Offset>): Boolean {
         previous = current
     }
     return result
+}
+
+internal fun cubeCompassHit(position:Offset,camera:OrbitCamera,width:Double,height:Double,density:Double):Double? {
+    val x=position.x-width/2;val y=position.y-height/2;val radius=minOf(width,height)*.44
+    if(kotlin.math.hypot(x,y)<radius*.78)return null
+    val nearest=(0..3).minByOrNull {i->val angle=camera.yaw+i*Math.PI/2;kotlin.math.hypot(x-kotlin.math.cos(angle)*radius*.91,y-kotlin.math.sin(angle)*radius*.91)} ?: return null
+    val angle=camera.yaw+nearest*Math.PI/2
+    return if(kotlin.math.hypot(x-kotlin.math.cos(angle)*radius*.91,y-kotlin.math.sin(angle)*radius*.91)<=16*density) -Math.PI/2+nearest*Math.PI/2 else null
 }

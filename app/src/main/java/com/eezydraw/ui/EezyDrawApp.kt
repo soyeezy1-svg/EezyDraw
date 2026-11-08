@@ -14,6 +14,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -114,6 +119,7 @@ fun EezyDrawApp(
     var photoIssue by remember {mutableStateOf<com.eezydraw.core.model.Issue?>(null)}
     var photoIssueKey by rememberSaveable {mutableStateOf<String?>(null)}
     var cameraUriText by rememberSaveable {mutableStateOf<String?>(null)}
+    var settingsReturnToProject by rememberSaveable {mutableStateOf(false)}
     var issueExportFormat by remember {mutableStateOf("pdf")}
     val issuePdf=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")){uri->uri?.let {viewModel.exportIssues(it.toString(),"pdf")}}
     val issueCsv=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")){uri->uri?.let {viewModel.exportIssues(it.toString(),"csv")}}
@@ -127,7 +133,7 @@ fun EezyDrawApp(
     }
     LaunchedEffect(state.notice,state.noticeUndo) {
         state.notice?.let { message ->
-            val result=snackbar.showSnackbar(message,actionLabel=if(state.noticeUndo)context.getString(R.string.editing_undo)else null)
+            val result=snackbar.showSnackbar(message,actionLabel=if(state.noticeUndo)context.getString(R.string.editing_undo)else null,withDismissAction=true)
             if(result==SnackbarResult.ActionPerformed)viewModel.undo()
             viewModel.clearNotice()
         }
@@ -137,7 +143,7 @@ fun EezyDrawApp(
         Surface(Modifier.fillMaxSize()) {
             Scaffold(
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                snackbarHost = { SnackbarHost(snackbar, Modifier.navigationBarsPadding()) },
+                snackbarHost = {if(state.screen!=AppScreen.PROJECT)SnackbarHost(snackbar, Modifier.navigationBarsPadding())},
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
                     AnimatedContent(
@@ -213,6 +219,8 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        onSaveCameraView=viewModel::saveCameraView,onDeleteCameraView=viewModel::deleteCameraView,onDiscardExit=viewModel::discardProjectAndExit,
+                                        onOpenSettings={settingsReturnToProject=true;viewModel.navigate(AppScreen.SETTINGS)},onNavigationSettings=viewModel::navigationSettings,
                                         onTakeoffSettings=viewModel::takeoffSettings,onTakeoffRate=viewModel::takeoffRate,onShareSchedule=viewModel::shareSchedule,
                                         onSaveIssue=viewModel::saveIssue,onDeleteIssue=viewModel::deleteIssue,onIssueScreenshot=viewModel::attachIssueScreenshot,onShareIssue=viewModel::shareIssue,
                                         onIssueExport={format->if(format=="pdf")issuePdf.launch("issues.pdf")else issueCsv.launch("issues.csv")},
@@ -234,8 +242,8 @@ fun EezyDrawApp(
                             } ?: LoadingIndicator()
                             AppScreen.SETTINGS -> SettingsScreen(
                                 settings = state.settings,
-                                onSave = viewModel::saveSettings,
-                                onBack = { viewModel.navigate(AppScreen.MENU) },
+                                onSave = {value->viewModel.saveSettings(value,settingsReturnToProject);settingsReturnToProject=false},
+                                onBack = {viewModel.navigate(if(settingsReturnToProject)AppScreen.PROJECT else AppScreen.MENU);settingsReturnToProject=false},
                                 onChooseSaveLocation = { chooseFolder.launch(state.settings.saveLocationUri?.toUri()) },
                                 onResetSaveLocation = viewModel::resetFolder,
                                 onOpenPermissions = {
@@ -265,6 +273,11 @@ fun EezyDrawApp(
                             )
                         }
                     }
+                    if(state.screen==AppScreen.PROJECT && state.document?.project?.settings?.canvasLayout?.hideAll!=true) {
+                        val width=LocalWindowInfo.current.containerSize.width/LocalDensity.current.density
+                        val noticeModifier=if(width>=760)Modifier.padding(start=184.dp,end=256.dp,top=8.dp)else Modifier.padding(start=8.dp,end=8.dp,top=if(width<520)260.dp else 136.dp)
+                        SnackbarHost(snackbar,Modifier.align(Alignment.TopCenter).statusBarsPadding().then(noticeModifier).fillMaxWidth())
+                    }
                     if (state.busy && startupComplete) {
                         Box(
                             Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = .7f))
@@ -288,7 +301,7 @@ fun EezyDrawApp(
             }
         }
     }
-    BackHandler(enabled = startupComplete && state.ready && state.screen != AppScreen.MENU && state.screen != AppScreen.SETTINGS) {
+    BackHandler(enabled = startupComplete && state.ready && state.screen != AppScreen.MENU && state.screen != AppScreen.SETTINGS && state.screen != AppScreen.PROJECT) {
         if (!state.busy) {
             if (state.screen == AppScreen.PROJECT) viewModel.backFromProject()
             else if (state.screen == AppScreen.PROJECT_DETAILS) viewModel.navigate(AppScreen.PROJECT)

@@ -132,13 +132,13 @@ class CanvasEditingFlowTest {
         toolsAction("redo")
         assertEquals(moved, element())
         collapseTools()
-        compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
+        compose.cadGroup("settings");compose.onNodeWithTag("canvas_save").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
         assertEquals(moved, repositories.projects.documents.values.single().elements.single())
         // The bottom-right View panel is persistent; deselect on uncovered canvas.
-        compose.onNodeWithTag("canvas_surface").performTouchInput { click(Offset(width * .94f, height * .20f)) }
+        compose.cadTap(.94f, .20f)
         compose.runOnIdle { assertTrue(model.state.value.selectedIds.isEmpty()) }
-        compose.onNodeWithContentDescription(context.getString(R.string.canvas_back)).performClick()
+        compose.onNodeWithTag("canvas_close").performClick()
         compose.onNodeWithTag("start_menu").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.continue_project)).performScrollTo().performClick()
         awaitCanvas()
@@ -195,17 +195,15 @@ class CanvasEditingFlowTest {
             assertTrue(model.state.value.canRedo)
         }
         collapseTools()
-        compose.onNodeWithTag("toolbar_edit").performClick()
-        compose.onNodeWithTag("tools_undo").performScrollTo().assertIsNotEnabled()
+        compose.cadGroup("edit")
+        compose.onNodeWithTag("view_undo").assertIsNotEnabled()
     }
 
     @Test
     fun numericPropertiesMirrorAndRectangularArrayApplyAsAtomicUndoableEdits() {
         createEmptyProject("Numeric solid editing")
         chooseTool("box")
-        compose.onNodeWithTag("canvas_surface").performTouchInput {
-            click(Offset(width * .43f, height * .60f))
-        }
+        compose.cadTap(.43f, .60f)
         awaitElements(1)
         val original = element()
         assertTrue((original.body as ElementBody.DrawingShape).shape is Shape.Box)
@@ -223,7 +221,7 @@ class CanvasEditingFlowTest {
         assertEquals("Typing a Properties draft must not mutate the document", original, element())
         compose.onNodeWithTag("properties_apply").assertIsEnabled().performClick()
         compose.onNodeWithTag("properties_side_panel").assertIsDisplayed()
-        compose.onNodeWithTag("panel_properties_hide").performClick()
+        compose.cadCloseDetail()
         val edited = element()
         compose.runOnIdle {
             val properties = readProperties(checkNotNull(model.state.value.document), edited)
@@ -283,7 +281,7 @@ class CanvasEditingFlowTest {
         toolsAction("undo")
         assertEquals("Undo mirror restores the complete numeric transform", edited, element())
         collapseTools()
-        compose.onNodeWithTag("canvas_save").assertIsEnabled().performClick()
+        compose.cadGroup("settings");compose.onNodeWithTag("canvas_save").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { !model.state.value.busy && !model.state.value.dirty }
         assertEquals(edited, repositories.projects.documents.values.single().elements.single())
     }
@@ -363,46 +361,19 @@ class CanvasEditingFlowTest {
     }
 
     private fun chooseTool(tool: String) {
-        if (tool == "select") { collapseTools(); return }
-        compose.runOnIdle { model.select(emptySet()) }
-        compose.onNodeWithTag("toolbar_draw").performClick()
-        compose.onNodeWithTag("tool_$tool").performScrollTo().performClick()
-        collapseTools()
+        compose.cadTool(tool)
     }
 
     private fun toolsAction(action: String) {
-        if (compose.onAllNodesWithTag("selection_toolbar").fetchSemanticsNodes().isNotEmpty()) {
-            if (action in setOf("copy", "delete", "properties")) {
-                compose.onNodeWithTag("selection_$action").assertIsEnabled().performClick()
-            } else {
-                compose.onNodeWithTag("selection_more").performClick()
-                compose.onNodeWithTag("selection_$action").performScrollTo().assertIsEnabled().performClick()
-            }
-        } else {
-            if (action in setOf("undo", "redo", "paste")) {
-                collapseTools()
-                if (compose.onAllNodesWithTag("tools_$action").fetchSemanticsNodes().isEmpty())
-                    compose.onNodeWithTag("toolbar_edit").performClick()
-            }
-            else expandTools()
-            compose.onNodeWithTag("tools_$action").performScrollTo().assertIsEnabled().performClick()
-            if (action == "finish") collapseTools()
-            if (action in setOf("undo", "redo", "paste"))
-                compose.onNodeWithTag("panel_edit_collapse").performClick()
-        }
-        compose.waitForIdle()
+        compose.cadAction(action)
     }
 
     private fun expandTools() {
-        if (compose.onAllNodesWithTag("tools_expand").fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNodeWithTag("tools_expand").performClick()
-        }
+        compose.cadGroup("draw")
     }
 
     private fun collapseTools() {
-        if (compose.onAllNodesWithTag("tools_collapse").fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNodeWithTag("tools_collapse").performClick()
-        }
+        compose.cadCloseStrip("draw")
     }
 
     private fun awaitCanvas() {

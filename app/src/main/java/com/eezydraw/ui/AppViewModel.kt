@@ -786,18 +786,29 @@ class AppViewModel(
         }
     }
 
+    fun saveCameraView(view:SavedView){drawingEdit {_,doc->NavigationCommands.save(doc,view)}}
+    fun deleteCameraView(id:ViewId){drawingEdit {_,doc->NavigationCommands.delete(doc,id)}}
+    fun navigationSettings(value:AppSettings) = operation {
+        val merged=state.value.settings.copy(gestureSensitivity=value.gestureSensitivity,invertOrbit=value.invertOrbit,zoomTowardFinger=value.zoomTowardFinger,showAxisIndicator=value.showAxisIndicator)
+        preferences.save(merged);mutableState.update {it.copy(settings=merged)}
+    }
+    fun discardProjectAndExit() = operation {
+        history.clear();mutableState.update {it.copy(document=savedDocument,dirty=false,selectedIds=emptySet(),canUndo=false,canRedo=false)}
+        navigate(AppScreen.MENU)
+    }
+
     fun backFromProject() {
         if (state.value.dirty) operation { persistCurrent(); navigate(AppScreen.MENU) }
         else navigate(AppScreen.MENU)
     }
 
-    fun saveSettings(settings: AppSettings) = operation {
+    fun saveSettings(settings: AppSettings,returnToProject:Boolean=false) = operation {
         val oldDefaults=state.value.settings.projectDefaults
         val changed=RouteKind.entries.filter {oldDefaults.routeDefaults[it]!=settings.projectDefaults.routeDefaults[it] || oldDefaults.defaultRouteElevations[it]!=settings.projectDefaults.defaultRouteElevations[it] || oldDefaults.floorServices!=settings.projectDefaults.floorServices}.toSet()
         val merged=settings.copy(canvasLayouts=state.value.settings.canvasLayouts,lastRoutingSettings=settings.lastRoutingSettings-changed)
         preferences.save(merged)
         mutableState.update { it.copy(settings = merged, notice = application.getString(R.string.settings_saved_notice),noticeUndo=false) }
-        navigate(AppScreen.MENU)
+        navigate(if(returnToProject && state.value.document!=null)AppScreen.PROJECT else AppScreen.MENU)
     }
 
     fun chooseFolder(uri: String) = operation {

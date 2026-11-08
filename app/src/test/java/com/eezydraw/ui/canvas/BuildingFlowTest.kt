@@ -41,27 +41,27 @@ class BuildingFlowTest {
     @Test fun roomDefaultsGenerateWallsAndSelectionHasDirectAction() {
         start()
         compose.runOnIdle {model.deleteElements(setOf(wall.id))}
-        compose.onNodeWithTag("toolbar_draw").performClick()
+        compose.cadGroup("draw")
         compose.onNodeWithTag("tool_room").performScrollTo().performClick()
         compose.onNodeWithTag("room_auto_walls").assertExists()
-        compose.onNodeWithTag("tools_collapse").performClick()
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.35f,height*.5f));click(Offset(width*.65f,height*.75f))}
+        compose.cadCloseStrip("draw")
+        compose.cadTap(.35f,.5f);compose.cadTap(.65f,.75f)
         compose.waitUntil(10000){model.state.value.document!!.elements.count {it.body is ElementBody.Wall}==4}
         val room=model.state.value.document!!.elements.first {it.body is ElementBody.Room}
         compose.runOnIdle {model.select(setOf(room.id))}
-        compose.onNodeWithTag("selection_generate_walls").performClick()
+        compose.cadSelection();compose.onNodeWithTag("selection_generate_walls").performClick()
         compose.onNodeWithTag("generate_walls_create").performClick()
         assertEquals(4,model.state.value.document!!.elements.count {it.body is ElementBody.Wall})
     }
     @Test fun wallToolChainsAndCancelEndsTheChain() {
         start()
         compose.runOnIdle {model.deleteElements(setOf(wall.id))}
-        compose.onNodeWithTag("toolbar_draw").performClick()
+        compose.cadGroup("draw")
         compose.onNodeWithTag("tool_wall").performScrollTo().performClick()
-        compose.onNodeWithTag("tools_collapse").performClick()
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.3f,height*.55f));click(Offset(width*.55f,height*.55f))}
+        compose.cadCloseStrip("draw")
+        compose.cadTap(.3f,.55f);compose.cadTap(.55f,.55f)
         compose.waitUntil(10000){model.state.value.document!!.elements.size==1}
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.55f,height*.8f))}
+        compose.cadTap(.55f, .8f)
         compose.waitUntil(10000){model.state.value.document!!.elements.size==2}
         compose.onNodeWithTag("placement_cancel").performClick()
         assertEquals(2,model.state.value.document!!.elements.size)
@@ -70,17 +70,17 @@ class BuildingFlowTest {
         start()
         compose.runOnIdle {model.deleteElements(setOf(wall.id))}
         val socket=BuiltInLibrary.items.first {it.symbol==LibrarySymbol.SOCKET}
-        compose.onNodeWithTag("toolbar_library").performClick()
+        compose.cadLibrary()
         compose.onNodeWithTag("library_search").performTextInput(socket.name)
-        compose.onNodeWithTag("library_insert_${socket.id.value}").performScrollTo().performClick()
+        compose.cadLibraryItem("library_insert_${socket.id.value}").performClick()
         compose.onAllNodesWithText("No wall on this level. Draw a room or wall first.").onFirst().assertExists()
         compose.onNodeWithTag("missing_wall_open_tool").performClick()
         compose.onNodeWithTag("route_input_Wall thickness").assertExists()
         compose.onNodeWithTag("placement_cancel").performClick()
-        compose.onNodeWithTag("toolbar_draw").performClick()
+        compose.cadGroup("draw")
         compose.onNodeWithTag("tool_box").performScrollTo().performClick()
-        compose.onNodeWithTag("tools_collapse").performClick()
-        compose.onNodeWithTag("canvas_surface").performTouchInput {click(Offset(width*.4f,height*.7f))}
+        compose.cadCloseStrip("draw")
+        compose.cadTap(.4f, .7f)
         compose.waitUntil(10000){model.state.value.document!!.elements.size==1}
         assertTrue(model.state.value.document!!.elements.single().body is ElementBody.DrawingShape)
     }

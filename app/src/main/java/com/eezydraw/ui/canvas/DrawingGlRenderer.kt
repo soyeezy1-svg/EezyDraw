@@ -226,8 +226,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
-        val halfWidth = width / (2 * current.viewport.pixelsPerMetre)
-        val halfHeight = height / (2 * current.viewport.pixelsPerMetre)
+        val visiblePlan=current.viewport.visibleBounds(width.toDouble(),height.toDouble())
+        val halfWidth=(visiblePlan.max.x-visiblePlan.min.x)/2
+        val halfHeight=(visiblePlan.max.y-visiblePlan.min.y)/2
 
         useLineShader(matrix, current.dark)
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
@@ -622,8 +623,9 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
     }
 
     private fun planMatrix(current: CanvasFrame): FloatArray = FloatArray(16).also {
-        it[0] = (2 * current.viewport.pixelsPerMetre / width).toFloat()
-        it[5] = (2 * current.viewport.pixelsPerMetre / height).toFloat()
+        val x=2*current.viewport.pixelsPerMetre/width;val y=2*current.viewport.pixelsPerMetre/height
+        val c=kotlin.math.cos(current.viewport.rotation);val s=kotlin.math.sin(current.viewport.rotation)
+        it[0]=(x*c).toFloat();it[4]=(-x*s).toFloat();it[1]=(y*s).toFloat();it[5]=(y*c).toFloat()
         // Plan view projects all elevations to XY. Depth testing is disabled.
         it[15] = 1f
     }
