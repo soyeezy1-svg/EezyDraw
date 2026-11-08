@@ -14,10 +14,15 @@ import com.eezydraw.core.model.*
 @Composable fun ModelExportDialog(document:ProjectDocument,initial:ModelExportOptions,onExport:(ModelExportOptions)->Unit,onDismiss:()->Unit) {
     var value by remember {mutableStateOf(initial)}
     AlertDialog(onDismissRequest=onDismiss,title={Text("Export 3D model")},text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()).testTag("model_export_options")) {
-        RouteChoice("Format",value.format,ModelFormat.entries,{value=value.copy(format=it)}){if(it==ModelFormat.IFC)"IFC4 (BIM)"else it.name}
+        RouteChoice("Format",value.format,ModelFormat.entries,{value=value.copy(format=it,upAxis=null,units=if(it in listOf(ModelFormat.OBJ,ModelFormat.GLTF,ModelFormat.GLB))ModelUnits.M else value.units)}){if(it==ModelFormat.IFC)"IFC4 (BIM)"else it.name}
         RouteChoice("What to export",value.scope,ModelScope.entries,{value=value.copy(scope=it)}){when(it){ModelScope.PROJECT->"Whole project";ModelScope.LEVEL->"Current level only";ModelScope.SELECTED->"Selected objects only";ModelScope.VISIBLE->"Visible objects only"}}
         RouteChoice("Level",value.levelId,document.levels.map {it.id},{value=value.copy(levelId=it)}){id->document.levels.find {it.id==id}?.name ?: "Choose a level"}
         RouteChoice("Units",value.units,ModelUnits.entries,{value=value.copy(units=it)}){it.name.lowercase()}
+        val axes=when(value.format){ModelFormat.IFC->listOf(ModelUpAxis.Z_UP);ModelFormat.GLTF,ModelFormat.GLB->listOf(ModelUpAxis.Y_UP);else->ModelUpAxis.entries}
+        RouteChoice("Up axis",value.resolvedUpAxis(),axes,{value=value.copy(upAxis=it)}){it.label}
+        if(axes.size==1)Text(if(value.format==ModelFormat.IFC)"IFC uses standard Z-up coordinates."else "glTF/GLB requires Y-up coordinates.")
+        RouteChoice("Position",value.moveToOrigin,listOf(false,true),{value=value.copy(moveToOrigin=it)}){if(it)"Move model to origin"else "Keep project coordinates"}
+        Text("Move to origin places the export's base centre at zero. OBJ defaults to metres; match your viewer's import units to this choice.")
         Text("Systems (none selected includes all)")
         (listOf("Power","ICT","HVAC","Plumbing","Fire","Architecture","Structure")+document.systems.map {it.name}).distinct().forEach {system->
             FilterChip(system in value.systems,{value=value.copy(systems=if(system in value.systems)value.systems-system else value.systems+system)},{Text(system)})}

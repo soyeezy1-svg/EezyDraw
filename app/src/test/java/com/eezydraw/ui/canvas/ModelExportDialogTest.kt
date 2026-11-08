@@ -36,4 +36,29 @@ class ModelExportDialogTest {
         compose.onNodeWithTag("model_export_save").performClick()
         assertEquals(ModelFormat.GLB,result!!.format);assertEquals(ModelUnits.CM,result!!.units);assertEquals(ModelScope.LEVEL,result!!.scope);assertEquals(level.id,result!!.levelId)
     }
+    @Test fun axisDefaultsOriginAndFormatConstraintsReachTheExporter() {
+        val document=ProjectDocument(Project(ProjectId("axes"),"Axes",0,0))
+        var result:ModelExportOptions?=null
+        compose.setContent {MaterialTheme {ModelExportDialog(document,ModelExportOptions(),{result=it},{})}}
+        compose.onNodeWithTag("route_choice_Format").performScrollTo().performClick()
+        compose.onNodeWithText("OBJ").performClick()
+        compose.onNodeWithTag("route_choice_Up axis").performScrollTo().assertTextContains("Up axis: Y-up")
+        compose.onNodeWithTag("route_choice_Units").performScrollTo().assertTextContains("Units: m")
+        compose.onNodeWithTag("route_choice_Up axis").performScrollTo().performClick()
+        compose.onNodeWithText("Z-up").performClick()
+        compose.onNodeWithTag("route_choice_Position").performScrollTo().performClick()
+        compose.onNodeWithText("Move model to origin").performClick()
+        compose.onNodeWithTag("model_export_save").performClick()
+        assertEquals(ModelUpAxis.Z_UP,result!!.resolvedUpAxis())
+        assertTrue(result!!.moveToOrigin)
+        compose.onNodeWithTag("route_choice_Format").performScrollTo().performClick()
+        compose.onNodeWithText("GLB").performClick()
+        compose.onNodeWithTag("route_choice_Up axis").performScrollTo().performClick()
+        compose.onNodeWithText("Z-up").assertDoesNotExist()
+        compose.onNodeWithText("Y-up").performClick()
+        compose.onNodeWithTag("model_export_save").performClick()
+        assertEquals(ModelUpAxis.Y_UP,result!!.resolvedUpAxis())
+        assertEquals(ModelUnits.M,result!!.units)
+        assertTrue(result!!.moveToOrigin)
+    }
 }

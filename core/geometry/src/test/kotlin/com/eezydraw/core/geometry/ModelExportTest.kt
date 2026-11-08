@@ -23,7 +23,7 @@ class ModelExportTest {
             assertTrue(data.size>100)
             when(format) {
                 ModelFormat.IFC->{val text=data.toString(Charsets.UTF_8);assertTrue("FILE_SCHEMA(('IFC4'))" in text);assertTrue("IFCWALL(" in text);assertTrue("IFCBUILDINGSTOREY(" in text);assertTrue("IFCTRIANGULATEDFACESET(" in text);assertTrue("Pset_EezyDraw" in text)}
-                ModelFormat.OBJ->{val text=data.toString(Charsets.UTF_8);val lines=text.lines();val vertices=lines.count {it.startsWith("v ")};val faces=lines.filter {it.startsWith("f ")};assertEquals(vertices/3,faces.size);faces.flatMap {it.split(" ").drop(1)}.forEach {assertTrue(it.toInt() in 1..vertices)}}
+                ModelFormat.OBJ->{val text=data.toString(Charsets.UTF_8);val lines=text.lines();val vertices=lines.count {it.startsWith("v ")};val faces=lines.filter {it.startsWith("f ")};assertEquals(vertices/3,faces.size);faces.flatMap {it.split(" ").drop(1)}.forEach {assertTrue(it.substringBefore('/').toInt() in 1..vertices)}}
                 ModelFormat.STL->{val text=data.toString(Charsets.UTF_8);assertEquals(text.lines().count {it.startsWith("facet normal") }*3,text.lines().count {it.startsWith("vertex ")})}
                 ModelFormat.GLB->{val buffer=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);assertEquals(0x46546c67,buffer.int);assertEquals(2,buffer.int);assertEquals(data.size,buffer.int);val length=buffer.int;assertEquals(0x4e4f534a,buffer.int);assertEquals(0,length%4)}
                 ModelFormat.GLTF->{val text=data.toString(Charsets.UTF_8);assertTrue("data:application/octet-stream;base64," in text);assertTrue("\"version\":\"2.0\"" in text)}
@@ -34,7 +34,7 @@ class ModelExportTest {
         val metre=bytes(ModelExportOptions(format=ModelFormat.OBJ)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).map(String::toDouble)
         val mm=bytes(ModelExportOptions(format=ModelFormat.OBJ,units=ModelUnits.MM)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).map(String::toDouble)
         metre.zip(mm).forEach {(m,n)->assertEquals(m*1000,n,1e-8)}
-        assertTrue(metre[0]>1000);assertTrue(metre[1]>2000)
+        assertTrue(metre[0]>1000);assertTrue(-metre[2]>2000)
         for(unit in ModelUnits.entries)for(format in ModelFormat.entries)File(System.getProperty("java.io.tmpdir"),"eezy-model-export/${unit.name}.${format.extension}").writeBytes(bytes(ModelExportOptions(format=format,units=unit)))
     }
     @Test fun scopesVisibilitySystemsAndCategoryFiltersAreIndependent() {
