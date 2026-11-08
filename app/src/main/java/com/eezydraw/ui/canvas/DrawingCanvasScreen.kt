@@ -135,6 +135,7 @@ fun DrawingCanvasScreen(
     modifier: Modifier = Modifier,
     surface: (@Composable (DrawingScene?, CanvasFrame, Modifier) -> Unit)? = null,
     editor: CanvasEditorActions? = null,
+    onExportModel:(String?,Boolean)->Unit={_,_->},
     onExportView: (ViewExportRequest,ViewExportFormat)->Unit = { _,_-> },
 ) {
     var viewport by rememberSaveable(document.project.id.value, stateSaver = PlanCameraSaver) { mutableStateOf(Viewport2D()) }
@@ -725,6 +726,13 @@ fun DrawingCanvasScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.canvas_back))
                 } },
                 actions = {
+                    var exportMenu by remember {mutableStateOf(false)}
+                    Box {TextButton({exportMenu=true},Modifier.testTag("project_export_menu")){Text("Export")}
+                        DropdownMenu(exportMenu,{exportMenu=false}) {
+                            DropdownMenuItem(text={Text("Export 3D model")},onClick={exportMenu=false;onExportModel(selectedLevel,!is3D)})
+                            DropdownMenuItem(text={Text("Export project archive")},onClick={exportMenu=false;onExport()})
+                        }
+                    }
                     IconButton(onExport, enabled = !busy) { Icon(Icons.Outlined.Share, stringResource(R.string.canvas_export)) }
                     IconButton(onDetails, enabled = !busy, modifier = Modifier.testTag("canvas_details")) {
                         Icon(Icons.Outlined.Description, stringResource(R.string.canvas_project_details))

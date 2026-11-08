@@ -175,7 +175,7 @@ View modes use actual triangle faces with object overrides or system/material/la
 
 ## Validation
 
-The suite contains **661 passing tests**: model 53, geometry 103, editing 232, storage 27 and app 246. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
+The suite contains **669 passing tests**: model 53, geometry 110, editing 232, storage 27 and app 247. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
 
 Precision-pointer regressions cover offset distance and edge flips, loupe placement/content, confirm-only placement, retained targets, nudge steps, snapping and Settings defaults/restoration. Existing regressions cover axis-isolated snapped movement/rotation, mode-exclusive selection controls, manual-only Properties, placement previews/reset/cancellation, distance-only measurement defaults, cube face/corner/drag/Home navigation and undoable style/settings changes. Existing regressions cover all six view modes, surface triangulation and holes, move snapping/body-drag preferences, associative measurements/AFFL, visibility persistence, nonmodal panel drafts/full-screen controls, and PNG/PDF output. The editing suite also covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
@@ -247,3 +247,5 @@ Draw includes **Room**, **Room polygon** and a chained **Wall** tool. Rooms crea
 
 
 Floor installations are available for conduit, trunking, cable tray and pipe. Draw a **Floor slab**, then choose **Installation → In screed / In slab / Under floor (raised floor void)** in the route bar. Depths are below finished floor; plan routes are dashed. Visibility includes **Show underfloor services** and the **Floor services schedule**. Library provides recessed floor boxes, floor sockets and slab sleeves; select a route for **Rise to wall / Rise to floor box**. See [the underfloor validation and manual path](docs/UNDERFLOOR_TEST_REPORT.md).
+
+Project → **Export → Export 3D model** saves IFC4, OBJ, embedded glTF, GLB or STL through the Android file picker. Choose project/level/selection/visible scope, system filters, units, categories and baked/separate cuts. See [3D-export validation](docs/MODEL_EXPORT_TEST_REPORT.md).

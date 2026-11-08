@@ -611,6 +611,20 @@ class AppViewModel(
             (document.project.settings.showMeasurements || !isMeasurement(it)) }.map {it.id}.toSet()
     }
 
+    private var pendingModelExport:Pair<ProjectDocument,com.eezydraw.core.geometry.ModelExportOptions>?=null
+    fun prepareModelExport(options:com.eezydraw.core.geometry.ModelExportOptions) {
+        state.value.document?.let {pendingModelExport=it to options}
+    }
+    fun cancelModelExport() {pendingModelExport=null}
+    fun exportModel(uri:String) = operation {
+        val (snapshot,options)=pendingModelExport ?: error("Choose Export 3D model and its options again.")
+        withContext(Dispatchers.IO) {
+            application.contentResolver.openOutputStream(uri.toUri(),"w")?.use {com.eezydraw.core.geometry.ModelExport.write(snapshot,options,it)} ?: error("The selected model export file cannot be opened.")
+        }
+        pendingModelExport=null
+        mutableState.update {it.copy(notice="3D model exported",noticeUndo=false)}
+    }
+
     fun prepareViewExport(request: ViewExportRequest, format: ViewExportFormat) {
         pendingViewExport = request to format
     }

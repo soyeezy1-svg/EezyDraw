@@ -1,0 +1,39 @@
+package com.eezydraw.ui.canvas
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import com.eezydraw.core.geometry.*
+import com.eezydraw.core.model.*
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk=[28],qualifiers="w1024dp-h768dp")
+@LooperMode(LooperMode.Mode.PAUSED)
+class ModelExportDialogTest {
+    @get:Rule val compose=createComposeRule()
+    @Test fun formatScopeUnitsAndSaveUseExplicitUserChoices() {
+        val p=ProjectId("export")
+        val level=Level(LevelId("g"),p,"Ground",0.0,.2,3.0)
+        val document=ProjectDocument(Project(p,"Export",0,0),levels=listOf(level))
+        var result:ModelExportOptions?=null
+        compose.setContent {MaterialTheme {ModelExportDialog(document,ModelExportOptions(levelId=level.id),{result=it},{})}}
+        compose.onNodeWithTag("route_choice_Format").performScrollTo().performClick()
+        compose.onNodeWithText("GLB").performClick()
+        compose.onNodeWithTag("route_choice_What to export").performScrollTo().performClick()
+        compose.onNodeWithText("Selected objects only").performClick()
+        compose.onNodeWithTag("model_export_save").assertIsNotEnabled()
+        compose.onNodeWithTag("route_choice_What to export").performScrollTo().performClick()
+        compose.onNodeWithText("Current level only").performClick()
+        compose.onNodeWithTag("route_choice_Units").performScrollTo().performClick()
+        compose.onNodeWithText("cm").performClick()
+        compose.onNodeWithTag("model_export_save").performClick()
+        assertEquals(ModelFormat.GLB,result!!.format);assertEquals(ModelUnits.CM,result!!.units);assertEquals(ModelScope.LEVEL,result!!.scope);assertEquals(level.id,result!!.levelId)
+    }
+}
