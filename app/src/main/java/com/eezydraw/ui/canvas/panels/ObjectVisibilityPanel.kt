@@ -3,6 +3,7 @@ package com.eezydraw.ui.canvas.panels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ fun ObjectVisibilityPanel(
     onAutoXray:(Boolean)->Unit,
     onRoomSideDisplay:(RoomSideRef,ObjectDisplay)->Unit,
     modifier:Modifier=Modifier,
+    embedded:Boolean=false,
     onLayerVisible:(LayerId,Boolean)->Unit={_,_->},
     onMeasurementsVisible:(Boolean)->Unit={},
     onFloorSettings:(FloorServiceSettings)->Unit={},
@@ -53,7 +55,7 @@ fun ObjectVisibilityPanel(
     onWallSettings:(WallServiceSettings)->Unit={},
     onWallSchedule:()->Unit={},
 ) {
-    Column(modifier.width(300.dp).heightIn(max=480.dp).verticalScroll(rememberScrollState())
+    Column((if(embedded)modifier.fillMaxSize() else modifier.width(300.dp).heightIn(max=480.dp)).verticalScroll(rememberScrollState())
         .padding(8.dp).testTag("object_visibility_panel"),verticalArrangement=Arrangement.spacedBy(4.dp)) {
         TextButton(onShowAll,Modifier.fillMaxWidth().heightIn(min=48.dp).testTag("visibility_show_all")) {
             Text(stringResource(R.string.visibility_show_all))

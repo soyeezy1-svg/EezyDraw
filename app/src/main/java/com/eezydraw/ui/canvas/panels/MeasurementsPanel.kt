@@ -31,7 +31,7 @@ fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
     onDismiss:()->Unit,modifier:Modifier=Modifier,embedded:Boolean=false) {
     var editing by remember { mutableStateOf<ElementId?>(null) }
     val content: @Composable () -> Unit = {
-        Column(Modifier.width(320.dp).fillMaxHeight().testTag("measurements_panel")) {
+        Column((if(embedded)Modifier.fillMaxWidth()else Modifier.width(320.dp)).fillMaxHeight().testTag("measurements_panel")) {
             if(!embedded) Row(Modifier.fillMaxWidth().padding(start=12.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text(stringResource(R.string.canvas_measurements),Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
                 IconButton(onDismiss) { Icon(Icons.Outlined.Close,stringResource(R.string.close)) }

@@ -69,6 +69,9 @@ fun SelectionToolbar(
     onLock: (Boolean) -> Unit,
     onRotationSnap: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    modern:Boolean=false,
+    menuRequest:String?=null,
+    onMenuClosed:()->Unit={},
     keepProportions: Boolean = false,
     onKeepProportions: (Boolean) -> Unit = {},
     layerLocked: Boolean = false,
@@ -91,7 +94,8 @@ fun SelectionToolbar(
     var page by rememberSaveable { mutableStateOf(SelectionMenuPage.MAIN) }
     var panel by rememberSaveable { mutableStateOf(CanvasPanelId.PROPERTIES) }
     fun changeLock(next:LockMode) { if (onLockMode != null) onLockMode(next) else onLock(next != LockMode.NONE) }
-    fun close() { expanded = false; page = SelectionMenuPage.MAIN }
+    androidx.compose.runtime.LaunchedEffect(menuRequest) {menuRequest?.let {page=SelectionMenuPage.valueOf(it);expanded=true}}
+    fun close() { expanded = false; page = SelectionMenuPage.MAIN;onMenuClosed() }
     fun act(action: () -> Unit) { close(); action() }
 
     Surface(
@@ -104,17 +108,17 @@ fun SelectionToolbar(
                 if (mode == GizmoMode.ROTATE) Icons.AutoMirrored.Outlined.RotateRight else Icons.Outlined.OpenWith,
                 stringResource(if (mode == GizmoMode.MOVE) R.string.selection_switch_rotate else R.string.selection_switch_move),
                 { onMode(if (mode == GizmoMode.MOVE) GizmoMode.ROTATE else GizmoMode.MOVE) },
-                Modifier.testTag("selection_mode"), selected = mode == GizmoMode.ROTATE,
+                Modifier.testTag("selection_mode"), selected = mode == GizmoMode.ROTATE,shortLabel=if(mode==GizmoMode.MOVE)"Rotate"else "Move",
             )
             CanvasActionButton(Icons.Outlined.ContentCopy, stringResource(R.string.selection_copy),
-                onCopy, Modifier.testTag("selection_copy"))
+                onCopy, Modifier.testTag("selection_copy"),shortLabel="Copy")
             CanvasActionButton(Icons.Outlined.Delete, stringResource(R.string.selection_delete),
-                onDelete, Modifier.testTag("selection_delete"), enabled = canEdit)
+                onDelete, Modifier.testTag("selection_delete"), enabled = canEdit,shortLabel="Delete")
             CanvasActionButton(Icons.Outlined.Tune, stringResource(R.string.selection_properties),
-                onProperties, Modifier.testTag("selection_properties"))
+                onProperties, Modifier.testTag("selection_properties"),shortLabel="Properties")
             Box {
                 CanvasActionButton(Icons.Outlined.MoreHoriz, stringResource(R.string.selection_more),
-                    { page = SelectionMenuPage.MAIN; expanded = !expanded }, Modifier.testTag("selection_more"))
+                    { page = SelectionMenuPage.MAIN; expanded = !expanded }, Modifier.testTag("selection_more"),shortLabel="More")
                 DropdownMenu(expanded, { close() }) {
                     if (page != SelectionMenuPage.MAIN) {
                         DropdownMenuItem(
@@ -150,7 +154,7 @@ fun SelectionToolbar(
                                 SelectionMenuItem(R.string.selection_show_room_walls,"selection_show_room_walls",true) {act(onShowRoomWalls)}
                             }
                             SelectionMenuItem(R.string.selection_visibility,"selection_visibility",true) {act {onPanelVisibility(CanvasPanelId.VISIBILITY,PanelVisibility.OPEN)}}
-                            SelectionMenuItem(R.string.selection_panels,"selection_panels",true) {page=SelectionMenuPage.PANELS}
+                            if(!modern)SelectionMenuItem(R.string.selection_panels,"selection_panels",true) {page=SelectionMenuPage.PANELS}
                             SelectionMenuItem(R.string.selection_rotate_90, "selection_rotate_90", canEdit) { act(onRotate90) }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.selection_rotation_snap, rotationSnapDegrees)) },

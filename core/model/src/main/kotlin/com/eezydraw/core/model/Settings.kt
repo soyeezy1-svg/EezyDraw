@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 @Serializable enum class AngleFormat { DEGREES, RADIANS }
 @Serializable enum class ThemeMode { SYSTEM, LIGHT, DARK }
 @Serializable enum class InputMode { TOUCH, STYLUS }
+@Serializable enum class CanvasBarPosition { BOTTOM, LEFT }
 @Serializable enum class RenderQuality { PERFORMANCE, BALANCED, QUALITY }
 @Serializable enum class SnapMode { GRID, ENDPOINT, MIDPOINT, INTERSECTION, PERPENDICULAR, ORTHO }
 @Serializable enum class ProjectTemplate { OFFICE, RESIDENTIAL, DATA_CENTER, EMPTY }
@@ -90,6 +91,8 @@ data class AppSettings(
     val invertOrbit:Boolean=false,
     val zoomTowardFinger:Boolean=true,
     val showAxisIndicator:Boolean=true,
+    val bottomBarLabels:Boolean=true,
+    val barPosition:CanvasBarPosition=CanvasBarPosition.BOTTOM,
     val defaultTemplate: ProjectTemplate = ProjectTemplate.EMPTY,
     val saveLocationUri: String? = null,
     val projectDefaults: ProjectSettings = ProjectSettings(),

@@ -1,5 +1,7 @@
 package com.eezydraw.ui.canvas.panels
 
+import com.eezydraw.ui.components.CadTooltip
+
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
@@ -56,6 +58,8 @@ fun LibraryPanel(
     onRedoLibrary: () -> Unit = {},
     canUndoLibrary: Boolean = false,
     canRedoLibrary: Boolean = false,
+    launchAction:String?=null,
+    onLaunchHandled:()->Unit={},
     authoringEnabled: Boolean = true,
     projectItemIds: Set<LibraryItemId> = items.mapTo(HashSet()) {it.id},
 ) {
@@ -63,6 +67,13 @@ fun LibraryPanel(
     var creating by remember { mutableStateOf(false) }
     var managing by remember { mutableStateOf(false) }
     var drawingError by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(launchAction) {
+        when(launchAction){
+            "create"->{creating=true;editingItem=createLibraryItem(LibraryItemId(UUID.randomUUID().toString()),LibraryBaseShape.BOX)}
+            "drawing"->{val item=onFromDrawing();if(item==null)drawingError=true else {creating=true;editingItem=item}}
+        }
+        if(launchAction!=null)onLaunchHandled()
+    }
     editingItem?.let { item -> LibraryItemEditor(item,creating,onSaveItem,{editingItem=null}) }
     if(drawingError) AlertDialog(onDismissRequest={drawingError=false},title={Text("Create from drawing")},
         text={Text("Use the drawing tools to draw your item, select its shapes, then choose From selected drawing.")},
@@ -86,7 +97,7 @@ fun LibraryPanel(
         }
     }
     val content: @Composable () -> Unit = {
-        Column((if(compactHeader)Modifier.fillMaxWidth()else Modifier.width(320.dp)).heightIn(max = 540.dp).testTag("library_panel")) {
+        Column((if(compactHeader)Modifier.fillMaxWidth()else Modifier.width(320.dp)).then(if(embedded)Modifier.fillMaxHeight()else Modifier.heightIn(max=540.dp)).testTag("library_panel")) {
             if (!embedded) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.panel_library), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -99,16 +110,14 @@ fun LibraryPanel(
                 query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).testTag("library_search"),
                 label = { Text(stringResource(R.string.library_search)) }, singleLine = true,
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }, Modifier.testTag("library_search_clear")) {
-                    Icon(Icons.Outlined.Clear, stringResource(R.string.library_clear_search))
-                } },
+                trailingIcon = { if (query.isNotEmpty()) CanvasActionButton(Icons.Outlined.Clear,stringResource(R.string.library_clear_search),{query=""},Modifier.testTag("library_search_clear")) },
             )
             }
             val switches:@Composable ()->Unit={
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(pluralStringResource(R.plurals.library_result_count,matches.size,matches.size), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
                 Box {
-                    IconButton({managing=true},modifier=Modifier.testTag("library_manage")) {Icon(Icons.Outlined.MoreVert,"Manage library")}
+                    CanvasActionButton(Icons.Outlined.MoreVert,"Manage library",{managing=true},Modifier.testTag("library_manage"))
                     DropdownMenu(managing,{managing=false}) {
                         DropdownMenuItem(text={Text("Create custom item")},enabled=authoringEnabled,onClick={managing=false;creating=true;editingItem=createLibraryItem(LibraryItemId(UUID.randomUUID().toString()),LibraryBaseShape.BOX)},modifier=Modifier.testTag("library_create"))
                         DropdownMenuItem(text={Text("From selected drawing")},enabled=authoringEnabled,onClick={managing=false;val item=onFromDrawing();if(item==null)drawingError=true else {creating=true;editingItem=item}},modifier=Modifier.testTag("library_from_drawing"))
@@ -118,14 +127,14 @@ fun LibraryPanel(
                         DropdownMenuItem(text={Text("Redo library edit")},enabled=canRedoLibrary,onClick={managing=false;onRedoLibrary()},modifier=Modifier.testTag("library_redo"))
                     }
                 }
-                IconToggleButton(state.viewMode == LibraryViewMode.GRID,
+                CadTooltip(stringResource(R.string.library_grid)) {IconToggleButton(state.viewMode == LibraryViewMode.GRID,
                     { onStateChange(state.copy(viewMode = LibraryViewMode.GRID)) }, Modifier.size(48.dp).testTag("library_grid")) {
                     Icon(Icons.Outlined.GridView, stringResource(R.string.library_grid))
-                }
-                IconToggleButton(state.viewMode == LibraryViewMode.LIST,
+                }}
+                CadTooltip(stringResource(R.string.library_list)) {IconToggleButton(state.viewMode == LibraryViewMode.LIST,
                     { onStateChange(state.copy(viewMode = LibraryViewMode.LIST)) }, Modifier.size(48.dp).testTag("library_list")) {
                     Icon(Icons.AutoMirrored.Outlined.ViewList, stringResource(R.string.library_list))
-                }
+                }}
             }
             }
             if(compactHeader)Row(Modifier.horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically){Box(Modifier.width(320.dp)){search()};Box(Modifier.width(300.dp)){switches()}}else {search();switches()}
@@ -195,7 +204,7 @@ private fun LibraryFolderHeader(folder: LibraryFolder, title: String, expanded: 
                     else -> Icons.Outlined.Folder
                 }
             }
-            Icon(icon, null, Modifier.size(20.dp))
+            Icon(icon, null, Modifier.size(24.dp))
             Text(title, Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.titleSmall)
             Text(folder.items.size.toString(), style = MaterialTheme.typography.labelMedium)
             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
@@ -246,18 +255,18 @@ private fun LibraryEntry(item: LibraryItem, folder: String, favorite: Boolean, u
 
 @Composable
 private fun FavoriteButton(item: LibraryItem, favorite: Boolean, onFavorite: () -> Unit, prefix: String) {
-    IconToggleButton(favorite, { onFavorite() }, Modifier.size(48.dp).testTag("${prefix}_favorite_${item.id.value}")) {
+    CadTooltip(stringResource(if(favorite)R.string.library_remove_favorite else R.string.library_add_favorite,item.name)) {IconToggleButton(favorite, { onFavorite() }, Modifier.size(48.dp).testTag("${prefix}_favorite_${item.id.value}")) {
         Icon(if (favorite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
             stringResource(if (favorite) R.string.library_remove_favorite else R.string.library_add_favorite, item.name),
             tint = if (favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    }}
 }
 
 @Composable
 private fun LibraryItemMenu(item:LibraryItem,onEdit:()->Unit,onRestore:()->Unit,onDelete:()->Unit,onDuplicate:()->Unit,enabled:Boolean,prefix:String) {
     var expanded by remember(item.id) {mutableStateOf(false)}
     Box {
-        IconButton({expanded=true},enabled=enabled,modifier=Modifier.size(40.dp).testTag("${prefix}_edit_${item.id.value}")) {Icon(Icons.Outlined.MoreVert,"Edit ${item.name}")}
+        CanvasActionButton(Icons.Outlined.MoreVert,"Edit ${item.name}",{expanded=true},Modifier.testTag("${prefix}_edit_${item.id.value}"),enabled=enabled)
         DropdownMenu(expanded,{expanded=false}) {
             DropdownMenuItem(text={Text("Edit item")},onClick={expanded=false;onEdit()},modifier=Modifier.testTag("library_edit_item"))
             DropdownMenuItem(text={Text("Duplicate")},onClick={expanded=false;onDuplicate()},modifier=Modifier.testTag("library_duplicate_item"))
