@@ -85,6 +85,15 @@ fun EezyDrawApp(
     }
     val importLibrary = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let {viewModel.importLibrary(it.toString())} }
     val exportLibrary = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let {viewModel.exportLibrary(it.toString())} }
+    var modelOptions by remember {mutableStateOf<com.eezydraw.core.geometry.ModelExportOptions?>(null)}
+    var modelDialog by remember {mutableStateOf(false)}
+    val exportModel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
+        if(uri!=null)viewModel.exportModel(uri.toString())else viewModel.cancelModelExport()
+    }
+    if(modelDialog)state.document?.let {document->com.eezydraw.ui.canvas.ModelExportDialog(document,modelOptions ?: com.eezydraw.core.geometry.ModelExportOptions(),{options->
+        modelOptions=options;viewModel.prepareModelExport(options);modelDialog=false
+        exportModel.launch(document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)+"."+options.format.extension)
+    },{modelDialog=false})}
     val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { viewModel.exportProject(it.toString()) }
     }
@@ -188,6 +197,7 @@ fun EezyDrawApp(
                                             onUndoLibrary=viewModel::undoLibrary,onRedoLibrary=viewModel::redoLibrary,
                                             libraryCanUndo=state.libraryCanUndo,libraryCanRedo=state.libraryCanRedo,
                                         ),
+                                        onExportModel={level,plan->modelOptions=com.eezydraw.core.geometry.ModelExportOptions(levelId=level?.let {com.eezydraw.core.model.LevelId(it)},selected=state.selectedIds,planView=plan);modelDialog=true},
                                         onExportView={request,format->
                                             viewModel.prepareViewExport(request,format)
                                             val base=document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)
