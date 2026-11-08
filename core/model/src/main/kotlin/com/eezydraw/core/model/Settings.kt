@@ -41,6 +41,7 @@ data class ProjectSettings(
     val hiddenLevelIds: Set<LevelId> = emptySet(),
     val showHiddenObjects: Boolean = false,
     val wallServices:WallServiceSettings = WallServiceSettings(),
+    val floorServices:FloorServiceSettings = FloorServiceSettings(),
     val autoXrayFrontWalls: Boolean = false,
     val canvasLayout: CanvasLayout = CanvasLayout(),
 ) {

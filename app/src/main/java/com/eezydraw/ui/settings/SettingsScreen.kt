@@ -206,11 +206,15 @@ fun SettingsScreen(
                 SectionHeading(stringResource(R.string.settings_service_heights))
                 Text(stringResource(R.string.settings_service_heights_help), style = MaterialTheme.typography.bodySmall)
             }
+            item {
+                Text("Underfloor service defaults")
+                com.eezydraw.ui.canvas.FloorDefaultsBar(defaults.floorServices,{value->update(current.copy(projectDefaults=defaults.copy(floorServices=value)))})
+            }
             RouteKind.entries.forEach { kind ->
                 item(key = "height_${kind.name}") {
                     com.eezydraw.ui.canvas.RoutingSettingsBar(kind,defaults.routeDefaults[kind] ?: com.eezydraw.core.model.defaultRoutingSettings(kind),{ value->
                         draft=draft.copy(settings=draft.settings.copy(projectDefaults=draft.settings.projectDefaults.copy(routeDefaults=draft.settings.projectDefaults.routeDefaults+(kind to value))))
-                    },showElevation=false)
+                    },showElevation=false,floorDefaults=defaults.floorServices)
                     NumericField(
                         "height_${kind.name}", R.string.settings_height, draft, errors, input,
                         label = stringResource(R.string.settings_height, stringResource(routeLabel(kind)), unit),

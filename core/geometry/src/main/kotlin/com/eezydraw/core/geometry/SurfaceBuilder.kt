@@ -79,7 +79,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                     }
                 }
             }
-            is ElementBody.Slab -> surfaceExtrusion(body.boundary, -body.thickness, 0.0, requireNotNull(emit))
+            is ElementBody.Slab -> if(document.project.settings.floorServices.showChannels && (document.project.settings.viewMode in setOf(ViewMode.XRAY,ViewMode.SECTION) || display==ObjectDisplay.XRAY) && floorServiceCuts(document,element).isNotEmpty())floorCutMesh(document,element)?.let {surfaceShape(it,requireNotNull(emit))}else surfaceExtrusion(body.boundary, -body.thickness, 0.0, requireNotNull(emit))
             is ElementBody.Wall -> {
                 val frame=wallFrames[element.id to null]
                 if(frame!=null && (allWallCuts[element.id to null].orEmpty().isNotEmpty() || sectionHeight!=null))wallCutMesh(frame,wallCuts[element.id to null].orEmpty(),sectionHeight)?.let {surfaceShape(it,requireNotNull(emit))}

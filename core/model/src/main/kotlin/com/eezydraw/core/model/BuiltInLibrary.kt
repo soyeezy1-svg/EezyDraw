@@ -44,7 +44,7 @@ object BuiltInLibrary {
             ict("intercom", "Intercom", .1, .04, .2, MountingType.WALL, 1.4, LibrarySymbol.INTERCOM),
             ict("pa-speaker", "PA speaker", .2, .2, .08, MountingType.CEILING, 3.0, LibrarySymbol.SPEAKER, system = "Public address", round = true),
             ict("tv-outlet", "TV outlet", .086, .035, .086, MountingType.WALL, .3, LibrarySymbol.TV_OUTLET),
-        ) + expandedLibraryItems() + fittingLibraryItems() + wallServiceLibraryItems()
+        ) + expandedLibraryItems() + fittingLibraryItems() + wallServiceLibraryItems() + floorServiceLibraryItems()
     }
 
     private val byId: Map<LibraryItemId, LibraryItem> by lazy { items.associateBy { it.id } }

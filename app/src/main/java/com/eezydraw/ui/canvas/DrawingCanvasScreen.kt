@@ -102,7 +102,7 @@ private sealed interface SceneLoad {
 private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean =
     a.elements == b.elements && a.layers == b.layers && a.systems == b.systems && a.libraryItems == b.libraryItems &&
         a.materials == b.materials && a.levels == b.levels && a.project.settings.showMeasurements == b.project.settings.showMeasurements &&
-        a.project.settings.wallServices==b.project.settings.wallServices && (a.project.settings.viewMode==ViewMode.SECTION)==(b.project.settings.viewMode==ViewMode.SECTION) && a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
+        a.project.settings.wallServices==b.project.settings.wallServices && a.project.settings.floorServices==b.project.settings.floorServices && a.project.settings.viewMode==b.project.settings.viewMode && a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
         a.project.settings.lengthUnit == b.project.settings.lengthUnit &&
         a.project.settings.angleFormat == b.project.settings.angleFormat &&
         a.project.settings.decimalPlaces == b.project.settings.decimalPlaces
@@ -163,6 +163,7 @@ fun DrawingCanvasScreen(
     var wallOptions by remember {mutableStateOf(RoomWallOptions(document.project.settings.defaultWallThickness,document.project.settings.defaultWallHeight))}
     var automaticWalls by remember {mutableStateOf(settings.projectDefaults.autoCreateWalls)}
     LaunchedEffect(settings.projectDefaults.autoCreateWalls){automaticWalls=settings.projectDefaults.autoCreateWalls}
+    var floorScheduleOpen by remember {mutableStateOf(false)}
     var wallSchedule by remember {mutableStateOf(false)}
     var libraryWallOptions by remember {mutableStateOf<WallServiceOptions?>(null)}
     var routeKind by remember(document.project.id) {mutableStateOf<RouteKind?>(null)}
@@ -224,7 +225,7 @@ fun DrawingCanvasScreen(
     val haptics=LocalHapticFeedback.current
     val selectedLevel = if (is3D) orbitLevel else level
     val floorZ = document.levels.find { it.id.value == selectedLevel }?.elevation ?: 0.0
-    val constructionZ=if(routeKind!=null)routingElevationAt(document,routeConfig.elevation,selectedLevel?.let(::LevelId),pointerWorld ?: Point3())else floorZ
+    val constructionZ=if(routeKind!=null)floorRoutingElevation(document,routeConfig,selectedLevel?.let(::LevelId),pointerWorld ?: Point3())else floorZ
     val snapSettings = document.project.settings.snap
     val anchor = if (anchorX != null && anchorY != null) Point2(anchorX!!, anchorY!!) else null
     val latestReady = rememberUpdatedState(ready)
@@ -306,7 +307,7 @@ fun DrawingCanvasScreen(
 
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
-        document.project.settings.wallServices,document.project.settings.viewMode==ViewMode.SECTION,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
+        document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
         settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D) {
         try {
             val previous = prepared
@@ -665,7 +666,7 @@ fun DrawingCanvasScreen(
     val liveRouteLength=liveRoutePicks.map {it.point}.zipWithNext().sumOf {(a,b)->kotlin.math.sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z))}
     val liveFittingCount=liveRouteDocument?.elements?.count {e->ROUTING_OWNER in e.properties && document.elements.none {it.id==e.id && it==e}} ?: 0
     val activeLabel=when {
-        buildingTool!=null->if(buildingTool=="wall")"Wall"else "Room"
+        buildingTool!=null->if(buildingTool=="wall")"Wall"else if(buildingTool=="slab")"Floor slab"else "Room"
         routeKind!=null->routeKind!!.name.replace('_',' ')
         pendingLibrary!=null->pendingLibraryItem?.name ?: "Library item"
         measurementMode==MeasurementMode.DISTANCE->stringResource(R.string.panel_measure_distance)
@@ -746,21 +747,21 @@ fun DrawingCanvasScreen(
                     activeTool=if(placementActive)activeLabel else null,measureActive=measurementMode!=MeasurementMode.NONE,
                     libraryActive=pendingLibrary!=null,panelStates=canvasLayout.panels,
                     onPanelChange={id,state->setPanel(id,state)},showPanelToggle=false)
-                if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool!="wall",wallOnly=buildingTool=="wall")
+                if(buildingTool!=null)BuildingOptions(wallOptions,{wallOptions=it},automaticWalls,{automaticWalls=it},buildingTool !in setOf("wall","slab"),wallOnly=buildingTool in setOf("wall","slab"),slab=buildingTool=="slab")
 
                 if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
                     Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
                 }
                 if(pendingLibraryItem?.mounting==MountingType.WALL)WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()})
                 if(routeKind!=null) {
-                    RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()})
-                    Text("${coordinate(routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
+                    RoutingSettingsBar(routeKind!!,routeConfig,{routeConfig=it;if(it.floorInstallation!=null)is3D=false;if(routeDraft.isNotEmpty())routeDraft=routeDraft.dropLast(1)+routeDraft.last().copy(settings=it);editor?.onRoutingSettings?.invoke(routeKind!!,it);clearPrecisionCandidate()},floorDefaults=document.project.settings.floorServices)
+                    Text("${coordinate(if(routeConfig.floorInstallation!=null)-routeConfig.floorDepth else routeConfig.elevation.value,LengthUnit.MILLIMETRES,0)} mm ${if(routeConfig.floorInstallation!=null)"Above finished floor"else routingReferenceLabel(routeConfig.elevation.reference)} · %.2f m · %d fittings".format(java.util.Locale.ROOT,
                         liveRouteLength,liveFittingCount),Modifier.testTag("route_live_label"))
                 }
                 if(editor!=null && !placementActive) {
                     RoutingRouteList(document,editor.onSelect)
                     document.elements.singleOrNull {it.id in selectedIds}?.let {WallServiceSelection(it,document,editor.onEditWallService,{wallSchedule=true})}
-                    selectedElement?.let {RoutingSelectionActions(document,it,editor)}
+                    document.elements.singleOrNull {it.id in selectedIds}?.let {RoutingSelectionActions(document,it,editor)}
                 }
                 if(placementActive) PlacementBanner(activeLabel,
                     when {
@@ -1015,12 +1016,13 @@ fun DrawingCanvasScreen(
                                         onPaste={cancelConstruction();actions.onPaste()},onMirrorX={actions.onMirror(MirrorAxis.X,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},
                                         onMirrorY={actions.onMirror(MirrorAxis.Y,positionLockedPivot ?: elementWorldBounds(document,selectedIds).center())},onArray={arrayOpen=true},
                                         onDelete=actions.onDelete,onProperties={openProperties()},expandedOverride=true,focusGroup=group,embedded=true,onBuilding={mode->
-                                            cancelConstruction();buildingTool=mode;tool=if(mode=="wall")DrawingTool.LINE else if(mode=="room")DrawingTool.RECTANGLE else DrawingTool.POLYGON
+                                            cancelConstruction();buildingTool=mode;tool=if(mode=="wall")DrawingTool.LINE else if(mode in setOf("room","slab"))DrawingTool.RECTANGLE else DrawingTool.POLYGON
                                             actions.onSelect(emptySet())
                                         },onRoute={kind->
                                             cancelConstruction();routeKind=kind
                                             val defaults=settings.projectDefaults
                                             routeConfig=settings.lastRoutingSettings[kind] ?: (defaults.routeDefaults[kind] ?: defaultRoutingSettings(kind)).let {it.copy(elevation=defaults.defaultRouteElevations[kind] ?: it.elevation)}
+                                            if(routeConfig.floorInstallation!=null)is3D=false
                                             actions.onSelect(emptySet());probe=false;zoomWindow=false
                                         })
                                 }
@@ -1058,7 +1060,7 @@ fun DrawingCanvasScreen(
                             {setPanelPlacement(CanvasPanelId.VISIBILITY,it)},onBoundsChanged={recordPanelBounds(CanvasPanelId.VISIBILITY,it)},icon=Icons.Outlined.Layers) {
                             ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},
                                 actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,
-                                onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
+                                onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
                         }
                     }
                 }
@@ -1122,6 +1124,7 @@ fun DrawingCanvasScreen(
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,
         onApply = { columns, rows, dx, dy -> editor.onArray(columns,rows,dx,dy); arrayOpen = false },onDismiss = { arrayOpen = false })
     if(generateWallsDialog)GenerateWallsDialog(wallOptions,{wallOptions=it},{editor?.onGenerateWalls?.invoke(selectedIds.filter {id->document.elements.any {it.id==id && it.body is ElementBody.Room}}.toSet(),wallOptions);generateWallsDialog=false},{generateWallsDialog=false})
+    if(floorScheduleOpen)FloorScheduleDialog(document,{editor?.onFloorSettings?.invoke(it)},{floorScheduleOpen=false})
     if(wallSchedule)WallScheduleDialog(document,{editor?.onWallSettings?.invoke(it)},{editor?.onViewMode?.invoke(ViewMode.SECTION);wallSchedule=false},{wallSchedule=false})
     toolError?.let { error -> AlertDialog(onDismissRequest = { toolError = null },title = { Text(stringResource(R.string.canvas_tool_error)) },
         text = { Text(error) },confirmButton = { TextButton({ toolError = null }) { Text(stringResource(R.string.close)) } }) }

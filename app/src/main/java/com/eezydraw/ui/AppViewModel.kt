@@ -532,6 +532,8 @@ class AppViewModel(
         }
         EditCommands.between(document,changed,"Change wall service mounting")
     }}
+    fun floorServiceSettings(settings:FloorServiceSettings)=updateProjectSettings("Floor services visibility and warnings") {it.copy(floorServices=settings)}
+    fun floorRise(id:ElementId,target:ElementId) {drawingEdit {_,doc->FloorServices.rise(doc,id,target)}}
     fun wallServiceSettings(settings:WallServiceSettings)=updateProjectSettings("Wall cut visibility and warnings") {it.copy(wallServices=settings)}
     fun roomCorner(id:ElementId,index:Int,point:Point3) {drawingEdit {_,doc->
         val e=doc.elements.first {it.id==id};val room=e.body as ElementBody.Room;val local=measurementToLocal(e.transform,point)
@@ -563,8 +565,9 @@ class AppViewModel(
             val prepared = build(current, document)
             val preview=prepared.preview(document)
             val roomWalls=RoomWalls.reconcile(document,preview)
-            val attached=WallServices.reconcile(document,roomWalls)
+            val attached=FloorServices.reconcile(document,WallServices.reconcile(document,roomWalls))
             val connected=ServiceRouting.reconcile(document,attached)
+            FloorServices.validateCuts(document,connected)
             val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
             val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
             val changed = history.execute(document, command)
@@ -597,13 +600,13 @@ class AppViewModel(
             canRedo = history.canRedo,
             canPaste = clipboard.isNotEmpty(),
             error = null,
-            notice = wallDepthWarnings(document).firstOrNull(),noticeUndo=false,
+            notice = (wallDepthWarnings(document)+floorServiceWarnings(document)).firstOrNull(),noticeUndo=false,
         )
     }
 
     private fun visibleSelection(document: ProjectDocument, ids: Set<ElementId>): Set<ElementId> {
         if (ids.isEmpty()) return emptySet()
-        val presentation=ScenePresentation(document)
+        val presentation=ScenePresentation(document,planView=true)
         return document.elements.asSequence().filter { it.id in ids && presentation.shown(presentation.display(it)) &&
             (document.project.settings.showMeasurements || !isMeasurement(it)) }.map {it.id}.toSet()
     }
@@ -668,7 +671,7 @@ class AppViewModel(
 
     fun saveSettings(settings: AppSettings) = operation {
         val oldDefaults=state.value.settings.projectDefaults
-        val changed=RouteKind.entries.filter {oldDefaults.routeDefaults[it]!=settings.projectDefaults.routeDefaults[it] || oldDefaults.defaultRouteElevations[it]!=settings.projectDefaults.defaultRouteElevations[it]}.toSet()
+        val changed=RouteKind.entries.filter {oldDefaults.routeDefaults[it]!=settings.projectDefaults.routeDefaults[it] || oldDefaults.defaultRouteElevations[it]!=settings.projectDefaults.defaultRouteElevations[it] || oldDefaults.floorServices!=settings.projectDefaults.floorServices}.toSet()
         val merged=settings.copy(canvasLayouts=state.value.settings.canvasLayouts,lastRoutingSettings=settings.lastRoutingSettings-changed)
         preferences.save(merged)
         mutableState.update { it.copy(settings = merged, notice = application.getString(R.string.settings_saved_notice),noticeUndo=false) }

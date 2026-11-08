@@ -47,7 +47,7 @@ fun buildDrawingScene(
     val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
     val wallCuts=if(document.project.settings.wallServices.showCuts)allWallCuts else emptyMap()
     val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
-    val presentation = ScenePresentation(document)
+    val presentation = ScenePresentation(document,planView=planSymbols)
     for (element in document.elements) {
         if (elementIds != null && element.id !in elementIds) continue
         val layer = layers[element.layerId]
@@ -115,13 +115,22 @@ fun buildDrawingScene(
                     }
                 }
             }
-            is ElementBody.Slab -> extrude(body.boundary, -body.thickness, 0.0, emit)
+            is ElementBody.Slab -> if(document.project.settings.floorServices.showChannels && (document.project.settings.viewMode in setOf(ViewMode.XRAY,ViewMode.SECTION) || display==ObjectDisplay.XRAY) && floorServiceCuts(document,element).isNotEmpty())floorCutMesh(document,element)?.let {wallMeshEdges(it).forEach {(a,b)->emit(a,b)}}else extrude(body.boundary, -body.thickness, 0.0, emit)
             is ElementBody.Wall -> {
                 val frame=wallFrames[element.id to null]
                 if(frame!=null && (allWallCuts[element.id to null].orEmpty().isNotEmpty() || sectionHeight!=null))wallCutMesh(frame,wallCuts[element.id to null].orEmpty(),sectionHeight)?.let {wallMeshEdges(it).forEach {(a,b)->emit(a,b)}}
                 else wall(body,emit)
             }
-            is ElementBody.Route -> polyline(body.fabricationPath ?: body.path, false, emit)
+            is ElementBody.Route -> if(planSymbols && element.floorRouting()!=null) {
+                (body.fabricationPath ?: body.path).zipWithNext().forEach {(a,b)->
+                    val length=kotlin.math.sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z))
+                    val count=ceil(length/.12).toInt().coerceIn(1,2000)
+                    for(i in 0 until count step 2) {
+                        fun at(t:Double)=Point3(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t)
+                        emit(at(i.toDouble()/count),at(minOf(i+1,count).toDouble()/count))
+                    }
+                }
+            }else polyline(body.fabricationPath ?: body.path, false, emit)
             is ElementBody.Component -> {
                 val definition = library[body.libraryItemId]
                 if (definition == null || definition.geometry.isEmpty()) {

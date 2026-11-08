@@ -280,6 +280,36 @@ class LibraryPersistenceTest {
         assertEquals(configs,imported.project.settings.routeDefaults)
     }
 
+    @Test fun `underfloor routing channels sleeves rises defaults schedule and warnings survive native storage`() = runBlocking {
+        val base=repository.create("Underfloor",ProjectTemplate.EMPTY,ProjectSettings(floorServices=FloorServiceSettings(screedThickness=.07,maxDepthFraction=.45)))
+        projectIds+=base.project.id.value
+        val level=base.levels.first().id
+        val slab=Element(ElementId("floor"),base.project.id,base.layers.first().id,ElementBody.Slab(Polygon2(listOf(Point2(0.0,0.0),Point2(8.0,0.0),Point2(8.0,8.0),Point2(0.0,8.0))),.2),level)
+        val config=defaultRoutingSettings(RouteKind.CONDUIT).copy(floorInstallation=FloorInstallation.IN_SLAB,floorDepth=.08)
+        var doc=base.copy(elements=listOf(slab))
+        doc=ServiceRouting.create(doc,RouteKind.CONDUIT,listOf(RoutePick(Point3(1.0,1.0,-.08),config,level),RoutePick(Point3(4.0,1.0,-.08),config,level),RoutePick(Point3(4.0,4.0,-.08),config,level))).preview(doc)
+        for(kind in listOf(FloorDeviceKind.FLOOR_BOX,FloorDeviceKind.SLAB_SLEEVE)) {
+            val item=floorServiceLibraryItems().first {it.floorService==kind}
+            val placement=previewLibraryPlacement(doc,item,Point3(5.0,4.0),level,id=ElementId(kind.name))
+            doc=LibraryCommands.place(doc,placement).preview(doc)
+        }
+        val route=doc.elements.first {it.body is ElementBody.Route}
+        doc=com.eezydraw.core.editing.FloorServices.rise(doc,route.id,ElementId("FLOOR_BOX")).preview(doc)
+        val saved=repository.save(doc.copy(project=doc.project.copy(settings=doc.project.settings.copy(viewMode=ViewMode.XRAY,floorServices=doc.project.settings.floorServices.copy(showServices=false)))))
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(floorSchedule(saved),floorSchedule(loaded))
+        assertEquals(floorServiceCuts(saved,slab),floorServiceCuts(loaded,slab))
+        assertEquals(floorServiceWarnings(saved),floorServiceWarnings(loaded))
+        assertEquals(loaded,ServiceRouting.reconcile(loaded,loaded))
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(floorSchedule(saved),floorSchedule(imported))
+        assertEquals(floorServiceCuts(saved,slab),floorServiceCuts(imported,imported.elements.first {it.id==slab.id}))
+    }
+
     private suspend fun assertFailsStorage(block: suspend () -> Unit) {
         try {
             block()

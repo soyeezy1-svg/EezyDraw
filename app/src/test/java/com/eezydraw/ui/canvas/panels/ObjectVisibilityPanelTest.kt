@@ -66,4 +66,18 @@ class ObjectVisibilityPanelTest {
         compose.onNodeWithTag("visibility_show_all").performScrollTo().performClick()
         assertEquals(listOf("hidden:true","xray:true","all"),events)
     }
+    @Test fun underfloorVisibilityScheduleAndDepthThresholdAreExplicitControls() {
+        var document by mutableStateOf(ProjectDocument(Project(id,"Floor services",0,0)))
+        var schedule by mutableStateOf(false)
+        compose.setContent {MaterialTheme {
+            val change:(FloorServiceSettings)->Unit={value->document=document.copy(project=document.project.copy(settings=document.project.settings.copy(floorServices=value)))}
+            ObjectVisibilityPanel(document,{_,_->},{_,_->},{_,_->},{},{},{},{_,_->},onFloorSettings=change,onFloorSchedule={schedule=true})
+            if(schedule)com.eezydraw.ui.canvas.FloorScheduleDialog(document,change,{schedule=false})
+        }}
+        compose.onNodeWithTag("visibility_underfloor").performScrollTo().performClick()
+        assertEquals(false,document.project.settings.floorServices.showServices)
+        compose.onNodeWithTag("floor_schedule_open").performScrollTo().performClick()
+        compose.onNodeWithTag("floor_depth_threshold").performScrollTo()
+    }
+
 }

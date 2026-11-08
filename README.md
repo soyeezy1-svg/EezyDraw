@@ -175,7 +175,7 @@ View modes use actual triangle faces with object overrides or system/material/la
 
 ## Validation
 
-The suite contains **644 passing tests**: model 51, geometry 99, editing 225, storage 26 and app 243. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
+The suite contains **661 passing tests**: model 53, geometry 103, editing 232, storage 27 and app 246. Debug APK and app/storage debug lint checks pass. See [the test report](docs/TEST_REPORT.md) for commands, results and device QA boundaries.
 
 Precision-pointer regressions cover offset distance and edge flips, loupe placement/content, confirm-only placement, retained targets, nudge steps, snapping and Settings defaults/restoration. Existing regressions cover axis-isolated snapped movement/rotation, mode-exclusive selection controls, manual-only Properties, placement previews/reset/cancellation, distance-only measurement defaults, cube face/corner/drag/Home navigation and undoable style/settings changes. Existing regressions cover all six view modes, surface triangulation and holes, move snapping/body-drag preferences, associative measurements/AFFL, visibility persistence, nonmodal panel drafts/full-screen controls, and PNG/PDF output. The editing suite also covers all 19 drawing tools, invalid/degenerate picks, directed three-point arcs and millimetre details near billion-metre coordinates; transformed dimension values/units/angles; geometry-based picking and local Properties; reversible edits, reference cleanup, mirroring, arrays and history budgets; and Compose tools, numeric Properties, handle-only movement, multitouch cancellation and consecutive snapped shapes. Real Room/file/archive tests retain all shape variants and signed mirrored transforms through save/load, export/import and backup restoration.
 
@@ -244,3 +244,6 @@ Visibility can show/hide all wall cuts and open the Wall services schedule. The 
 See [wall-service validation](docs/WALL_SERVICES_TEST_REPORT.md) and [room/wall validation](docs/WALL_CREATION_TEST_REPORT.md) for checks and device QA boundaries.
 
 Draw includes **Room**, **Room polygon** and a chained **Wall** tool. Rooms create walls automatically by default; the Room tool and Settings can turn this off. Select a room for the visible **Generate walls** action. See [the quick room → walls → socket test](docs/WALL_CREATION_QUICK_TEST.md).
+
+
+Floor installations are available for conduit, trunking, cable tray and pipe. Draw a **Floor slab**, then choose **Installation → In screed / In slab / Under floor (raised floor void)** in the route bar. Depths are below finished floor; plan routes are dashed. Visibility includes **Show underfloor services** and the **Floor services schedule**. Library provides recessed floor boxes, floor sockets and slab sleeves; select a route for **Rise to wall / Rise to floor box**. See [the underfloor validation and manual path](docs/UNDERFLOOR_TEST_REPORT.md).
