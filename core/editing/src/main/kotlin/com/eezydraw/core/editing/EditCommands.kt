@@ -15,7 +15,7 @@ object EditCommands {
     private fun betweenValidated(before: ProjectDocument, after: ProjectDocument, label: String,
         allowLockedPresentation:Boolean=false): EditCommand {
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
-        require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues,
+        require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues, assets=after.assets,
             systems=after.systems,libraryItems=after.libraryItems,materials=after.materials,
             project=before.project.copy(settings=after.project.settings)) == after) {
             "Drawing edits can change only elements, library definitions, materials, layers, systems, settings, groups and issues"
@@ -76,6 +76,7 @@ object EditCommands {
             layers = if (before.layers == after.layers) null else LinkPatch(before.layers, after.layers),
             groups = if (before.groups == after.groups) null else LinkPatch(before.groups, after.groups),
             issues = if (before.issues == after.issues) null else LinkPatch(before.issues, after.issues),
+            assets = if(before.assets==after.assets)null else LinkPatch(before.assets,after.assets),
             systems = if(before.systems==after.systems)null else LinkPatch(before.systems,after.systems),
             libraryItems = if(before.libraryItems==after.libraryItems)null else LinkPatch(before.libraryItems,after.libraryItems),
             materials = if(before.materials==after.materials)null else LinkPatch(before.materials,after.materials),

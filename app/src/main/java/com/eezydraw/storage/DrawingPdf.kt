@@ -63,30 +63,28 @@ internal class DrawingPdf(private val width: Int, private val height: Int) {
         val topLeft = corners[0]; val topRight = corners[1]; val bottomLeft = corners[3]
         content.append("q ${n(topRight.x-topLeft.x)} ${n(topLeft.y-topRight.y)} ${n(topLeft.x-bottomLeft.x)} ${n(bottomLeft.y-topLeft.y)} ${n(bottomLeft.x)} ${n(height-bottomLeft.y)} cm /Im$index Do Q\n")
     }
-    fun write(output: OutputStream) {
-        var count = 0L
-        val offsets = LongArray(6+images.size*2)
-        fun bytes(data: ByteArray) { output.write(data); count += data.size }
-        fun raw(text: String) = bytes(text.toByteArray(Charsets.US_ASCII))
-        fun obj(id: Int, value: String) { offsets[id] = count; raw("$id 0 obj\n$value\nendobj\n") }
-        fun stream(id: Int, dictionary: String, data: ByteArray) {
-            offsets[id] = count; raw("$id 0 obj\n<< $dictionary /Length ${data.size} >>\nstream\n")
-            bytes(data); raw("\nendstream\nendobj\n")
-        }
-        raw("%PDF-1.4\n% EEZY DRAW scaled drawing\n")
-        obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
-        obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-        val resources = images.indices.joinToString(" ") { "/Im$it ${6+it*2} 0 R" }
-        obj(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 $width $height] /Resources << /Font << /F1 4 0 R >> /XObject << $resources >> >> /Contents 5 0 R >>")
-        obj(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
-        stream(5, "", content.toString().toByteArray(Charsets.US_ASCII))
-        for ((i, image) in images.withIndex()) {
-            stream(6+i*2, "/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /SMask ${7+i*2} 0 R", image.rgb)
-            stream(7+i*2, "/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode", image.alpha)
-        }
-        val xref = count
-        raw("xref\n0 ${offsets.size}\n0000000000 65535 f \n")
-        for (i in 1 until offsets.size) raw(String.format(Locale.ROOT, "%010d 00000 n \n", offsets[i]))
-        raw("trailer\n<< /Size ${offsets.size} /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n")
+    fun write(output:OutputStream)=writePages(listOf(this),output)
+    companion object {
+     fun writePages(pages:List<DrawingPdf>,output:OutputStream) {
+      var next=4
+      data class PageIds(val page:Int,val content:Int,val images:List<Pair<Int,Int>>)
+      val ids=pages.map {p->PageIds(next++,next++,p.images.map {next++ to next++})}
+      val offsets=LongArray(next);var count=0L
+      fun bytes(b:ByteArray){output.write(b);count+=b.size}
+      fun raw(s:String)=bytes(s.toByteArray(Charsets.US_ASCII))
+      fun obj(id:Int,s:String){offsets[id]=count;raw("$id 0 obj\n$s\nendobj\n")}
+      fun stream(id:Int,dict:String,b:ByteArray){offsets[id]=count;raw("$id 0 obj\n<< $dict /Length ${b.size} >>\nstream\n");bytes(b);raw("\nendstream\nendobj\n")}
+      raw("%PDF-1.4\n% EEZY DRAW\n");obj(1,"<< /Type /Catalog /Pages 2 0 R >>");obj(2,"<< /Type /Pages /Kids [${ids.joinToString(" ") {"${it.page} 0 R"}}] /Count ${pages.size} >>");obj(3,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
+      pages.zip(ids).forEach {(p,ids)->
+       val resources=ids.images.mapIndexed {i,pair->"/Im$i ${pair.first} 0 R"}.joinToString(" ")
+       obj(ids.page,"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.width} ${p.height}] /Resources << /Font << /F1 3 0 R >> /XObject << $resources >> >> /Contents ${ids.content} 0 R >>")
+       stream(ids.content,"",p.content.toString().toByteArray(Charsets.US_ASCII))
+       p.images.zip(ids.images).forEach {(image,pair)->
+        stream(pair.first,"/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /SMask ${pair.second} 0 R",image.rgb)
+        stream(pair.second,"/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode",image.alpha)
+       }
+      }
+      val xref=count;raw("xref\n0 ${offsets.size}\n0000000000 65535 f \n");for(i in 1 until offsets.size)raw(String.format(Locale.ROOT,"%010d 00000 n \n",offsets[i]));raw("trailer\n<< /Size ${offsets.size} /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n")
+     }
     }
 }

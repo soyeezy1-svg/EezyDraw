@@ -55,7 +55,7 @@ fun filteredClashes(document:ProjectDocument,kind:ClashKind?,system:SystemId?,le
     return results.sortedWith(order.thenBy {it.id.value})
 }
 @Composable fun ClashPanel(document:ProjectDocument,progress:Float?,summary:String?,onCheck:()->Unit,onCancel:()->Unit,
-    onFocus:(Issue)->Unit,onClear:()->Unit,xray:Boolean,onXray:(Boolean)->Unit,onStatus:(IssueId,ClashStatus,String)->Unit) {
+    onFocus:(Issue)->Unit,onClear:()->Unit,xray:Boolean,onXray:(Boolean)->Unit,onStatus:(IssueId,ClashStatus,String)->Unit,onIssue:(Issue)->Unit={}) {
     var kind by remember {mutableStateOf<ClashKind?>(null)};var system by remember {mutableStateOf<SystemId?>(null)}
     var level by remember {mutableStateOf<LevelId?>(null)};var sort by remember {mutableStateOf(ClashSort.ID)}
     var editing by remember {mutableStateOf<IssueId?>(null)}
@@ -77,6 +77,7 @@ fun filteredClashes(document:ProjectDocument,kind:ClashKind?,system:SystemId?,le
             Text(c.levelIds.joinToString {id->document.levels.find {it.id==id}?.name ?: id.value}.ifBlank {"Project datum"})
             Text(String.format(Locale.ROOT,"%s %.2f mm · (%.3f, %.3f, %.3f) m",if(c.kind==ClashKind.HARD)"Overlap"else "Distance",1000*(if(c.kind==ClashKind.HARD)c.overlap else c.distance),c.position.x,c.position.y,c.position.z))
             if(c.note.isNotBlank())Text(c.note)
+            TextButton({onIssue(issue)}){Text("Create issue")}
             TextButton({editing=issue.id}){Text("Status and note")}
         }}
     }

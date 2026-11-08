@@ -646,6 +646,40 @@ class AppViewModel(
         catch(error:Exception){reportError(error.message ?: "Could not update the clash")}
     }
 
+    fun saveIssue(issue:Issue) {
+        val current=state.value;val doc=current.document ?: return
+        try {publishDrawing(current,history.execute(doc,IssueCommands.put(doc,issue)),current.selectedIds)}catch(e:Exception){reportError(e.message ?: "Cannot save issue")}
+    }
+    fun deleteIssue(issue:Issue) {
+        val current=state.value;val doc=current.document ?: return
+        try {publishDrawing(current,history.execute(doc,IssueCommands.delete(doc,issue.id)),current.selectedIds)}catch(e:Exception){reportError(e.message ?: "Cannot delete issue")}
+    }
+    fun attachIssueImage(issue:Issue,uri:String) = operation {
+        val bitmap=withContext(Dispatchers.IO) {com.eezydraw.storage.IssueMedia.decode(application,uri.toUri())}
+        try {storeIssueBitmap(issue,bitmap,false)}finally {bitmap.recycle()}
+    }
+    fun attachIssueScreenshot(issue:Issue,marks:List<IssueMarkup>,bitmap:android.graphics.Bitmap) {
+        val owned=bitmap.copy(android.graphics.Bitmap.Config.ARGB_8888,true)
+        operation {try {withContext(Dispatchers.Default){com.eezydraw.storage.paintIssueMarkups(android.graphics.Canvas(owned),marks,owned.width,owned.height)};storeIssueBitmap(issue.copy(annotations=issue.annotations.filterNot {it.viewId==issue.capture?.id || it.viewId.isEmpty()}+marks),owned,true)}finally {owned.recycle()}}
+    }
+    private suspend fun storeIssueBitmap(issue:Issue,bitmap:android.graphics.Bitmap,screenshot:Boolean) {
+        val current=state.value;val doc=current.document ?: return
+        require(!issue.locked){"Unlock the issue first"}
+        val asset=withContext(Dispatchers.IO) {com.eezydraw.storage.IssueMedia.store(application,doc,bitmap)}
+        val next=if(screenshot)issue.copy(screenshot=asset.id,capture=issue.capture?.copy(screenshot=asset.id))else issue.copy(attachments=issue.attachments+asset.id)
+        publishDrawing(current,history.execute(doc,IssueCommands.put(doc,next,listOf(asset))),current.selectedIds)
+    }
+    fun exportIssues(uri:String,format:String,id:IssueId?=null) = operation {
+        val doc=state.value.document ?: return@operation
+        withContext(Dispatchers.IO){application.contentResolver.openOutputStream(uri.toUri(),"w")?.use {com.eezydraw.storage.IssueMedia.export(application,doc,format,id,it)} ?: error("Cannot open issue export")}
+    }
+    fun shareIssue(issue:Issue,format:String) = operation {
+        val doc=state.value.document ?: return@operation
+        val file=withContext(Dispatchers.IO){java.io.File(application.cacheDir,"issue-share/${UUID.randomUUID()}.$format").also {it.parentFile!!.mkdirs();it.outputStream().use {out->com.eezydraw.storage.IssueMedia.export(application,doc.copy(issues=doc.issues.filterNot {it.id==issue.id}+issue),format,issue.id,out)}}}
+        val send=com.eezydraw.storage.IssueMedia.shareIntent(application,file,format)
+        application.startActivity(Intent.createChooser(send,"Share issue").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     private var pendingDrawingExport:Pair<ViewExportRequest,com.eezydraw.storage.DrawingExportOptions>?=null
     fun prepareDrawingExport(request:ViewExportRequest,options:com.eezydraw.storage.DrawingExportOptions) {pendingDrawingExport=request to options}
     fun cancelDrawingExport() {pendingDrawingExport=null}

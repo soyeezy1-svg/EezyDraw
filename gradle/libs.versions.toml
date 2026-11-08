@@ -16,6 +16,7 @@ lifecycle = "2.9.0"
 documentfile = "1.0.1"
 
 [libraries]
+androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", version = "1.4.1" }
 jts = { module = "org.locationtech.jts:jts-core", version = "1.20.0" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
