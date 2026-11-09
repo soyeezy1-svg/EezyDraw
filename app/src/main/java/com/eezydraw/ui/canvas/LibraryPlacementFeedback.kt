@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eezydraw.R
+import com.eezydraw.core.editing.readWallMount
 import com.eezydraw.core.editing.LibraryPlacement
 import com.eezydraw.core.editing.PrecisionPick
 import com.eezydraw.core.editing.projectPrecisionPoint
@@ -24,7 +25,7 @@ internal fun resolvedLibraryPrecisionPick(
     orbit: OrbitCamera, is3D: Boolean, width: Double, height: Double,
 ): PrecisionPick? {
     if (pick == null) return null
-    val point = placement.connectionPoint ?: placement.element.transform.translation
+    val point = placement.connectionPoint ?: placement.wallPoint ?: placement.element.transform.translation
     val screen = projectPrecisionPoint(point,viewport,orbit,is3D,width,height) ?: return null
     return pick.copy(point=point,screen=screen,wallEdge=placement.wallSnapped,
         mode=if(placement.connectedRouteId!=null) SnapMode.ENDPOINT else pick.mode.takeIf {pick.point==point},
@@ -48,6 +49,10 @@ internal fun LibraryPlacementFeedback(
             } else {
                 Text(stringResource(R.string.library_placement_mounting_height,coordinate(placement.mountingHeight,unit,precision),suffix),
                     style=MaterialTheme.typography.labelLarge)
+                readWallMount(document,placement.element)?.let {mount->
+                    Text(mount.face,Modifier.testTag("library_wall_face"),style=MaterialTheme.typography.labelLarge)
+                    Text("Left ${coordinate(mount.fromLeft,unit,precision)} $suffix · Right ${coordinate(mount.fromRight,unit,precision)} $suffix",Modifier.testTag("library_wall_position"),style=MaterialTheme.typography.labelMedium)
+                }
                 if (item.fitting != null) {
                     val route = document.elements.find {it.id==placement.connectedRouteId}
                     Text(if(placement.connectedRouteId==null)stringResource(R.string.library_fitting_seek_route)

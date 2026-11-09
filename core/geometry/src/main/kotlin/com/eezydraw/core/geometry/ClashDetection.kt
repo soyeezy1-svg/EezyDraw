@@ -17,7 +17,7 @@ object ClashDetection {
         if(elements.isEmpty())return ClashRun(emptyList(),0,0,options.key(),options)
         val physical=unfilteredGeometryDocument(document).let {d->d.copy(project=d.project.copy(settings=d.project.settings.copy(
             viewMode=ViewMode.XRAY,wallServices=d.project.settings.wallServices.copy(showCuts=true),floorServices=d.project.settings.floorServices.copy(showChannels=true))))}
-        val scene=buildSurfaceScene(physical,elements.mapTo(hashSetOf()){it.id},cancel)
+        val scene=buildSurfaceScene(physical,elements.mapTo(hashSetOf()){it.id},checkCancelled=cancel)
         require(scene.chunks.sumOf {it.vertices.size.toLong()/30}<=200_000) {"Clash geometry exceeds 200,000 triangles. Check individual levels or systems."}
         data class Solid(val element:Element,val mesh:ClashMesh,val clearance:Double) {
             val signature by lazy {

@@ -80,6 +80,7 @@ fun SelectionToolbar(
     onLockLevel: (LockMode) -> Unit = {},
     display: ObjectDisplay = ObjectDisplay.NORMAL,
     onDisplay: (ObjectDisplay) -> Unit = {},
+    onResetDisplay:()->Unit={onDisplay(ObjectDisplay.NORMAL)},
     room: Element? = null,
     selectedRoomSide: RoomSideRef? = null,
     onRoomSide: (RoomSideRef?) -> Unit = {},
@@ -193,8 +194,9 @@ fun SelectionToolbar(
                             SelectionMenuItem(R.string.selection_lock_all,"selection_lock_all",true) {act {onLockLevel(LockMode.ALL)}}
                             SelectionMenuItem(R.string.selection_unlock_all,"selection_unlock_all",true) {act {onLockLevel(LockMode.NONE)}}
                         }
-                        SelectionMenuPage.DISPLAY -> ObjectDisplay.entries.forEach {item->
-                            SelectionMenuItem(objectDisplayLabel(item),"selection_display_${item.name.lowercase()}",true,display==item) {act {onDisplay(item)}}
+                        SelectionMenuPage.DISPLAY -> {
+                            ObjectDisplay.entries.forEach {item->SelectionMenuItem(objectDisplayLabel(item),"selection_display_${item.name.lowercase()}",true,display==item) {act {onDisplay(item)}}}
+                            SelectionMenuItem(R.string.selection_reset_display,"selection_reset_display",true){act {onResetDisplay()}}
                         }
                         SelectionMenuPage.ROOM_WALLS -> {
                             SelectionMenuItem(R.string.selection_room_whole,"selection_room_whole",true,selectedRoomSide==null) {act {onRoomSide(null)}}

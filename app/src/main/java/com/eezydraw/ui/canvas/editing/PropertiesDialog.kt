@@ -16,6 +16,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
@@ -29,6 +30,13 @@ import androidx.compose.ui.unit.dp
 import com.eezydraw.R
 import com.eezydraw.core.editing.ElementProperties
 import com.eezydraw.core.editing.LibraryInstanceProperties
+import com.eezydraw.core.model.WallFaceSide
+import com.eezydraw.core.model.WallPositionReference
+import com.eezydraw.core.model.AlongWallPosition
+import com.eezydraw.core.model.DoorHinge
+import com.eezydraw.core.model.DoorDirection
+import com.eezydraw.core.model.DoorSwing
+import com.eezydraw.ui.canvas.RouteChoice
 import com.eezydraw.core.model.LockMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.Point3
@@ -74,6 +82,7 @@ fun PropertiesEditor(
     onApplyLibrary: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
     onUpdateAllOfType: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
     onResetToLibraryDefault: (() -> Unit)? = null,
+    extraContent: (@Composable () -> Unit)? = null,
 ) {
     val factor = editingMetresPerUnit(units)
     val source = remember(properties) { listOf(
@@ -98,6 +107,15 @@ fun PropertiesEditor(
     var libraryFields by rememberSaveable(libraryProperties, units, precision, stateSaver = StringFieldsSaver) {
         mutableStateOf(libraryInitial)
     }
+    val wall=libraryProperties?.wallMount
+    val wallInitial=remember(libraryProperties,units,precision) {wall?.let {listOf(it.fromLeft,it.fromRight).map {n->String.format(Locale.ROOT,"%.${precision.coerceIn(0,8)}f",n/factor)}} ?: emptyList()}
+    var wallFields by rememberSaveable(libraryProperties,units,precision,stateSaver=StringFieldsSaver){mutableStateOf(wallInitial)}
+    var wallEdited by rememberSaveable(libraryProperties,units){mutableIntStateOf(-1)}
+    var wallSide by rememberSaveable(libraryProperties){mutableStateOf(wall?.side?.name ?: WallFaceSide.LEFT.name)}
+    var hinge by rememberSaveable(libraryProperties){mutableStateOf(wall?.swing?.hinge?.name ?: DoorHinge.LEFT.name)}
+    var swingDirection by rememberSaveable(libraryProperties){mutableStateOf(wall?.swing?.direction?.name ?: DoorDirection.IN.name)}
+    val wallValues=wallFields.mapIndexed {i,text->if(text==wallInitial[i])if(i==0)wall!!.fromLeft else wall!!.fromRight else text.toDoubleOrNull()?.times(factor)?.takeIf {it.isFinite() && it>=0}}
+    val wallInvalid=wall!=null && wallEdited>=0 && (wallValues[wallEdited]==null || wallValues[wallEdited]!!>wall.fromLeft+wall.fromRight)
     val connectionValues = remember(libraryProperties) {
         fittingSectionValues(libraryProperties?.section, libraryProperties?.outletSection)
     }
@@ -142,7 +160,7 @@ fun PropertiesEditor(
     val connectionErrors = connectionParsed.map { it == null }
     val connectionEdited = connectionParsed.indices.any { connectionParsed[it] != connectionValues[it] }
     val libraryColour = libraryProperties?.let { parseLibraryColour(libraryFields[2]) }
-    val libraryInvalid = libraryProperties != null && (mountingHeight == null || libraryColour == null || connectionErrors.any { it } ||
+    val libraryInvalid = wallInvalid || libraryProperties != null && (mountingHeight == null || libraryColour == null || connectionErrors.any { it } ||
         (!libraryProperties.connectionProfileRepresentable && !connectionEdited))
     var applied by remember(properties, libraryProperties) { mutableStateOf(false) }
     fun transformDraft() = ElementProperties(
@@ -158,6 +176,9 @@ fun PropertiesEditor(
         mountingHeight = mountingHeight!!, material = libraryFields[1], colourArgb = libraryColour!!,
         system = libraryFields[3], manufacturer = libraryFields[4], model = libraryFields[5],
         nameTag = libraryFields[6],
+        wallMount=wall?.copy(side=WallFaceSide.valueOf(wallSide),
+            position=if(wallEdited<0)null else AlongWallPosition(if(wallEdited==0)WallPositionReference.LEFT_END else WallPositionReference.RIGHT_END,wallValues[wallEdited]!!),
+            swing=wall.swing?.let {DoorSwing(DoorHinge.valueOf(hinge),DoorDirection.valueOf(swingDirection))}),
         section = fittingSectionFromValues(libraryProperties.section, connectionParsed.filterNotNull()),
         outletSection = fittingSectionFromValues(libraryProperties.outletSection,
             connectionParsed.filterNotNull().drop(fittingSectionValues(libraryProperties.section, null).size)),
@@ -170,6 +191,7 @@ fun PropertiesEditor(
         "property_rotation_z", "property_width", "property_depth", "property_height")
     val fieldsContent: @Composable () -> Unit = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            extraContent?.invoke()
             if(fullyLocked || lockMode==LockMode.POSITION_ONLY)Text(
                 stringResource(if(fullyLocked)R.string.selection_locked_properties else R.string.selection_position_locked_properties),
                 modifier=Modifier.testTag("properties_lock_message"),style=MaterialTheme.typography.bodyMedium,
@@ -187,7 +209,7 @@ fun PropertiesEditor(
                 EditingNumberField(
                     value, { next -> fields = fields.toMutableList().also { it[index] = next }; applied=false },
                     stringResource(labels[index]), tags[index], errors[index], enabled = !flat && !fullyLocked &&
-                        !(lockMode==LockMode.POSITION_ONLY && index<3) && !(index >= 6 && libraryProperties?.section != null),
+                        !(lockMode==LockMode.POSITION_ONLY && index<3) && !(index >= 6 && libraryProperties?.section != null) && !(index==7 && wall?.architectural==true),
                     error = stringResource(if (index >= 6) R.string.editing_positive_error else R.string.editing_finite_error),
                 )
             }
@@ -206,6 +228,25 @@ fun PropertiesEditor(
             if (libraryProperties != null) {
                 Text(stringResource(R.string.library_instance_parameters), style = MaterialTheme.typography.titleSmall)
                 Text(stringResource(R.string.library_instance_only), style = MaterialTheme.typography.bodySmall)
+                wall?.let {mount->
+                    Text("Wall face and position",style=MaterialTheme.typography.titleSmall)
+                    Text(if(wallSide==WallFaceSide.LEFT.name)mount.leftFace else mount.rightFace,style=MaterialTheme.typography.bodySmall)
+                    if(!fullyLocked && lockMode!=LockMode.POSITION_ONLY)RouteChoice("Face",WallFaceSide.valueOf(wallSide),WallFaceSide.entries,{wallSide=it.name;applied=false}) {if(it==WallFaceSide.LEFT)mount.leftFace else mount.rightFace}
+                    TextButton({wallSide=if(wallSide==WallFaceSide.LEFT.name)WallFaceSide.RIGHT.name else WallFaceSide.LEFT.name;applied=false},enabled=!fullyLocked && lockMode!=LockMode.POSITION_ONLY,modifier=Modifier.testTag("property_wall_flip_side")){Text("Flip side")}
+                    Text("Distances locate the item centre from the wall's left (start) and right (end).",style=MaterialTheme.typography.bodySmall)
+                    wallFields.forEachIndexed {index,text->EditingNumberField(text,{value->
+                        wallEdited=index;wallFields=wallFields.toMutableList().also {it[index]=value};applied=false
+                        value.toDoubleOrNull()?.times(factor)?.takeIf {it.isFinite() && it>=0 && it<=mount.fromLeft+mount.fromRight}?.let {n->
+                            wallFields=wallFields.toMutableList().also {it[1-index]=String.format(Locale.ROOT,"%.${precision.coerceIn(0,8)}f",(mount.fromLeft+mount.fromRight-n)/factor)}
+                        }
+                    },"From ${if(index==0)"left"else"right"} end (${units.name.lowercase()})","property_wall_${if(index==0)"left"else"right"}",wallInvalid && wallEdited==index,
+                        enabled=!fullyLocked && lockMode!=LockMode.POSITION_ONLY,error="Enter a distance within this wall")}
+                    if(!fullyLocked)mount.swing?.let {
+                        RouteChoice("Hinge",DoorHinge.valueOf(hinge),DoorHinge.entries,{hinge=it.name;applied=false}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
+                        RouteChoice("Swing",DoorDirection.valueOf(swingDirection),DoorDirection.entries,{swingDirection=it.name;applied=false}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
+                        TextButton({swingDirection=if(swingDirection==DoorDirection.IN.name)DoorDirection.OUT.name else DoorDirection.IN.name;applied=false},enabled=!fullyLocked,modifier=Modifier.testTag("property_door_flip")){Text("Flip")}
+                    }
+                }
                 FittingConnectionFields(libraryProperties.section, libraryProperties.outletSection,
                     connectionFields, connectionErrors, units, !fullyLocked && lockMode != LockMode.POSITION_ONLY) { index, value ->
                     connectionFields = connectionFields.toMutableList().also { it[index] = value }

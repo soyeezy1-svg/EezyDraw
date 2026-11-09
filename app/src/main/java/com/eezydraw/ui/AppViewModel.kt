@@ -320,6 +320,12 @@ class AppViewModel(
     fun showHiddenObjects(show:Boolean)=updateProjectSettings("Show hidden objects") {it.copy(showHiddenObjects=show)}
     fun autoXrayFrontWalls(enabled:Boolean)=updateProjectSettings("Auto X-ray front walls") {it.copy(autoXrayFrontWalls=enabled)}
 
+    fun resetSelectionDisplay()=presentationEdit("Reset display") {current,document->PresentationCommands.resetDisplay(document,current.selectedIds)}
+    fun resetAllDisplay()=presentationEdit("Reset all display") {_,document->PresentationCommands.resetAllDisplay(document)}
+    fun setRoomCeiling(id:ElementId,options:CeilingOptions?) {drawingEdit {_,document->Ceilings.setRoom(document,id,options)}}
+    fun setLevelCeiling(id:LevelId,options:CeilingOptions) {drawingEdit {_,document->Ceilings.setLevel(document,id,options)}}
+    fun showCeilings(show:Boolean)=updateProjectSettings("Show ceilings") {it.copy(showCeilings=show)}
+
     fun setCanvasLayout(layout:CanvasLayout) {
         val current=state.value;val document=current.document ?: return
         if(document.project.settings.canvasLayout==layout)return
@@ -591,7 +597,8 @@ class AppViewModel(
             val prepared = build(current, document)
             val preview=prepared.preview(document)
             val roomWalls=RoomWalls.reconcile(document,preview)
-            val attached=FloorServices.reconcile(document,WallServices.reconcile(document,roomWalls))
+            val ceilings=Ceilings.reconcile(document,roomWalls)
+            val attached=FloorServices.reconcile(document,WallServices.reconcile(document,ceilings))
             val connected=ServiceRouting.reconcile(document,attached)
             FloorServices.validateCuts(document,connected)
             val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
@@ -916,8 +923,9 @@ class AppViewModel(
 
     private fun showProject(loaded: ProjectDocument) {
         val remembered=state.value.settings.canvasLayouts[loaded.project.id.value]
-        val document=if(remembered==null)loaded else loaded.copy(project=loaded.project.copy(settings=loaded.project.settings.copy(canvasLayout=remembered)))
-        savedDocument = document
+        val base=if(remembered==null)loaded else loaded.copy(project=loaded.project.copy(settings=loaded.project.settings.copy(canvasLayout=remembered)))
+        val document=Ceilings.reconcile(base,WallServices.reconcile(base,base))
+        savedDocument = base
         history.clear()
         history.setLimit(state.value.settings.undoLimit)
         clipboard = emptyList()
@@ -926,7 +934,7 @@ class AppViewModel(
         savedState["screen"] = AppScreen.PROJECT.name
         mutableState.update {
             it.copy(
-                screen = AppScreen.PROJECT, document = document, dirty = false, failedProjectId = null,stressRun=null,
+                screen = AppScreen.PROJECT, document = document, dirty = document!=base, failedProjectId = null,stressRun=null,
                 selectedIds = emptySet(), canUndo = false, canRedo = false, canPaste = false,
             )
         }

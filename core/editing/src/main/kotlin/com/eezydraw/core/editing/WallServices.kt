@@ -15,17 +15,17 @@ object WallServices {
             document.layers.none {it.id==e.layerId && it.locked} && ScenePresentation(document).display(e)!=ObjectDisplay.HIDDEN &&
             (frame.roomSide?.let {ScenePresentation(document).sideDisplay(e,it)!=ObjectDisplay.HIDDEN} ?: true)
     }
-    fun nearest(document:ProjectDocument,point:Point3,level:LevelId?=null,preferred:WallServiceAttachment?=null,tolerance:Double=.75,allowLocked:Boolean=false):WallFacePick? {
+    fun nearest(document:ProjectDocument,point:Point3,level:LevelId?=null,preferred:WallServiceAttachment?=null,tolerance:Double=.75,allowLocked:Boolean=false,size:Size3?=null):WallFacePick? {
         val frames=wallFrames(document)
         val unlocked=if(allowLocked)document.copy(elements=document.elements.map {it.withLock(LockMode.NONE)},layers=document.layers.map {it.copy(locked=false)})else document
         val candidates=frames.filter {eligible(unlocked,it,level) && (preferred==null || it.host.id==preferred.wallId && it.roomSide==preferred.roomSide)}.flatMap {frame->
             val q=frame.coordinates(point)
-            if(q.z < -1e-6 || q.z>frame.height+1e-6)emptyList()else WallFaceSide.entries.filter {preferred==null || it==preferred.side}.map {side->
+            if(q.z < -1e-6 || q.z>frame.height+1e-6 || size!=null && (frame.length<size.width || q.z-size.height/2 < -1e-6 || q.z+size.height/2>frame.height+1e-6))emptyList()else WallFaceSide.entries.filter {preferred==null || it==preferred.side}.map {side->
                 val at=frame.world(q.x.coerceIn(0.0,frame.length),frame.faceDepth(side),q.z.coerceIn(0.0,frame.height))
                 WallFacePick(frame,side,at)
             }
         }
-        return candidates.filter {distance(it.point,point)<=tolerance}.minByOrNull {distance(it.point,point)}
+        return candidates.filter {preferred!=null || distance(it.point,point)<=tolerance}.minByOrNull {distance(it.point,point)}
     }
     /** Real wall-plane ray intersection works in orbit and orthographic elevation views. */
     fun pick(document:ProjectDocument,screen:Point2,orbit:OrbitCamera,width:Double,height:Double,level:LevelId?,preferred:WallServiceAttachment?=null):WallFacePick? {
@@ -78,26 +78,37 @@ object WallServices {
         require(picks.size<512){"Finish the route before adding more points"}
         return picks+RoutePick(at,settings,level?.id)
     }
-    fun attach(document:ProjectDocument,element:Element,options:WallServiceOptions,preferred:WallServiceAttachment?=element.wallService()):Element {
+    fun attach(document:ProjectDocument,element:Element,options:WallServiceOptions,preferred:WallServiceAttachment?=element.wallService(),aim:Point3?=null):Element {
         val body=element.body
-        val target=if(body is ElementBody.Component)measurementToWorld(element.transform,Point3(body.size.width/2,0.0,body.size.height/2))else {
+        val target=aim ?: if(body is ElementBody.Component)measurementToWorld(element.transform,Point3(body.size.width/2,0.0,body.size.height/2))else {
             val r=body as? ElementBody.Route ?: error("Select a wall service")
             val a=measurementToWorld(element.transform,r.path.first());val b=measurementToWorld(element.transform,r.path.last());Point3((a.x+b.x)/2,(a.y+b.y)/2,(a.z+b.z)/2)
         }
-        val face=requireNotNull(nearest(document,target,element.levelId,preferred,allowLocked=options.mode==WallServiceMode.SURFACE)){"The service must remain on its visible, unlocked wall face"}
-        val f=face.frame;val attachment=WallServiceAttachment(f.host.id,face.side,options,f.roomSide)
-        val normal=f.outward(face.side)
+        val item=(body as? ElementBody.Component)?.let {document.libraryItems.find {item->item.id==it.libraryItemId} ?: BuiltInLibrary.find(it.libraryItemId)}
+        val opening=item?.openingKind()
+        val resolvedOptions=if(opening!=null)options.copy(mode=WallServiceMode.OPENING,clearance=0.0,depth=null,profile=OpeningProfile.RECTANGULAR,
+            swing=options.swing ?: DoorSwing().takeIf {opening in setOf(OpeningKind.DOOR,OpeningKind.DOUBLE_DOOR)})else options
+        val physical=(body as? ElementBody.Component)?.let {Size3(it.size.width*abs(element.transform.scale.x),it.size.depth*abs(element.transform.scale.y),it.size.height*abs(element.transform.scale.z))}
+        val preferredFace=preferred?.let {it.copy(side=options.side ?: it.side)}
+        val face=requireNotNull(nearest(document,target,element.levelId,preferredFace,tolerance=if(aim!=null)Double.POSITIVE_INFINITY else .75,allowLocked=resolvedOptions.mode==WallServiceMode.SURFACE,size=physical)) {"The item must fit on a visible, unlocked wall face"}
+        val f=face.frame;val side=options.side ?: face.side
+        val attachment=WallServiceAttachment(f.host.id,side,resolvedOptions.copy(side=null,position=null),f.roomSide)
+        val normal=f.outward(side)
         val transform=when(body) {
             is ElementBody.Component -> {
-                val width=body.size.width*abs(element.transform.scale.x);val height=body.size.height*abs(element.transform.scale.z)
-                require(width<=f.length+1e-8 && height<=f.height+1e-8){"The device does not fit on this wall"}
-                val centre=f.coordinates(target);val z=(element.transform.translation.z-f.origin.z).coerceIn(0.0,f.height-height)
-                val x=Point3(normal.y,-normal.x)
-                val sign=x.x*f.along.x+x.y*f.along.y
-                val s=centre.x.coerceIn(width/2,f.length-width/2)-sign*width/2
-                val inward=if(options.mode==WallServiceMode.SURFACE)0.0 else body.size.depth*abs(element.transform.scale.y)
-                val depth=f.faceDepth(face.side)+if(face.side==WallFaceSide.LEFT)inward else -inward
-                element.transform.copy(translation=f.world(s,depth,z),rotation=Rotation3(z=atan2(-normal.x,normal.y)))
+                val width=physical!!.width;val height=physical.height
+                val centre=f.coordinates(target)
+                val centreS=options.position?.let {resolveAlongWallPosition(document,f,it,centre.x,element.id)} ?: centre.x.coerceIn(width/2,f.length-width/2)
+                require(centreS>=width/2-1e-8 && centreS<=f.length-width/2+1e-8){"The position places the item beyond the wall ends"}
+                val z=(element.transform.translation.z-f.origin.z).coerceIn(0.0,f.height-height)
+                val ny=if(element.transform.scale.y<0)-1.0 else 1.0
+                val nx=if(element.transform.scale.x<0)-1.0 else 1.0
+                val x=Point3(normal.y*ny,-normal.x*ny)
+                val sign=(x.x*f.along.x+x.y*f.along.y)*nx
+                val start=centreS-sign*width/2
+                val inward=when(resolvedOptions.mode){WallServiceMode.SURFACE->0.0;WallServiceMode.OPENING->f.thickness;else->physical.depth}
+                val depth=f.faceDepth(side)+if(side==WallFaceSide.LEFT)inward else -inward
+                element.transform.copy(translation=f.world(start,depth,z),rotation=Rotation3(z=atan2(-normal.x*ny,normal.y*ny)))
             }
             else -> element.transform
         }
@@ -112,20 +123,27 @@ object WallServices {
             }
             changed=changed.copy(body=(changed.body as ElementBody.Route).copy(path=points,routing=body.routing?.let {it.copy(settings=it.settings.copy(wallOptions=options))},host=HostAttachment(f.host.id,if(options.mode==WallServiceMode.CHASE)HostMode.CHASE else HostMode.SURFACE,measurementToLocal(f.host.transform,measurementToWorld(transform,points.first())),options.depth ?: physicalDepth+options.clearance)))
         } else if(changed.body is ElementBody.Component) {
-            val component=changed.body as ElementBody.Component
-            changed=changed.copy(body=component.copy(host=HostAttachment(f.host.id,when(options.mode){WallServiceMode.SURFACE->HostMode.SURFACE;WallServiceMode.OPENING->HostMode.THROUGH_OPENING;else->HostMode.RECESSED},measurementToLocal(f.host.transform,changed.transform.translation),options.depth ?: component.size.depth)))
+            val original=changed.body as ElementBody.Component
+            val component=if(opening!=null)original.copy(size=original.size.copy(depth=f.thickness/abs(transform.scale.y)))else original
+            changed=changed.copy(body=component.copy(host=HostAttachment(f.host.id,when(resolvedOptions.mode){WallServiceMode.SURFACE->HostMode.SURFACE;WallServiceMode.OPENING->HostMode.THROUGH_OPENING;else->HostMode.RECESSED},measurementToLocal(f.host.transform,changed.transform.translation),options.depth ?: component.size.depth)))
         }
         return changed
     }
     fun reconcile(before:ProjectDocument,after:ProjectDocument):ProjectDocument {
         val old=before.elements.associateBy {it.id};val hosts=after.elements.associateBy {it.id}
+        val frames by lazy {wallFrames(after).associateBy {it.host.id to it.roomSide}}
+        val definitions=after.libraryItems.associateBy {it.id}
         val orphan=after.elements.filter {e->(e.properties[WALL_DEVICE_FEED] as? ParameterValue.Text)?.value?.let {id->ElementId(id) !in hosts}==true}.mapTo(hashSetOf()){it.id}
         if(orphan.isNotEmpty())return reconcile(before,EditCommands.delete(after,orphan).preview(after))
         val elements=after.elements.map {e->
             val mount=e.wallService() ?: return@map e
             val host=hosts[mount.wallId] ?: return@map e.withWallService(null)
             val previous=old[e.id];val oldHost=old[host.id]
-            if(previous==e && oldHost==host)return@map e
+            val opening=(e.body as? ElementBody.Component)?.let {b->definitions[b.libraryItemId]?.openingKind()}
+            val frame=if(opening!=null)frames[mount.wallId to mount.roomSide]else null
+            val component=e.body as? ElementBody.Component
+            val upgrade=opening!=null && (mount.options.mode!=WallServiceMode.OPENING || component!=null && frame!=null && abs(component.size.depth*abs(e.transform.scale.y)-frame.thickness)>1e-8)
+            if(previous==e && oldHost?.copy(properties=host.properties)==host && !upgrade)return@map e
             // An existing locked host can keep attachments; new attachment commands require an unlocked face.
             val unlocked=after.copy(elements=after.elements.map {if(it.id==host.id)it.withLock(LockMode.NONE)else it},layers=after.layers.map {if(it.id==host.layerId)it.copy(locked=false)else it})
             var candidate=e
@@ -134,9 +152,13 @@ object WallServices {
                 candidate=e.copy(transform=e.transform.copy(translation=p,rotation=e.transform.rotation.copy(z=e.transform.rotation.z+host.transform.rotation.z-oldHost.transform.rotation.z)))
             }
             // Visibility never invalidates an existing attachment or its derived physical cut.
-            val visible=unlocked.copy(elements=unlocked.elements.map {if(it.id==host.id)it.withDisplay(ObjectDisplay.NORMAL).withAllRoomSidesNormal()else it},
+            val visible=unlocked.copy(elements=unlocked.elements.map {if(it.id==host.id || it.body is ElementBody.Room)it.withDisplay(ObjectDisplay.NORMAL).withAllRoomSidesNormal().let {v->
+                    if(v.body is ElementBody.Wall)v.copy(properties=v.properties+(ELEMENT_DISPLAY_KEY to ParameterValue.Text(ObjectDisplay.NORMAL.name)))else v
+                }else it},
                 layers=unlocked.layers.map {if(it.id==host.layerId)it.copy(visible=true)else it},project=unlocked.project.copy(settings=unlocked.project.settings.copy(hiddenLevelIds=emptySet())),systems=unlocked.systems.map {it.copy(visible=true)})
-            attach(visible,candidate,mount.options,mount)
+            val attached=attach(visible,candidate,mount.options,mount)
+            require(e.lockMode!=LockMode.ALL || attached==e || upgrade && previous==e && oldHost==host){"A locked wall item prevents changing its wall"}
+            attached
         }
         return after.copy(elements=elements)
     }

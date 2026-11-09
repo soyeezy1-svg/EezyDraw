@@ -23,18 +23,20 @@ fun floorDepthAt(document:ProjectDocument,e:Element,p:Point3)=(document.levels.f
 fun floorRoutingElevation(document:ProjectDocument,settings:RoutingSettings,level:LevelId?,point:Point3)=
     if(settings.floorInstallation!=null)(document.levels.find {it.id==level}?.elevation ?: 0.0)-settings.floorDepth else routingElevationAt(document,settings.elevation,level,point)
 fun floorContains(slab:Element,world:Point3):Boolean {
+    if(slab.isCeiling)return false
     val b=slab.body as? ElementBody.Slab ?: return false
     val p=measurementToLocal(slab.transform,world)
     fun inside(ring:List<Point2>):Boolean {var hit=false
         for(i in ring.indices){val a=ring[i];val z=ring[(i+1)%ring.size];if((a.y>p.y)!=(z.y>p.y) && p.x<(z.x-a.x)*(p.y-a.y)/(z.y-a.y)+a.x)hit=!hit};return hit}
     return inside(b.boundary.outer) && b.boundary.holes.none(::inside)
 }
-fun floorSlab(document:ProjectDocument,point:Point3,level:LevelId?)=document.elements.filter {it.body is ElementBody.Slab && (level==null || it.levelId==level) && floorContains(it,point)}.minByOrNull {abs(it.transform.translation.z-point.z)}
+fun floorSlab(document:ProjectDocument,point:Point3,level:LevelId?)=document.elements.filter {it.body is ElementBody.Slab && !it.isCeiling && (level==null || it.levelId==level) && floorContains(it,point)}.minByOrNull {abs(it.transform.translation.z-point.z)}
 
 /** Physical metres in the slab's orthonormal plane; signed scaling remains in its host transform. */
 fun floorLocalMetres(slab:Element,world:Point3):Point3=measurementToLocal(slab.transform,world).let {Point3(it.x*abs(slab.transform.scale.x),it.y*abs(slab.transform.scale.y),it.z*abs(slab.transform.scale.z))}
 data class FloorCut(val slabId:ElementId,val sourceId:ElementId,val outline:List<Point2>,val depth:Double)
 fun floorServiceCuts(document:ProjectDocument,slab:Element):List<FloorCut> {
+    if(slab.isCeiling)return emptyList()
     val thickness=(slab.body as ElementBody.Slab).thickness*abs(slab.transform.scale.z)
     val clearance=document.project.settings.floorServices.clearance
     val direct=document.elements.flatMap {e->when(val body=e.body) {

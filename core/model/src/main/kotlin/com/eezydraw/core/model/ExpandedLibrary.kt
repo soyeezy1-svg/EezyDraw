@@ -125,6 +125,11 @@ private class StockGroup(
             geometry = stockGeometry(form, size), symbolGeometry = stockSymbol(form, size),
             defaultMaterial = material, defaultSystem = system, defaultColourArgb = colour,
             parameters = parameters,
+            opening=when(form) {
+                StockForm.SINGLE_DOOR->OpeningKind.DOOR;StockForm.DOUBLE_DOOR->OpeningKind.DOUBLE_DOOR
+                StockForm.SLIDING_DOOR->OpeningKind.SLIDING_DOOR;StockForm.DOUBLE_WINDOW->OpeningKind.DOUBLE_WINDOW
+                StockForm.SINGLE_WINDOW,StockForm.FIXED_WINDOW->OpeningKind.WINDOW;else->null
+            },ceiling=form==StockForm.CEILING,
         )
     }
 }

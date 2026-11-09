@@ -18,6 +18,7 @@ data class LibraryInstanceProperties(
     val outletSection: RouteSection? = null,
     val connectionProfileRepresentable: Boolean = true,
     val freeMounting: Boolean = false,
+    val wallMount:WallMountProperties?=null,
 ) {
     init {
         require(mountingHeight.isFinite()) { "Mounting height must be finite." }
@@ -53,6 +54,7 @@ fun readLibraryProperties(document: ProjectDocument, element: Element): LibraryI
         outletSection = connection.outletSection,
         connectionProfileRepresentable = connection.representable,
         freeMounting = item.mounting == MountingType.FREE,
+        wallMount=readWallMount(document,element),
     )
 }
 
@@ -199,6 +201,9 @@ object LibraryCommands {
                     (changed.body as ElementBody.Component).parameters +
                         (LibraryParameterKeys.MOUNTING_HEIGHT to ParameterValue.Number(mountingPoint.z - floor, Quantity.LENGTH))))
             }
+            properties.wallMount?.let {mount->changed.wallService()?.let {attachment->
+                changed=WallServices.attach(prepared,changed,attachment.options.copy(side=mount.side,position=mount.position,swing=mount.swing),attachment)
+            }}
             val associated = associate(prepared, synchronizeHostPosition(prepared, changed), properties)
             prepared = associated.first
             associated.second

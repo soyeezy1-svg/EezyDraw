@@ -34,6 +34,8 @@ data class LibraryItem(
     val wallService:WallServiceOptions? = null,
     val floorService:FloorDeviceKind? = null,
     val unitRates:Map<String,Double> = emptyMap(),
+    val opening:OpeningKind?=null,
+    val ceiling:Boolean=false,
 ) {
     init {
         require(name.isNotBlank() && category.isNotBlank() && version > 0)

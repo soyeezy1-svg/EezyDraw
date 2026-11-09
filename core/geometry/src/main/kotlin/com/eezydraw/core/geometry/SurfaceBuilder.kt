@@ -23,7 +23,7 @@ private const val SURFACE_TAU = PI * 2
  * Open shapes remain line geometry. Polygon caps use even/odd scanline trapezoids, preserving
  * concavities and holes without requiring ring winding. Call off the main thread.
  */
-fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = null, checkCancelled: () -> Unit = {}): SurfaceScene {
+fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = null, planView:Boolean=false, architecturalCuts:Boolean=true, checkCancelled: () -> Unit = {}): SurfaceScene {
     val layers = document.layers.associateBy { it.id }
     val systems = document.systems.associateBy { it.id }
     val materials = document.materials.associateBy { it.id }
@@ -31,9 +31,15 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
     val collector = SurfaceCollector()
     val wallFrames=wallFrames(document).associateBy {it.host.id to it.roomSide}
     val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
-    val wallCuts=if(document.project.settings.wallServices.showCuts)allWallCuts else emptyMap()
+    val architecture=document.elements.mapNotNull {e->(e.body as? ElementBody.Component)?.let {b->if(library[b.libraryItemId]?.openingKind()!=null)e.id else null}}.toSet()
+    val wallCuts=allWallCuts.mapValues {(key,cuts)->cuts.filter {document.project.settings.wallServices.showCuts || architecturalCuts && it.sourceId in architecture}.map {cut->
+        if(planView && cut.sourceId in architecture) {
+            val l=cut.outline.minOf {it.x};val r=cut.outline.maxOf {it.x};val h=wallFrames[key]?.height ?: 1.0
+            cut.copy(outline=listOf(Point2(l,0.0),Point2(r,0.0),Point2(r,h),Point2(l,h)))
+        }else cut
+    }}
     val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
-    val presentation = ScenePresentation(document)
+    val presentation = ScenePresentation(document,planView)
     for (element in document.elements) {
         checkCancelled()
         if (elementIds != null && element.id !in elementIds) continue
@@ -46,7 +52,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val material = (element.materialId ?: definition?.materialId)?.let(materials::get)
         val colour = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb ?: 0xFF6688AA
         val transform = SurfaceTransform(element.transform)
-        val partSide=if(element.body is ElementBody.Wall)presentation.wallSide(element) else null
+        val partSide=if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter=presentation.roomCenter(element)
         fun emitter(mode:ObjectDisplay,side:RoomSideRef?,surfaceTransform:SurfaceTransform=transform):SurfaceEmitter? {
             if(mode==ObjectDisplay.HIDDEN || mode==ObjectDisplay.WIREFRAME)return null
@@ -62,7 +68,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         when (val body = element.body) {
             is ElementBody.DrawingShape -> surfaceShape(body.shape, requireNotNull(emit))
             is ElementBody.Room -> {
-                emit?.let {surfaceCap(body.boundary,0.0,true,it);surfaceCap(body.boundary,body.ceilingHeight,false,it)}
+                emit?.let {surfaceCap(body.boundary,0.0,true,it)}
                 (listOf(body.boundary.outer)+body.boundary.holes).forEachIndexed {ringIndex,vertices->
                     val ccw=surfaceArea(vertices)>0.0
                     val forward=if(ringIndex==0)ccw else !ccw
@@ -94,7 +100,9 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
                 val normal=frame?.normal?.let {n->measurementToLocal(element.transform,Point3(element.transform.translation.x+n.x,element.transform.translation.y+n.y,element.transform.translation.z))}
                 surfaceRoute(body,requireNotNull(emit),normal)
             }
-            is ElementBody.Component -> if (definition == null || definition.geometry.isEmpty()) {
+            is ElementBody.Component -> if(definition?.openingKind()!=null) {
+                openingGeometry(definition.openingKind()!!,body.size,body.wallService?.options?.swing ?: DoorSwing(),planView).forEach {surfaceShape(it,requireNotNull(emit))}
+            } else if (definition == null || definition.geometry.isEmpty()) {
                 surfaceBox(body.size, requireNotNull(emit))
             } else {
                 val scale = Scale3(element.transform.scale.x * body.size.width / (definition.geometrySize ?: definition.defaultSize).width,

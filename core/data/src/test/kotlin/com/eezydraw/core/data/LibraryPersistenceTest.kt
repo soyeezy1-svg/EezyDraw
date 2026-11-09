@@ -3,6 +3,10 @@ package com.eezydraw.core.data
 import android.content.Context
 import androidx.room.Room
 import com.eezydraw.core.model.*
+import com.eezydraw.core.editing.Ceilings
+import com.eezydraw.core.editing.PresentationCommands
+import com.eezydraw.core.editing.EditCommands
+import com.eezydraw.core.editing.readWallMount
 import com.eezydraw.core.editing.RoomWalls
 import com.eezydraw.core.editing.WallServices
 import com.eezydraw.core.editing.LibraryCommands
@@ -315,6 +319,55 @@ class LibraryPersistenceTest {
             block()
             fail("Expected invalid library data to be rejected")
         } catch (_: ProjectStorageException) { }
+    }
+
+    @Test fun `architectural openings faces individual wall display and ceiling options survive real storage and archives`()=runBlocking {
+        val created=repository.create("Wall coordination",ProjectTemplate.EMPTY,ProjectSettings())
+        projectIds+=created.project.id.value
+        val level=created.levels.single();val layer=created.layers.first().id;val p=created.project.id
+        val boundary=Polygon2(listOf(Point2(0.0,0.0),Point2(6.0,0.0),Point2(6.0,4.0),Point2(0.0,4.0)))
+        val a=Element(ElementId("room-a"),p,layer,ElementBody.Room(boundary),level.id,name="Room A")
+        val b=a.copy(id=ElementId("room-b"),name="Room B",transform=Transform3(Point3(6.0,0.0)))
+        val rooms=created.copy(elements=listOf(a,b))
+        var document=RoomWalls.generate(rooms,setOf(a.id,b.id),RoomWallOptions()).preview(rooms)
+        fun add(slug:String,id:String,point:Point3,options:WallServiceOptions?=null) {
+            val item=BuiltInLibrary.find(LibraryItemId("eezy.architecture.$slug"))!!
+            val placement=previewLibraryPlacement(document,item,point,level.id,id=ElementId(id),wallOptions=options)
+            document=LibraryCommands.place(document,placement).preview(document)
+        }
+        add("single-door","door",Point3(5.9,2.0),WallServiceOptions(WallServiceMode.OPENING,side=WallFaceSide.LEFT,swing=DoorSwing(DoorHinge.RIGHT,DoorDirection.OUT)))
+        add("single-window","window",Point3(6.3,3.0),WallServiceOptions(WallServiceMode.OPENING,side=WallFaceSide.RIGHT))
+        val socket=BuiltInLibrary.items.first {it.symbol==LibrarySymbol.SOCKET}
+        val placement=previewLibraryPlacement(document,socket,Point3(6.3,.7),level.id,id=ElementId("socket"),wallOptions=defaultWallDeviceOptions(socket).copy(
+            side=WallFaceSide.RIGHT,position=AlongWallPosition(WallPositionReference.NEAREST_DOOR,.3)))
+        document=LibraryCommands.place(document,placement).preview(document)
+        document=Ceilings.setLevel(document,level.id,CeilingOptions(CeilingType.FLAT,2.7,.12)).preview(document)
+        document=Ceilings.setRoom(document,a.id,CeilingOptions(CeilingType.FLAT,2.65,.08)).preview(document)
+        val shared=document.elements.first {it.id.value=="door"}.wallService()!!.wallId
+        document=RoomWalls.reconcile(document,PresentationCommands.setDisplay(document,setOf(shared),ObjectDisplay.XRAY).preview(document))
+        val ceiling=document.elements.first {(it.properties[CEILING_OWNER] as? ParameterValue.Text)?.value==a.id.value}
+        document=PresentationCommands.setDisplay(document,setOf(ceiling.id),ObjectDisplay.HIDDEN).preview(document)
+        document=document.copy(project=document.project.copy(settings=document.project.settings.copy(showCeilings=false)))
+        val saved=repository.save(document)
+        database.close();reopen()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(2,wallServiceCuts(loaded).count {it.mode==WallServiceMode.OPENING})
+        assertEquals(DoorSwing(DoorHinge.RIGHT,DoorDirection.OUT),loaded.elements.first {it.id.value=="door"}.wallService()!!.options.swing)
+        assertEquals(WallFaceSide.RIGHT,readWallMount(loaded,loaded.elements.first {it.id.value=="socket"})!!.side)
+        assertEquals(ObjectDisplay.XRAY,loaded.elements.first {it.id==shared}.objectDisplay)
+        assertFalse(loaded.project.settings.showCeilings)
+        assertEquals(CeilingOptions(CeilingType.FLAT,2.7,.12),loaded.levels.single().ceiling)
+        assertEquals(CeilingOptions(CeilingType.FLAT,2.65,.08),(loaded.elements.first {it.id==a.id}.body as ElementBody.Room).ceiling)
+        val archive=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}
+        val imported=repository.importProject(ByteArrayInputStream(archive.toByteArray()));projectIds+=imported.project.id.value
+        assertNotEquals(loaded.project.id,imported.project.id)
+        assertEquals(loaded.elements.map {it.copy(projectId=imported.project.id)},imported.elements)
+        assertEquals(wallServiceCuts(loaded),wallServiceCuts(imported))
+        val closed=EditCommands.delete(imported,setOf(ElementId("door"))).preview(imported)
+        assertFalse(wallServiceCuts(closed).any {it.sourceId.value=="door"})
+        val reset=PresentationCommands.resetAllDisplay(imported).preview(imported)
+        assertTrue(reset.elements.all {it.objectDisplay==ObjectDisplay.NORMAL})
     }
 
     private fun reopen() {

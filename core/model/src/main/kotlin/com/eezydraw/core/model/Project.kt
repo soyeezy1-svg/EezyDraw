@@ -37,6 +37,7 @@ data class Level(
     val elevation: Double,
     val slabThickness: Double,
     val storeyHeight: Double,
+    val ceiling:CeilingOptions=CeilingOptions(height=storeyHeight-slabThickness),
 ) {
     init {
         require(name.isNotBlank() && elevation.isFinite())

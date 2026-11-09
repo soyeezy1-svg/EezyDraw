@@ -20,7 +20,7 @@ object PresentationCommands {
     }
 
     fun setDisplay(document:ProjectDocument,ids:Set<ElementId>,display:ObjectDisplay):EditCommand =
-        EditCommands.presentation(document,selected(document,ids).map {it.withDisplay(display)},when(display) {
+        EditCommands.presentation(document,selected(document,ids).map {e->if(e.body is ElementBody.Wall)e.copy(properties=e.properties+(ELEMENT_DISPLAY_KEY to ParameterValue.Text(display.name)))else e.withDisplay(display)},when(display) {
             ObjectDisplay.NORMAL->"Object shown"
             ObjectDisplay.HIDDEN->"Object hidden"
             ObjectDisplay.XRAY->"Object X-ray enabled"
@@ -29,6 +29,8 @@ object PresentationCommands {
 
     fun setRoomSideDisplay(document:ProjectDocument,side:RoomSideRef,display:ObjectDisplay):EditCommand {
         val room=requireNotNull(document.elements.find {it.id==side.roomId}) {"The room no longer exists."}
+        val linked=(room.body as? ElementBody.Room)?.wallFaces.orEmpty().filter {it.edgeIndex==side.edgeIndex && it.ringIndex==side.ringIndex}.mapTo(hashSetOf()){it.wallId}
+        if(linked.isNotEmpty())return setDisplay(document,linked,display)
         return EditCommands.presentation(document,listOf(room.withRoomSideDisplay(side,display)),when(display) {
             ObjectDisplay.HIDDEN->"Wall hidden"
             ObjectDisplay.NORMAL->"Wall shown"
@@ -56,6 +58,13 @@ object PresentationCommands {
             }
         }
         return EditCommands.presentation(document,replacements,"Room walls shown")
+    }
+
+    fun resetDisplay(document:ProjectDocument,ids:Set<ElementId>):EditCommand = setDisplay(document,ids,ObjectDisplay.NORMAL)
+    fun resetAllDisplay(document:ProjectDocument):EditCommand {
+        val after=document.copy(elements=document.elements.map {it.withDisplay(ObjectDisplay.NORMAL).withAllRoomSidesNormal()},
+            project=document.project.copy(settings=document.project.settings.copy(autoXrayFrontWalls=false)))
+        return EditCommands.presentationBetween(document,after,"Reset all display")
     }
 
     /** Showing all restores visibility, while retaining intentional X-ray/wireframe styles. */

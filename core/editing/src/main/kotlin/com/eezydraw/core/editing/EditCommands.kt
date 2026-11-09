@@ -16,10 +16,11 @@ object EditCommands {
         allowLockedPresentation:Boolean=false): EditCommand {
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
         require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues, assets=after.assets, views=after.views,
-            systems=after.systems,libraryItems=after.libraryItems,materials=after.materials,
+            systems=after.systems,libraryItems=after.libraryItems,materials=after.materials,levels=after.levels,
             project=before.project.copy(settings=after.project.settings)) == after) {
             "Drawing edits can change only elements, library definitions, materials, layers, systems, settings, groups and issues"
         }
+        require(before.levels.size==after.levels.size && before.levels.zip(after.levels).all {(a,b)->a.copy(ceiling=b.ceiling)==b}) {"Only ceiling settings can change through drawing level edits"}
         val old = before.elements.withIndex().associateBy { it.value.id }
         val next = after.elements.withIndex().associateBy { it.value.id }
         require(old.size == before.elements.size && next.size == after.elements.size) { "Duplicate object IDs" }
@@ -80,6 +81,7 @@ object EditCommands {
             views = if(before.views==after.views)null else LinkPatch(before.views,after.views),
             systems = if(before.systems==after.systems)null else LinkPatch(before.systems,after.systems),
             libraryItems = if(before.libraryItems==after.libraryItems)null else LinkPatch(before.libraryItems,after.libraryItems),
+            levels=if(before.levels==after.levels)null else LinkPatch(before.levels,after.levels),
             materials = if(before.materials==after.materials)null else LinkPatch(before.materials,after.materials),
             settings = after.project.settings.copy(canvasLayout=before.project.settings.canvasLayout).let {nextSettings->
                 if(before.project.settings==nextSettings)null else ValuePatch(before.project.settings,nextSettings)
@@ -126,7 +128,7 @@ object EditCommands {
         }
         val nextSettings=after.project.settings
         require(before.project.settings.copy(hiddenLevelIds=nextSettings.hiddenLevelIds,
-            showHiddenObjects=nextSettings.showHiddenObjects,showMeasurements=nextSettings.showMeasurements,
+            showHiddenObjects=nextSettings.showHiddenObjects,showMeasurements=nextSettings.showMeasurements,showCeilings=nextSettings.showCeilings,
             autoXrayFrontWalls=nextSettings.autoXrayFrontWalls)==nextSettings) {
             "A presentation change cannot change unrelated project settings"
         }
@@ -159,7 +161,8 @@ object EditCommands {
         "Mirror objects",
     )
 
-    fun delete(document: ProjectDocument, ids: Set<ElementId>): EditCommand {
+    fun delete(document: ProjectDocument, selectedIds: Set<ElementId>): EditCommand {
+        val ids=selectedIds+document.elements.filter {(it.properties[CEILING_OWNER] as? ParameterValue.Text)?.value?.let(::ElementId) in selectedIds}.map {it.id}
         selected(document, ids).forEach { requireEditable(document, it) }
         val replacements = LinkedHashMap<ElementId, Element?>()
         for (element in document.elements) {
@@ -249,7 +252,8 @@ object EditCommands {
                         startAnchor=r.startAnchor?.takeIf {it.elementId in ids.values},endAnchor=r.endAnchor?.takeIf {it.elementId in ids.values},
                         fittingOverrides=r.fittingOverrides.mapKeys {(k,_)->nodeIds[k] ?: k},suppressedFittings=r.suppressedFittings.map {nodeIds[it] ?: it}.toSet()))
                 }},
-                properties=element.properties.filterKeys {it!="routingOwner" && it!="routingNode" && it!=WALL_DEVICE_FEED}+
+                properties=element.properties.filterKeys {it!="routingOwner" && it!="routingNode" && it!=WALL_DEVICE_FEED && it!=CEILING_OWNER}+
+                    ((element.properties[CEILING_OWNER] as? ParameterValue.Text)?.value?.let {ids[ElementId(it)]}?.let {mapOf(CEILING_OWNER to ParameterValue.Text(it.value))} ?: emptyMap())+
                     ((element.properties[WALL_DEVICE_FEED] as? ParameterValue.Text)?.value?.let {ids[ElementId(it)]}?.let {mapOf(WALL_DEVICE_FEED to ParameterValue.Text(it.value))} ?: emptyMap()),
             )
         }
@@ -373,6 +377,7 @@ object EditCommands {
         }
         val faces=wallFrames(document.copy(elements=all)).mapTo(hashSetOf()){it.host.id to it.roomSide}
         for (element in changed) {
+            element.properties[CEILING_OWNER]?.let {owner->require(owner is ParameterValue.Text && all.any {it.id.value==owner.value && it.body is ElementBody.Room} && element.body is ElementBody.Slab){"A ceiling must belong to an existing room"}}
             element.wallService()?.let {require(it.wallId to it.roomSide in faces){"The wall service host no longer exists"}}
             require(element.levelId == null || element.levelId in levels) { "Object level no longer exists" }
             require(element.systemId == null || element.systemId in systems) { "Object system no longer exists" }

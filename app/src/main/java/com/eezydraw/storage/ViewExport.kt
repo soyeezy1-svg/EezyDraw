@@ -81,7 +81,7 @@ object ViewExport {
         val mode = request.frame.viewMode
         val autoWalls = request.frame.autoXrayFrontWalls || request.document.project.settings.autoXrayFrontWalls
         val surfaces = if (mode != ViewMode.WIREFRAME || autoWalls && request.frame.is3D || hasXrayOverrides(request.document))
-            com.eezydraw.core.geometry.SectionClip.surfaces(buildSurfaceScene(request.document),request.frame.sectionBox) else null
+            com.eezydraw.core.geometry.SectionClip.surfaces(buildSurfaceScene(request.document,planView=!request.frame.is3D),request.frame.sectionBox) else null
         val parts = scene.chunks.map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) } +
             surfaces?.chunks.orEmpty().map { RoomWallPart(it.roomSide, it.bounds, it.roomCenter) }
         val walls = RoomWallIndex(parts)

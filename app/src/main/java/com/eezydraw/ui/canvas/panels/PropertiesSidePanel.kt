@@ -52,13 +52,14 @@ fun PropertiesSidePanel(
     onApplyLibrary: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
     onUpdateAllOfType: ((ElementProperties, LibraryInstanceProperties) -> Unit)? = null,
     onResetToLibraryDefault: (() -> Unit)? = null,
+    extraContent:(@Composable ()->Unit)?=null,
 ) {
     if(embedded) {
         PropertiesEditor(properties,units,precision,onApply,onDismiss,
             modifier.fillMaxSize().testTag("properties_side_panel").padding(12.dp),
             lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
             onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
-            onResetToLibraryDefault=onResetToLibraryDefault)
+            onResetToLibraryDefault=onResetToLibraryDefault,extraContent=extraContent)
         return
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
@@ -82,7 +83,7 @@ fun PropertiesSidePanel(
                         Modifier.fillMaxWidth().weight(1f, fill = false).padding(12.dp),
                         lockMode=lockMode,layerLocked=layerLocked,libraryProperties=libraryProperties,
                         onApplyLibrary=onApplyLibrary,onUpdateAllOfType=onUpdateAllOfType,
-                        onResetToLibraryDefault=onResetToLibraryDefault)
+                        onResetToLibraryDefault=onResetToLibraryDefault,extraContent=extraContent)
                 }
             }
         }

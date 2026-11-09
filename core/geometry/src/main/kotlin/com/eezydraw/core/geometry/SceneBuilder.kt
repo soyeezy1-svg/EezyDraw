@@ -33,6 +33,7 @@ fun buildDrawingScene(
     document: ProjectDocument,
     elementIds: Set<ElementId>? = null,
     planSymbols: Boolean = false,
+    architecturalCuts:Boolean=true,
 ): DrawingScene {
     val layers = document.layers.associateBy { it.id }
     val systems = document.systems.associateBy { it.id }
@@ -45,7 +46,13 @@ fun buildDrawingScene(
     val chunks = ChunkCollector()
     val wallFrames=wallFrames(document).associateBy {it.host.id to it.roomSide}
     val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
-    val wallCuts=if(document.project.settings.wallServices.showCuts)allWallCuts else emptyMap()
+    val architecture=document.elements.mapNotNull {e->(e.body as? ElementBody.Component)?.let {b->if(library[b.libraryItemId]?.openingKind()!=null)e.id else null}}.toSet()
+    val wallCuts=allWallCuts.mapValues {(key,cuts)->cuts.filter {document.project.settings.wallServices.showCuts || architecturalCuts && it.sourceId in architecture}.map {cut->
+        if(planSymbols && cut.sourceId in architecture) {
+            val l=cut.outline.minOf {it.x};val r=cut.outline.maxOf {it.x};val h=wallFrames[key]?.height ?: 1.0
+            cut.copy(outline=listOf(Point2(l,0.0),Point2(r,0.0),Point2(r,h),Point2(l,h)))
+        }else cut
+    }}
     val sectionHeight=document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION}
     val presentation = ScenePresentation(document,planView=planSymbols)
     for (element in document.elements) {
@@ -60,7 +67,7 @@ fun buildDrawingScene(
         val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
         val color = element.colourOverride ?: system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
             ?: layer?.colourArgb ?: 0xFF334455
-        val partSide = if(element.body is ElementBody.Wall)presentation.wallSide(element) else null
+        val partSide = if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter = presentation.roomCenter(element)
         fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { originalA,originalB ->
             val plane=sectionHeight?.plus(document.levels.find {it.id==element.levelId}?.elevation ?: 0.0)
@@ -95,7 +102,6 @@ fun buildDrawingScene(
                         if(presentation.linkedWall(element,side)!=null) {
                             // These edges bound the room caps; the linked wall supplies its physical sides.
                             emit(point(a.x,a.y),point(b.x,b.y))
-                            emit(point(a.x,a.y,body.ceilingHeight),point(b.x,b.y,body.ceilingHeight))
                             continue
                         }
                         val mode=presentation.sideDisplay(element,side)
@@ -132,6 +138,12 @@ fun buildDrawingScene(
                 }
             }else polyline(body.fabricationPath ?: body.path, false, emit)
             is ElementBody.Component -> {
+                val opening=library[body.libraryItemId]?.openingKind()
+                if(opening!=null) {
+                    val swing=body.wallService?.options?.swing ?: DoorSwing()
+                    (openingGeometry(opening,body.size,swing,planSymbols)+if(planSymbols)openingPlanSymbol(opening,body.size,swing)else emptyList()).forEach {drawShape(it,emit,document.project.settings,transform::apply)}
+                    continue
+                }
                 val definition = library[body.libraryItemId]
                 if (definition == null || definition.geometry.isEmpty()) {
                     box(body.size, emit)

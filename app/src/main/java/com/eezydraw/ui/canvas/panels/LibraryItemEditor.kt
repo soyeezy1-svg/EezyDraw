@@ -34,6 +34,8 @@ internal fun LibraryItemEditor(initial: LibraryItem, creating: Boolean, onSave: 
     var mountingHeight by remember(initial) { mutableStateOf((initial.defaultMountingHeight * 1000).toString()) }
     var system by remember(initial) { mutableStateOf(initial.defaultSystem) }
     var colour by remember(initial) { mutableStateOf(initial.defaultColourArgb.toString(16).uppercase()) }
+    var opening by remember(initial){mutableStateOf(initial.openingKind())}
+    var ceilingObject by remember(initial){mutableStateOf(initial.ceiling)}
     var mounting by remember(initial) { mutableStateOf(initial.mounting) }
     var error by remember { mutableStateOf<String?>(null) }
     var readingPhoto by remember { mutableStateOf(false) }
@@ -91,7 +93,7 @@ internal fun LibraryItemEditor(initial: LibraryItem, creating: Boolean, onSave: 
                 defaultSystem=system.trim(),defaultColourArgb=argb,mounting=mounting,materialId=null,
                 parameters=source.parameters-reservedKeys,builtIn=if(asNew) false else source.builtIn,
                 version=if(asNew) 1 else source.version+1,
-                fitting=source.fitting?.let { if(asNew) it.copy(baseTypeId=newId) else it })
+                fitting=source.fitting?.let { if(asNew) it.copy(baseTypeId=newId) else it },opening=opening.takeIf {mounting==MountingType.WALL},ceiling=ceilingObject && mounting==MountingType.CEILING)
             require(next.name.length <= 120 && next.category.length <= 120) { "Names must be at most 120 characters." }
             onSave(next)
             onDismiss()
@@ -115,6 +117,12 @@ internal fun LibraryItemEditor(initial: LibraryItem, creating: Boolean, onSave: 
             OutlinedTextField(height,{height=it},label={Text("Height (mm)")},singleLine=true,modifier=Modifier.testTag("library_edit_height"))
             Text("Mounting type",style=MaterialTheme.typography.labelMedium)
             LibraryChoice(MountingType.entries.map { it.name },mounting.ordinal) {mounting=MountingType.entries[it]}
+            if(mounting==MountingType.WALL) {
+                Text("Wall item type")
+                val kinds=(if((source.catalogSourceId ?: source.id).value.startsWith("eezy.architecture.") && source.openingKind()!=null)emptyList<OpeningKind?>()else listOf(null))+OpeningKind.entries
+                LibraryChoice(kinds.map {it?.name?.lowercase()?.replace('_',' ') ?: "Device (surface / recess)"},kinds.indexOf(opening).coerceAtLeast(0)){opening=kinds[it]}
+            }
+            if(mounting==MountingType.CEILING)Row {Checkbox(ceilingObject,{ceilingObject=it});Text("Ceiling object")}
             OutlinedTextField(mountingHeight,{mountingHeight=it},label={Text("Default mounting height (mm)")},singleLine=true)
             OutlinedTextField(system,{system=it},label={Text("System")},singleLine=true,modifier=Modifier.testTag("library_edit_system"))
             OutlinedTextField(colour,{colour=it},label={Text("Colour (ARGB hex)")},singleLine=true,modifier=Modifier.testTag("library_edit_colour"))
