@@ -33,7 +33,7 @@ object RoomWalls {
      var id=prior?.takeIf {it !in used && before.elements.any {e->e.id==it && GENERATED_ROOM_WALL in e.properties}} ?: ElementId(UUID.nameUUIDFromBytes(key.toByteArray()).toString())
      if(id in used)id=ElementId(UUID.nameUUIDFromBytes((key+edge.room.id.value).toByteArray()).toString())
      used+=id
-     val material=materials.find {it.name.equals(edge.options.material,true)} ?: Material(MaterialId(UUID.nameUUIDFromBytes(edge.options.material.toByteArray()).toString()),edge.options.material,0xFFAAAAAA).also {materials+=it}
+     val material=materials.find {it.name.equals(edge.options.material,true)} ?: Material(MaterialId(UUID.nameUUIDFromBytes(edge.options.material.toByteArray()).toString()),edge.options.material,MattePalette.WALL).also {materials+=it}
      val room=edge.room.body as ElementBody.Room;val ring=if(edge.ring==null)room.boundary.outer else room.boundary.holes[edge.ring]
      val ccw=ring.indices.sumOf {i->val p=ring[i];val q=ring[(i+1)%ring.size];p.x*q.y-q.x*p.y}>0
      val insideLeft=(ccw==(edge.ring==null))==forward

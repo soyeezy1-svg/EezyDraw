@@ -14,7 +14,7 @@ data class ModelExportOptions(val format:ModelFormat=ModelFormat.IFC,val scope:M
     val units:ModelUnits=ModelUnits.M,val levelId:LevelId?=null,val selected:Set<ElementId> = emptySet(),
     val systems:Set<String> = emptySet(),val walls:Boolean=true,val slabs:Boolean=true,val library:Boolean=true,
     val routes:Boolean=true,val fittings:Boolean=true,val underfloor:Boolean=true,val cuts:ModelCuts=ModelCuts.CUTS,val planView:Boolean=true,val upAxis:ModelUpAxis?=null,val moveToOrigin:Boolean=false,val appVersion:String="unknown")
-data class ExportMesh(val element:Element,val name:String,val vertices:List<Point3>,val host:ElementId?=null)
+data class ExportMesh(val element:Element,val name:String,val vertices:List<Point3>,val host:ElementId?=null,val colourArgb:Long=MattePalette.OTHER)
 
 /** Snapshot-only conversion. All geometry is in world metres, including the project origin. */
 object ModelExport {
@@ -46,7 +46,9 @@ object ModelExport {
             val vertices=chunks.filter {c->options.scope!=ModelScope.VISIBLE || c.roomSide?.let {side->byId[side.roomId]?.let {presentation.sideDisplay(it,side)!=ObjectDisplay.HIDDEN}}!=false}.flatMap {c->
                 (c.vertices.indices step 10).map {i->Point3(c.origin.x+c.vertices[i]+document.project.origin.x,c.origin.y+c.vertices[i+1]+document.project.origin.y,c.origin.z+c.vertices[i+2]+document.project.origin.z)}
             }
-            ExportMesh(element,element.name.ifBlank {(element.body as? ElementBody.Component)?.let {definitions[it.libraryItemId]?.name} ?: element.body::class.simpleName.orEmpty()},vertices)
+            ExportMesh(element,element.name.ifBlank {(element.body as? ElementBody.Component)?.let {definitions[it.libraryItemId]?.name} ?: element.body::class.simpleName.orEmpty()},vertices,
+                colourArgb=renderColour(element,document.layers.find {it.id==element.layerId},document.systems.find {it.id==element.systemId},
+                    (element.materialId ?: (element.body as? ElementBody.Component)?.let {definitions[it.libraryItemId]?.materialId})?.let {id->document.materials.find {it.id==id}}))
         }.filter {it.vertices.isNotEmpty()}.toMutableList()
         if(options.cuts==ModelCuts.SEPARATE) {
             val frames=wallFrames(document).associateBy {it.host.id to it.roomSide}
@@ -74,9 +76,9 @@ object ModelExport {
         when(options.format){ModelFormat.IFC->writeIfc(document,meshes,options,output,shift);ModelFormat.GLTF,ModelFormat.GLB->gltf(meshes,options,output,shift);else->{
             val w=output.bufferedWriter();var index=1;var normalIndex=1
             val solidName="EEZY_DRAW_upAxis_${options.resolvedUpAxis().name}_units_${options.units.name}_app_${options.appVersion.replace(Regex("[^A-Za-z0-9._-]"),"_")}_origin_${if(options.moveToOrigin)"MOVE"else "PROJECT"}_offset_${shift.x}_${shift.y}_${shift.z}"
-            if(options.format==ModelFormat.OBJ){w.appendLine("# EEZY DRAW ${exportCoordinateNote(options,shift)}");w.appendLine("# Forward axis: ${if(options.resolvedUpAxis()==ModelUpAxis.Y_UP)"-Z"else "+Y"}")}else w.appendLine("solid $solidName")
+            if(options.format==ModelFormat.OBJ){w.appendLine("# EEZY DRAW ${exportCoordinateNote(options,shift)}");w.appendLine("# Vertex RGB colours use the common OBJ vertex-colour extension");w.appendLine("# Forward axis: ${if(options.resolvedUpAxis()==ModelUpAxis.Y_UP)"-Z"else "+Y"}")}else w.appendLine("solid $solidName")
             for(m in meshes){if(options.format==ModelFormat.OBJ)w.appendLine("o "+m.name.replace(Regex("[\\r\\n#]"),"_"))
-                for(t in m.vertices.chunked(3))if(options.format==ModelFormat.OBJ){for(p in t)w.appendLine("v ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");val n=triangleNormal(t[0],t[1],t[2]);w.appendLine("vn ${n.x} ${n.y} ${n.z}");w.appendLine("f $index//$normalIndex ${index+1}//$normalIndex ${index+2}//$normalIndex");index+=3;normalIndex++}else {
+                for(t in m.vertices.chunked(3))if(options.format==ModelFormat.OBJ){for(p in t)w.appendLine("v ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor} ${rgb(m.colourArgb).joinToString(" ")}");val n=triangleNormal(t[0],t[1],t[2]);w.appendLine("vn ${n.x} ${n.y} ${n.z}");w.appendLine("f $index//$normalIndex ${index+1}//$normalIndex ${index+2}//$normalIndex");index+=3;normalIndex++}else {
                     val n=triangleNormal(t[0],t[1],t[2])
                     w.appendLine("facet normal ${n.x} ${n.y} ${n.z}\nouter loop");for(p in t)w.appendLine("vertex ${p.x*options.units.factor} ${p.y*options.units.factor} ${p.z*options.units.factor}");w.appendLine("endloop\nendfacet")}}
             if(options.format==ModelFormat.STL)w.appendLine("endsolid $solidName");w.flush()
@@ -92,12 +94,13 @@ object ModelExport {
             views+="{\"buffer\":0,\"byteOffset\":$offset,\"byteLength\":${points.size*24},\"byteStride\":24,\"target\":34962}"
             accessors+="{\"bufferView\":$i,\"componentType\":5126,\"count\":${points.size},\"type\":\"VEC3\",\"min\":[${points.minOf {it.x}},${points.minOf {it.y}},${points.minOf {it.z}}],\"max\":[${points.maxOf {it.x}},${points.maxOf {it.y}},${points.maxOf {it.z}}]}"
             accessors+="{\"bufferView\":$i,\"byteOffset\":12,\"componentType\":5126,\"count\":${points.size},\"type\":\"VEC3\"}"
-            meshJson+="{\"name\":${json(m.name)},\"primitives\":[{\"attributes\":{\"POSITION\":${i*2},\"NORMAL\":${i*2+1}},\"mode\":4}]}"
+            meshJson+="{\"name\":${json(m.name)},\"primitives\":[{\"attributes\":{\"POSITION\":${i*2},\"NORMAL\":${i*2+1}},\"material\":$i,\"mode\":4}]}"
             val scale=1/options.units.factor
             nodes+="{\"mesh\":$i,\"name\":${json(m.name)},\"translation\":[${origin.x},${origin.y},${origin.z}],\"scale\":[$scale,$scale,$scale]}"
         }
+        val materials=meshes.map {m->"{\"name\":${json(m.name+" matte")},\"doubleSided\":true,\"alphaMode\":${json(if((m.colourArgb shr 24 and 255)<255)"BLEND"else "OPAQUE")},\"pbrMetallicRoughness\":{\"baseColorFactor\":[${rgb(m.colourArgb).joinToString()},${(m.colourArgb shr 24 and 255)/255.0}],\"metallicFactor\":0,\"roughnessFactor\":0.9}}"}
         val uri=if(options.format==ModelFormat.GLTF)",\"uri\":\"data:application/octet-stream;base64,${Base64.getEncoder().encodeToString(buffer.array())}\""else ""
-        val text="{\"asset\":{\"version\":\"2.0\",\"generator\":${json("EEZY DRAW "+options.appVersion)},\"extras\":{\"sourceUnits\":${json(options.units.name)},\"upAxis\":${json(options.resolvedUpAxis().name)},\"coordinateUnits\":\"M\",\"appVersion\":${json(options.appVersion)},\"originPolicy\":${json(if(options.moveToOrigin)"MOVE_TO_ORIGIN"else "PROJECT")},\"sourceOffsetMetres\":[${shift.x},${shift.y},${shift.z}]}},\"scene\":0,\"scenes\":[{\"nodes\":[${meshes.indices.joinToString()}]}],\"nodes\":[${nodes.joinToString()}],\"meshes\":[${meshJson.joinToString()}],\"buffers\":[{\"byteLength\":$size$uri}],\"bufferViews\":[${views.joinToString()}],\"accessors\":[${accessors.joinToString()}]}"
+        val text="{\"asset\":{\"version\":\"2.0\",\"generator\":${json("EEZY DRAW "+options.appVersion)},\"extras\":{\"sourceUnits\":${json(options.units.name)},\"upAxis\":${json(options.resolvedUpAxis().name)},\"coordinateUnits\":\"M\",\"appVersion\":${json(options.appVersion)},\"originPolicy\":${json(if(options.moveToOrigin)"MOVE_TO_ORIGIN"else "PROJECT")},\"sourceOffsetMetres\":[${shift.x},${shift.y},${shift.z}]}},\"scene\":0,\"scenes\":[{\"nodes\":[${meshes.indices.joinToString()}]}],\"nodes\":[${nodes.joinToString()}],\"meshes\":[${meshJson.joinToString()}],\"materials\":[${materials.joinToString()}],\"buffers\":[{\"byteLength\":$size$uri}],\"bufferViews\":[${views.joinToString()}],\"accessors\":[${accessors.joinToString()}]}"
         if(options.format==ModelFormat.GLTF){output.write(text.toByteArray());return}
         val data=text.toByteArray();val padded=(data.size+3)/4*4
         val header=ByteBuffer.allocate(20).order(ByteOrder.LITTLE_ENDIAN).putInt(0x46546c67).putInt(2).putInt(12+8+padded+8+size).putInt(padded).putInt(0x4e4f534a).array()
@@ -105,3 +108,5 @@ object ModelExport {
     }
 }
 internal fun json(s:String)="\""+s.flatMap {c->when(c){'"'->"\\\"";'\\'->"\\\\";'\n'->"\\n";'\r'->"\\r";else->if(c.code<32)" "else c.toString()}.toList()}.joinToString("")+"\""
+
+internal fun rgb(colour:Long)=listOf((colour shr 16 and 255)/255.0,(colour shr 8 and 255)/255.0,(colour and 255)/255.0)

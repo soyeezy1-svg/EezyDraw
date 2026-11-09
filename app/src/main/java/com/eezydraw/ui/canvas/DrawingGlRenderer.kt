@@ -1,5 +1,7 @@
 package com.eezydraw.ui.canvas
 
+import com.eezydraw.core.geometry.*
+import com.eezydraw.core.model.*
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import com.eezydraw.core.editing.EditDelta
@@ -36,12 +38,25 @@ import kotlin.math.tan
  * gestures change only uniforms, culling and a bounded construction-grid buffer. All origin
  * subtraction happens in doubles before values reach the GPU.
  */
-internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> Unit = {}, private val reportError: (String) -> Unit) : GLSurfaceView.Renderer {
+internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> Unit = {}, private val publishDiagnostics:(RenderDiagnostics)->Unit={}, private val reportError: (String) -> Unit) : GLSurfaceView.Renderer {
     private data class RenderState(val scene: DrawingScene?, val frame: CanvasFrame)
     private val state = AtomicReference(RenderState(null, CanvasFrame(Viewport2D(), OrbitCamera())))
     private val disposed = AtomicBoolean(false)
 
     // The fields below belong exclusively to the GL thread.
+    private val adaptive=AdaptiveGraphics()
+    private val fxaa=FxaaPass()
+    private val multisample=MultisampleTarget()
+    private var samples=0
+    private var supportsResolve=false
+    private var surfaceInfoPending=true
+    private var depthBits=0
+    private var fragmentHighPrecision=true
+    private var effectiveQuality=RenderQuality.QUALITY
+    private var lodCount=0
+    private var lodProjection=LodProjection(OrbitCamera(),1)
+    private var uploadedShadowScene:SurfaceScene?=null
+    private var shadowChunks=emptyList<GpuSurfaceChunk>()
     private var program = 0
     private var positionAttribute = -1
     private var colorAttribute = -1
@@ -95,6 +110,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // Handles from the old EGL context are invalid, even when the CPU scene is unchanged.
+        fxaa.contextLost();adaptive.reset();surfaceInfoPending=true;shadowChunks=emptyList();uploadedShadowScene=null
         program = 0
         gridBuffer = 0
         chunks = emptyList()
@@ -145,6 +161,10 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+            val bits=IntArray(1);GLES20.glGetIntegerv(GLES20.GL_DEPTH_BITS,bits,0);depthBits=bits[0]
+            GLES20.glGetIntegerv(GLES20.GL_SAMPLES,bits,0);samples=bits[0]
+            supportsResolve=Regex("OpenGL ES [3-9]").containsMatchIn(GLES20.glGetString(GLES20.GL_VERSION).orEmpty())
+            multisample.contextCreated(supportsResolve)
             checkGlUpload("initializing drawing state")
         } catch (error: IllegalStateException) {
             releaseGlResources()
@@ -161,13 +181,18 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
 
     override fun onDrawFrame(gl: GL10?) {
         val snapshot = state.get()
-        val current = snapshot.frame
+        val current = snapshot.frame.let {f->if(f.is3D && f.orbit.clip==null && snapshot.scene!=null)
+            f.copy(orbit=f.orbit.withSceneClipping(snapshot.scene.boundsForLevel(f.levelId))) else f}
+        val sample=adaptive.frame(System.nanoTime(),current.quality,current.graphics.automaticQuality && current.is3D,current.motionActive)
+        effectiveQuality=adaptive.quality;lodCount=0;lodProjection=LodProjection(current.orbit,height)
+        multisample.begin(width,height,requestedSamples(effectiveQuality,current.graphics.antiAliasing && current.is3D))
+        samples=multisample.samples
         if (current.dark) GLES20.glClearColor(0.055f, 0.071f, 0.10f, 1f)
         else GLES20.glClearColor(0.97f, 0.98f, 0.99f, 1f)
         GLES20.glColorMask(true, true, true, true)
         GLES20.glDepthMask(true)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-        if (disposed.get() || program == 0 || surfaceShader == null) return
+        if (disposed.get() || program == 0 || surfaceShader == null) {GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER,0);return}
 
         val pendingScene = snapshot.scene
         if (pendingScene !== uploadedScene && !uploadScene(pendingScene)) return
@@ -210,6 +235,8 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
         if (current.selectionMeasurementScene !== selectionMeasurementCache.scene &&
             !uploadExtraLines(current.selectionMeasurementScene, selectionMeasurementCache)) return
 
+        val shadows=current.contactShadowScene.takeIf {current.selectionDelta==null && current.is3D && current.graphics.contactShadows && effectiveQuality!=RenderQuality.PERFORMANCE && passes.lighting>0 && !passes.transparent}
+        if(shadows!==uploadedShadowScene && !uploadShadows(shadows))return
         val planDepth = if (!current.is3D && surfacePassActive) planDepthRange(pendingScene, current, 0.0) else null
         val planOriginZ = planDepth?.let { it.first / 2 + it.second / 2 } ?: current.floorElevation
         val origin = if (current.is3D) current.orbit.target else
@@ -259,6 +286,11 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
                 drawSurfaces(surfaceChunks, current, matrix, origin, halfWidth, halfHeight, transparent)
                 drawSurfaces(selectionSurfaceChunks, current, matrix, origin, halfWidth, halfHeight, transparent,
                     current.selectionDelta, selected = true)
+                if(!transparent && shadowChunks.isNotEmpty()) {
+                    GLES20.glDepthMask(false);GLES20.glPolygonOffset(-1f,-1f)
+                    drawSurfaces(shadowChunks,current,matrix,origin,halfWidth,halfHeight,false)
+                    GLES20.glDepthMask(true);GLES20.glPolygonOffset(1f,1f)
+                }
             }
             GLES20.glColorMask(true, true, true, true)
             GLES20.glDepthMask(true)
@@ -302,6 +334,13 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
         }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         disableLineAttributes()
+        val resolvedTexture=multisample.finish()
+        val usedFxaa=current.graphics.antiAliasing && current.is3D && fxaa.apply(width,height,resolvedTexture)
+        if(resolvedTexture!=0 && !usedFxaa)multisample.present()
+        if(surfaceInfoPending || sample!=null && (current.graphics.showFrameRate || current.graphics.automaticQuality)) {
+            publishDiagnostics(RenderDiagnostics(sample?.first,effectiveQuality,samples,if(samples>0)24 else depthBits,usedFxaa,lodCount,supportsResolve))
+            surfaceInfoPending=false
+        }
         publishLoupe(current.loupe?.let { captureLoupe(it, width, height)?.copy(renderFrame = current, scene = pendingScene) })
         if(pendingScene?.segments?.isNotEmpty()==true)current.performanceCounter?.frame(System.nanoTime())
     }
@@ -361,7 +400,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             val depth = !forceOverlay && chunk.display != ObjectDisplay.WIREFRAME && chunk.display != ObjectDisplay.HIDDEN &&
                 !plan.transparent && (current.is3D || surfacePassActive)
             if (depth) GLES20.glEnable(GLES20.GL_DEPTH_TEST) else GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-            GLES20.glUniform1f(lineOpacityUniform, objectEdgeOpacity(chunk.display, front))
+            GLES20.glUniform1f(lineOpacityUniform, objectEdgeOpacity(chunk.display, front)*if(forceOverlay)1f else edgeEmphasis(objectViewMode(current.viewMode,chunk.display,front)))
             if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
             boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
             if (current.is3D) {
@@ -382,7 +421,9 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
                 (transformedOrigin.z - origin.z).toFloat() else 0f
             if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
             GLES20.glUniform3f(offsetUniform, x, y, z)
-            drawBuffer(gpu.buffer, chunk.vertices.size / FLOATS_PER_VERTEX)
+            val lod=current.is3D && !forceOverlay && delta==null && chunk.lodAllowed && gpu.lodCount>0 && lodProjection.diameter(chunk.bounds)<lodPixelThreshold(effectiveQuality)
+            if(lod)lodCount++
+            drawBuffer(if(lod)gpu.lodBuffer else gpu.buffer,if(lod)gpu.lodCount else chunk.vertices.size / FLOATS_PER_VERTEX)
         }
     }
 
@@ -406,10 +447,17 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
         val outward = if (current.is3D) Point3(cos(current.orbit.pitch) * cos(current.orbit.yaw),
             cos(current.orbit.pitch) * sin(current.orbit.yaw), sin(current.orbit.pitch)) else Point3(z = 1.0)
         GLES20.glUniform3f(shader.viewDirection, outward.x.toFloat(), outward.y.toFloat(), outward.z.toFloat())
+        val key=if(current.is3D)cameraKeyLight(current.orbit)else normalizeRender(Point3(.2,-.3,.9))
+        val coefficients=lightCoefficients(current.graphics.lighting)
+        GLES20.glUniform3f(shader.keyLight,key.x.toFloat(),key.y.toFloat(),key.z.toFloat())
+        GLES20.glUniform2f(shader.lightStrength,coefficients.first.toFloat(),coefficients.second.toFloat())
         GLES20.glEnableVertexAttribArray(shader.position)
         GLES20.glEnableVertexAttribArray(shader.normal)
         GLES20.glEnableVertexAttribArray(shader.color)
-        val ordered = if (transparentPass) batches.sortedBy { gpu ->
+        val ordered = if (transparentPass) batches.filter {gpu->
+            (current.levelId==null || gpu.source.levelId==null || gpu.source.levelId==current.levelId) &&
+                objectRenderPlan(current.viewMode,gpu.source.display,roomWalls.isFront(gpu.source.roomSide,current.orbit,current.autoXrayFrontWalls,current.is3D)).transparent
+        }.sortedBy { gpu ->
             val bounds = gpu.source.bounds
             val center = Point3(bounds.min.x / 2 + bounds.max.x / 2,
                 bounds.min.y / 2 + bounds.max.y / 2, bounds.min.z / 2 + bounds.max.z / 2)
@@ -421,9 +469,6 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             val front = roomWalls.isFront(chunk.roomSide, current.orbit, current.autoXrayFrontWalls, current.is3D)
             val passes = objectRenderPlan(current.viewMode, chunk.display, front)
             if (!passes.surfaces || passes.transparent != transparentPass) continue
-            GLES20.glColorMask(!passes.depthOnly, !passes.depthOnly, !passes.depthOnly, !passes.depthOnly)
-            GLES20.glUniform1f(shader.lighting, passes.lighting.toFloat())
-            GLES20.glUniform1f(shader.opacity, if (passes.transparent) .28f else 1f)
             if (current.levelId != null && chunk.levelId != null && chunk.levelId != current.levelId) continue
             boundsRelativeToCamera(chunk.bounds, origin, delta, linear)
             if (current.is3D) {
@@ -435,12 +480,28 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             val y = (position.y - origin.y).toFloat()
             val z = (position.z - origin.z).toFloat()
             if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
+            GLES20.glColorMask(!passes.depthOnly, !passes.depthOnly, !passes.depthOnly, !passes.depthOnly)
+            val shadow=chunk.material==RenderMaterial.CONTACT_SHADOW
+            if(!transparentPass)GLES20.glPolygonOffset(if(shadow)-1f else chunk.depthBias,if(shadow)-1f else chunk.depthBias)
+            GLES20.glUniform1f(shader.lighting,if(shadow)0f else passes.lighting.toFloat())
+            GLES20.glUniform1f(shader.dark,if(current.dark && !shadow)1f else 0f)
+            val detail=when(effectiveQuality){RenderQuality.PERFORMANCE->TextureDetail.LOW;RenderQuality.BALANCED->if(current.graphics.textureDetail==TextureDetail.HIGH)TextureDetail.MEDIUM else current.graphics.textureDetail;else->current.graphics.textureDetail}
+            val grain=if(detail==TextureDetail.HIGH).035f else if(detail==TextureDetail.MEDIUM).02f else 0f
+            GLES20.glUniform1f(shader.grain,if(shadow || !current.is3D || !fragmentHighPrecision)0f else grain)
+            GLES20.glUniform2f(shader.textureDensity,
+                (if(current.orbit.projection==Projection.PERSPECTIVE)height/(2*tan(OrbitCamera.FOV_Y/2))else height/current.orbit.orthographicHeight).toFloat(),
+                if(current.orbit.projection==Projection.PERSPECTIVE)1f else 0f)
+            GLES20.glUniform1f(shader.frequency,textureFrequency(detail).toFloat())
+            GLES20.glUniform1f(shader.opacity, if (passes.transparent) .28f else 1f)
             GLES20.glUniform3f(shader.offset, x, y, z)
-            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, gpu.buffer)
+            GLES20.glUniform3f(shader.textureOffset,(position.x%64).toFloat(),(position.y%64).toFloat(),(position.z%64).toFloat())
+            val lod=current.is3D && !selected && delta==null && gpu.lodCount>0 && lodProjection.diameter(chunk.bounds)<lodPixelThreshold(effectiveQuality)
+            if(lod)lodCount++
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, if(lod)gpu.lodBuffer else gpu.buffer)
             GLES20.glVertexAttribPointer(shader.position, 3, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 0)
             GLES20.glVertexAttribPointer(shader.normal, 3, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 3 * FLOAT_BYTES)
             GLES20.glVertexAttribPointer(shader.color, 4, GLES20.GL_FLOAT, false, SURFACE_VERTEX_BYTES, 6 * FLOAT_BYTES)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, chunk.vertices.size / SURFACE_FLOATS_PER_VERTEX)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, if(lod)gpu.lodCount else chunk.vertices.size / SURFACE_FLOATS_PER_VERTEX)
         }
         GLES20.glDisableVertexAttribArray(shader.position)
         GLES20.glDisableVertexAttribArray(shader.normal)
@@ -449,6 +510,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
 
     /** Called on the GL thread, or reclaimed by EGL itself when a disposed surface is detached. */
     fun releaseGlResources() {
+        fxaa.release();multisample.release();deleteShadows()
         if (positionAttribute >= 0) GLES20.glDisableVertexAttribArray(positionAttribute)
         if (colorAttribute >= 0) GLES20.glDisableVertexAttribArray(colorAttribute)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
@@ -520,6 +582,29 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
         } finally { GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0) }
     }
 
+    private fun deleteShadows() {
+        if(shadowChunks.isNotEmpty())GLES20.glDeleteBuffers(shadowChunks.size,shadowChunks.map {it.buffer}.toIntArray(),0)
+        shadowChunks=emptyList();uploadedShadowScene=null
+    }
+    private fun uploadShadows(scene:SurfaceScene?):Boolean {
+        deleteShadows()
+        if(scene==null){return true}
+        val ids=IntArray(scene.chunks.size)
+        try {
+            GLES20.glGenBuffers(ids.size,ids,0)
+            shadowChunks=scene.chunks.mapIndexed {i,chunk->
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER,ids[i])
+                GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER,chunk.vertices.size*4,stage(chunk.vertices,chunk.vertices.size),GLES20.GL_STATIC_DRAW)
+                checkGlUpload("uploading contact shadows")
+                GpuSurfaceChunk(chunk,ids[i])
+            }
+            uploadedShadowScene=scene;return true
+        } catch(error:IllegalStateException) {
+            GLES20.glDeleteBuffers(ids.size,ids,0);shadowChunks=emptyList()
+            reportError("Contact shadows could not be uploaded: ${error.message}");return false
+        }
+    }
+
     private fun uploadSurface(value: SurfaceScene?, selection: Boolean = false): Boolean {
         deleteSurfaceBuffers(selection)
         if (selection) uploadedSelectionSurfaceScene = null else uploadedSurfaceScene = null
@@ -527,7 +612,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             if (selection) uploadedSelectionSurfaceScene = value else uploadedSurfaceScene = value
             return true
         }
-        val ids = IntArray(value.chunks.size)
+        val ids = IntArray(value.chunks.size*2)
         try {
             GLES20.glGenBuffers(ids.size, ids, 0)
             checkGlUpload("allocating surface buffers")
@@ -537,7 +622,13 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
                 GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, chunk.vertices.size * FLOAT_BYTES,
                     stage(chunk.vertices, chunk.vertices.size), GLES20.GL_STATIC_DRAW)
                 checkGlUpload("uploading filled surfaces")
-                GpuSurfaceChunk(chunk, ids[index])
+                val coarse=if(selection)FloatArray(0)else coarseSurface(chunk)
+                if(coarse.isNotEmpty()) {
+                    GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER,ids[value.chunks.size+index])
+                    GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER,coarse.size*4,stage(coarse,coarse.size),GLES20.GL_STATIC_DRAW)
+                    checkGlUpload("uploading distant surfaces")
+                }
+                GpuSurfaceChunk(chunk, ids[index],ids[value.chunks.size+index],coarse.size/10)
             }
             if (selection) { selectionSurfaceChunks = uploaded; uploadedSelectionSurfaceScene = value }
             else { surfaceChunks = uploaded; uploadedSurfaceScene = value }
@@ -552,7 +643,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
 
     private fun deleteSurfaceBuffers(selection: Boolean = false) {
         val batches = if (selection) selectionSurfaceChunks else surfaceChunks
-        if (batches.isNotEmpty()) GLES20.glDeleteBuffers(batches.size, batches.map { it.buffer }.toIntArray(), 0)
+        if (batches.isNotEmpty()) GLES20.glDeleteBuffers(batches.size*2, batches.flatMap {listOf(it.buffer,it.lodBuffer)}.toIntArray(), 0)
         if (selection) selectionSurfaceChunks = emptyList() else surfaceChunks = emptyList()
     }
 
@@ -564,7 +655,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             if (selection) uploadedSelectionScene = value else uploadedScene = value
             return true
         }
-        val ids = IntArray(value.chunks.size)
+        val ids = IntArray(value.chunks.size*2)
         try {
             checkGlUpload("preparing the drawing upload")
             GLES20.glGenBuffers(ids.size, ids, 0)
@@ -577,7 +668,13 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
                 val floats = stage(chunk.vertices, chunk.vertices.size)
                 GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, chunk.vertices.size * FLOAT_BYTES, floats, GLES20.GL_STATIC_DRAW)
                 checkGlUpload("uploading drawing batch ${index + 1} of ${ids.size}")
-                uploaded += GpuChunk(chunk, id)
+                val coarse=if(selection || !chunk.lodAllowed)FloatArray(0)else coarseWire(chunk.vertices)
+                if(coarse.isNotEmpty()) {
+                    GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER,ids[value.chunks.size+index])
+                    GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER,coarse.size*4,stage(coarse,coarse.size),GLES20.GL_STATIC_DRAW)
+                    checkGlUpload("uploading distant edges")
+                }
+                uploaded += GpuChunk(chunk, id,ids[value.chunks.size+index],coarse.size/7)
             }
             if (selection) {
                 selectionChunks = uploaded
@@ -610,7 +707,7 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
     private fun deleteChunkBuffers(selection: Boolean = false) {
         val batches = if (selection) selectionChunks else chunks
         if (batches.isNotEmpty()) {
-            val ids = IntArray(batches.size) { batches[it].buffer }
+            val ids = batches.flatMap {listOf(it.buffer,it.lodBuffer)}.toIntArray()
             GLES20.glDeleteBuffers(ids.size, ids, 0)
             if (selection) selectionChunks = emptyList() else chunks = emptyList()
         }
@@ -798,15 +895,20 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
     }
 
     private fun createSurfaceShader(): SurfaceShader {
-        val id = createProgram(SURFACE_VERTEX_SHADER, SURFACE_FRAGMENT_SHADER)
+        val precision=IntArray(1)
+        GLES20.glGetShaderPrecisionFormat(GLES20.GL_FRAGMENT_SHADER,GLES20.GL_HIGH_FLOAT,IntArray(2),0,precision,0)
+        fragmentHighPrecision=precision[0]>0
+        val vertex=if(fragmentHighPrecision)SURFACE_VERTEX_SHADER else SURFACE_VERTEX_SHADER.replace("varying highp","varying mediump")
+        val fragment=if(fragmentHighPrecision)SURFACE_FRAGMENT_SHADER else SURFACE_FRAGMENT_SHADER.replace("highp","mediump")
+        val id = createProgram(vertex,fragment)
         fun attribute(name: String) = GLES20.glGetAttribLocation(id, name)
         fun uniform(name: String) = GLES20.glGetUniformLocation(id, name)
         val shader = SurfaceShader(id, attribute("aPosition"), attribute("aNormal"), attribute("aColor"),
             uniform("uMatrix"), uniform("uModel"), uniform("uNormalMatrix"), uniform("uOffset"),
-            uniform("uLighting"), uniform("uOpacity"), uniform("uSelection"), uniform("uDark"), uniform("uViewDirection"))
+            uniform("uLighting"), uniform("uOpacity"), uniform("uSelection"), uniform("uDark"), uniform("uViewDirection"),uniform("uKeyLight"),uniform("uLightStrength"),uniform("uTextureOffset"),uniform("uGrain"),uniform("uFrequency"),uniform("uTextureDensity"))
         if (listOf(shader.position, shader.normal, shader.color, shader.matrix, shader.model,
                 shader.normalMatrix, shader.offset, shader.lighting, shader.opacity, shader.selection,
-                shader.dark, shader.viewDirection).any { it < 0 }) {
+                shader.dark, shader.viewDirection,shader.keyLight,shader.lightStrength,shader.textureOffset,shader.grain,shader.frequency,shader.textureDensity).any { it < 0 }) {
             GLES20.glDeleteProgram(id)
             error("Required surface shader inputs are unavailable")
         }
@@ -851,13 +953,14 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
         return shader
     }
 
-    private data class GpuChunk(val source: SceneChunk, val buffer: Int)
+    private data class GpuChunk(val source: SceneChunk, val buffer: Int,val lodBuffer:Int=0,val lodCount:Int=0)
     private class ExtraLineCache(var scene: DrawingScene? = null, var chunks: List<GpuChunk> = emptyList())
-    private data class GpuSurfaceChunk(val source: SurfaceChunk, val buffer: Int)
+    private data class GpuSurfaceChunk(val source: SurfaceChunk, val buffer: Int,val lodBuffer:Int=0,val lodCount:Int=0)
     private data class SurfaceShader(
         val program: Int, val position: Int, val normal: Int, val color: Int,
         val matrix: Int, val model: Int, val normalMatrix: Int, val offset: Int,
         val lighting: Int, val opacity: Int, val selection: Int, val dark: Int, val viewDirection: Int,
+        val keyLight:Int,val lightStrength:Int,val textureOffset:Int,val grain:Int,val frequency:Int,val textureDensity:Int,
     )
 
     private companion object {
@@ -917,14 +1020,19 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             uniform float uSelection;
             uniform float uDark;
             attribute vec3 aPosition;
+            uniform vec3 uTextureOffset;
             attribute vec3 aNormal;
             attribute vec4 aColor;
             varying mediump vec3 vNormal;
+            varying highp vec3 vTexturePosition;
+            varying highp float vDepth;
             varying lowp vec4 vColor;
             void main() {
                 vec3 position = (uModel * vec4(aPosition, 1.0)).xyz + uOffset;
                 gl_Position = uMatrix * vec4(position, 1.0);
                 vNormal = uNormalMatrix * aNormal;
+                vTexturePosition = (uModel * vec4(aPosition,1.0)).xyz + uTextureOffset;
+                vDepth=gl_Position.w;
                 vec3 color = aColor.rgb;
                 float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
                 if (uDark > 0.5 && luminance < 0.08) {
@@ -934,27 +1042,42 @@ internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> U
             }
         """
         const val SURFACE_FRAGMENT_SHADER = """
-            precision mediump float;
+            precision highp float;
             uniform float uLighting;
             uniform float uOpacity;
             uniform vec3 uViewDirection;
+            uniform vec3 uKeyLight;
+            uniform vec2 uLightStrength;
+            uniform float uGrain;
+            uniform float uFrequency;
+            uniform vec2 uTextureDensity;
             varying mediump vec3 vNormal;
+            varying highp vec3 vTexturePosition;
+            varying highp float vDepth;
             varying lowp vec4 vColor;
             void main() {
                 vec3 normal = normalize(vNormal);
                 if (!gl_FrontFacing) normal = -normal;
-                vec3 key = normalize(vec3(0.45, -0.40, 0.80));
+                vec3 key = normalize(uKeyLight);
                 float diffuse = max(dot(normal, key), 0.0);
-                float illumination = 1.0;
+                float illumination = uLighting > 0.5 ? uLightStrength.x + uLightStrength.y * diffuse : 1.0;
                 float specular = 0.0;
-                if (uLighting > 0.5) illumination = 0.36 + 0.64 * diffuse;
                 if (uLighting > 1.5) {
-                    float fill = max(dot(normal, normalize(vec3(-0.60, 0.35, 0.55))), 0.0);
-                    illumination = 0.22 + 0.62 * diffuse + 0.16 * fill;
                     vec3 halfway = normalize(key + normalize(uViewDirection));
-                    specular = 0.22 * pow(max(dot(normal, halfway), 0.0), 32.0);
+                    specular = 0.035 * pow(max(dot(normal, halfway), 0.0), 12.0);
                 }
-                gl_FragColor = vec4(clamp(vColor.rgb * illumination + vec3(specular), 0.0, 1.0), vColor.a * uOpacity);
+                float grain=1.0;
+                if(uGrain>0.0){
+                    float density=uTextureDensity.y>.5 ? uTextureDensity.x/max(.001,vDepth) : uTextureDensity.x;
+                    density*=abs(dot(normal,uViewDirection));
+                    float strength=uGrain*clamp((density/max(.01,uFrequency)-4.0)/8.0,0.0,1.0);
+                    if(strength>0.0){
+                    float f=uFrequency*6.2831853;
+                    float noise=(sin(dot(vTexturePosition,vec3(.75,.5,1.0))*f)+sin(dot(vTexturePosition,vec3(1.0,.75,-.5))*f+1.7)+sin(dot(vTexturePosition,vec3(-.5,1.0,.75))*f+4.1))/3.0;
+                    grain=1.0-strength*.5+strength*.5*noise;
+                    }
+                }
+                gl_FragColor = vec4(clamp(vColor.rgb * illumination * grain + vec3(specular), 0.0, 1.0), vColor.a * uOpacity);
             }
         """
     }

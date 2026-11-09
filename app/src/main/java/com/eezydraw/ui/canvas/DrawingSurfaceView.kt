@@ -37,6 +37,10 @@ data class CanvasFrame(
     val autoXrayFrontWalls: Boolean = false,
     val loupe: LoupeSource? = null,
     val sectionBox:com.eezydraw.core.model.Bounds3?=null,
+    val graphics:com.eezydraw.core.model.GraphicsOptions=com.eezydraw.core.model.GraphicsOptions(),
+    val quality:com.eezydraw.core.model.RenderQuality=com.eezydraw.core.model.RenderQuality.QUALITY,
+    val contactShadowScene:SurfaceScene?=null,
+    val motionActive:Boolean=false,
     val performanceCounter:com.eezydraw.ui.developer.RenderFrameCounter?=null,
 ) {
     init {
@@ -59,6 +63,7 @@ class DrawingSurfaceView @JvmOverloads constructor(
     @Volatile
     var onRenderError: ((String) -> Unit)? = null
 
+    internal var onDiagnostics:((RenderDiagnostics)->Unit)?=null
     internal var onLoupe: ((CapturedLoupe?) -> Unit)? = null
     private val latestLoupe = java.util.concurrent.atomic.AtomicReference<CapturedLoupe?>()
     private val loupeDeliveryPending = AtomicBoolean(false)
@@ -68,13 +73,14 @@ class DrawingSurfaceView @JvmOverloads constructor(
             loupeDeliveryPending.set(false)
             if (!released.get()) onLoupe?.invoke(latestLoupe.get())
         }
-    }, reportError = { message ->
+    }, publishDiagnostics={stats->post {if(!released.get())onDiagnostics?.invoke(stats)}}, reportError = { message ->
         post { if (!released.get()) onRenderError?.invoke(message) }
     })
 
     init {
         setEGLContextClientVersion(2)
-        setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+        setEGLContextFactory(GraphicsEglContextFactory())
+        setEGLConfigChooser(GraphicsEglChooser())
         preserveEGLContextOnPause = true
         setRenderer(drawingRenderer)
         renderMode = RENDERMODE_WHEN_DIRTY
@@ -107,6 +113,7 @@ class DrawingSurfaceView @JvmOverloads constructor(
         if (!released.compareAndSet(false, true)) return
         latestLoupe.set(null)
         onLoupe = null
+        onDiagnostics=null
         drawingRenderer.dispose()
         queueEvent { drawingRenderer.releaseGlResources() }
         requestRender()

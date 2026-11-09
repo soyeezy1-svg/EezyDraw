@@ -1,0 +1,15 @@
+<resources>
+    <string name="graphics_low">Low</string>
+    <string name="graphics_medium">Medium</string>
+    <string name="graphics_high">High</string>
+    <string name="graphics_aa">Anti-aliasing</string>
+    <string name="graphics_lighting">Lighting</string>
+    <string name="graphics_soft">Soft</string>
+    <string name="graphics_normal">Normal</string>
+    <string name="graphics_strong">Strong</string>
+    <string name="graphics_texture">Texture detail</string>
+    <string name="graphics_contact">Contact shadows</string>
+    <string name="graphics_auto">Lower quality automatically</string>
+    <string name="graphics_fps">Show frame rate</string>
+    <string name="graphics_quality_help">High requests 4× MSAA and Medium 2×. FXAA smooths thin lines at every quality level and covers unsupported MSAA. Low omits contact shadows and grain; Medium limits grain to Medium. Automatic quality reduces distant detail, grain and contact shadows during sustained slow navigation, then recovers gradually. It keeps your saved choices.</string>
+</resources>

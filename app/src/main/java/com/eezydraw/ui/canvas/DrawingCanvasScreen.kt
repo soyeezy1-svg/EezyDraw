@@ -106,6 +106,7 @@ private sealed interface SceneLoad {
         val componentReferences:Map<ElementId,Point3>,
         val planSymbols:Boolean,
         val inspectionKey:String?=null,
+        val contactShadows:SurfaceScene?=null,
     ) : SceneLoad
     data object Failed : SceneLoad
 }
@@ -170,6 +171,11 @@ fun DrawingCanvasScreen(
     var initialized by rememberSaveable(document.project.id.value) { mutableStateOf(false) }
     var orbitShown by rememberSaveable(document.project.id.value) { mutableStateOf(false) }
     var gizmoMode by rememberSaveable(document.project.id.value) { mutableStateOf(GizmoMode.MOVE) }
+    var graphicsStats by remember {mutableStateOf(RenderDiagnostics())}
+    var graphicsClock by remember {mutableLongStateOf(System.nanoTime())}
+    LaunchedEffect(settings.graphics.showFrameRate) {
+        while(settings.graphics.showFrameRate){kotlinx.coroutines.delay(500);graphicsClock=System.nanoTime()}
+    }
     var cameraOrbiting by remember {mutableStateOf(false)}
     var rotationAngle by remember {mutableStateOf<Double?>(null)}
     var level by rememberSaveable(document.project.id.value) { mutableStateOf(document.levels.firstOrNull()?.id?.value) }
@@ -360,7 +366,7 @@ fun DrawingCanvasScreen(
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
         document.project.settings.showCeilings,document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
-        settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView,sectionBox) {
+        settings.graphics.contactShadows,settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView,sectionBox) {
         try {
             val previous = prepared
             val compiled = withContext(Dispatchers.Default) {
@@ -389,7 +395,10 @@ fun DrawingCanvasScreen(
                     if (sameGeometry) previous!!.picker else EditorPicker(renderDocument, scene, index,planView=planSymbols),resize,
                     MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement,
                     if(sameGeometry)previous!!.pointPicks else PointPickContext(document,scene),
-                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols,inspectionKey)
+                    if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols,inspectionKey,
+                    if(is3D && settings.graphics.contactShadows) {
+                        if(sameGeometry && previous?.contactShadows!=null)previous.contactShadows else SectionClip.surfaces(buildContactShadows(renderDocument),sectionBox)
+                    }else null)
             }
             prepared = compiled
             loading = compiled
@@ -746,12 +755,13 @@ fun DrawingCanvasScreen(
                 (r.right-canvasBounds.left).toDouble(),(r.bottom-canvasBounds.top).toDouble())},safe=safeRect,previous=previousLoupe)} else null
     SideEffect {if(previousLoupe!=loupeBounds)previousLoupe=loupeBounds}
     val loupeSource=loupeBounds?.let {LoupeSource(displayedPrecisionPick!!.screen,it.width,settings.precisionPointer.magnifierZoom)}
-    val frame = CanvasFrame(viewport, orbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
+    val clippedOrbit=ready?.scene?.boundsForLevel(selectedLevel)?.let {b->orbit.withSceneClipping(renderClipBounds(b,ready.selectionScene?.bounds,preview))} ?: orbit
+    val frame = CanvasFrame(viewport, clippedOrbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
-        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,loupe=loupeSource,sectionBox=sectionBox,performanceCounter=activeBenchmark?.takeIf {it.result==null}?.counter)
+        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,loupe=loupeSource,sectionBox=sectionBox,graphics=settings.graphics,quality=settings.renderQuality,contactShadowScene=ready?.contactShadows,motionActive=cameraOrbiting || navigationTool==NavigationTool.WALK,performanceCounter=activeBenchmark?.takeIf {it.result==null}?.counter)
     StressBenchmarkEffect(activeBenchmark,geometryMatches && initialized && !busy && ready!=null,
         onPrepare={cancelConstruction();level=null;orbitLevel=null;is3D=true;benchmarkOrbit=orbit.preset(ViewPreset.ISOMETRIC).fit(ready!!.scene.bounds,size.width.toDouble()/size.height.coerceAtLeast(1));orbit=benchmarkOrbit},
         onOrbit={orbit=benchmarkOrbit.copy(yaw=benchmarkOrbit.yaw+it*PI/2)},onComplete=onBenchmarkComplete)
@@ -1067,7 +1077,7 @@ fun DrawingCanvasScreen(
                     },
             ) {
                 if (surface != null) surface(ready?.mainScene, frame, Modifier.fillMaxSize())
-                else NativeDrawingSurface(ready?.mainScene, frame, Modifier.fillMaxSize(), onError = { rendererFailed = true }, onLoupe = {loupeCapture=it})
+                else NativeDrawingSurface(ready?.mainScene, frame, Modifier.fillMaxSize(), onError = { rendererFailed = true }, onLoupe = {loupeCapture=it},onDiagnostics={graphicsStats=it})
                 issuePins(renderDocument,frame,size.width,size.height).forEach {(id,screen)->
                     TextButton({document.issues.find {it.id==id}?.let(::openIssue)},Modifier.offset {androidx.compose.ui.unit.IntOffset((screen.x-20*density).toInt(),(screen.y-20*density).toInt())}.size(40.dp)){Text("●",color=androidx.compose.ui.graphics.Color(0xFFFF8800))}
                 }
@@ -1169,6 +1179,10 @@ fun DrawingCanvasScreen(
                 if(placedFeedback && !placementActive)Text(stringResource(R.string.placement_placed),Modifier.align(Alignment.TopCenter).padding(top=140.dp).testTag("placement_placed"))
                 if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)84.dp else 8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}).loupeObstacle("axis_indicator"))
                 if(sectionOptions && !panelsHidden)sectionBox?.let {SectionBoxOverlay(it,viewport,orbit,is3D,size.width,size.height,{sectionBox=it})}
+                if(settings.graphics.showFrameRate && is3D)Surface(Modifier.align(Alignment.TopCenter).padding(top=112.dp).testTag("graphics_fps").loupeObstacle("graphics_fps"),tonalElevation=3.dp) {
+                    val label=frameRateLabel(graphicsStats,graphicsClock)
+                    Text("$label · ${when(graphicsStats.quality){RenderQuality.PERFORMANCE->"Low";RenderQuality.BALANCED->"Medium";RenderQuality.QUALITY->"High"}} · ${if(!settings.graphics.antiAliasing)"AA off"else if(graphicsStats.fxaa)if(graphicsStats.samples>0)"${graphicsStats.samples}× MSAA + FXAA"else "FXAA"else "${graphicsStats.samples}× MSAA"} · ${graphicsStats.depthBits}-bit depth",Modifier.padding(6.dp),style=MaterialTheme.typography.labelSmall)
+                }
                 if(navigationTool==NavigationTool.WALK && !panelsHidden)WalkPad({right,forward->orbit=orbit.walk(right*.02*settings.gestureSensitivity,forward*.02*settings.gestureSensitivity)},Modifier.align(Alignment.BottomEnd).padding(end=8.dp,bottom=with(LocalDensity.current){chromeHeight.toDp()+12.dp}))
             } // Gesture surface ends here; control overlays are siblings.
                 if(selectionToolbarVisible && navigationTool==NavigationTool.SELECT && !placementActive && !panelsHidden && !zoomWindow && !cameraOrbiting && selectedBounds!=null)selectionControls?.let {controls->

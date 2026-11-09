@@ -206,7 +206,7 @@ private fun projectEdge(camera: OrbitCamera, edge: SceneSegment, width: Double, 
     if (a == null || b == null) {
         val outward = DragVector(cos(camera.pitch) * cos(camera.yaw), cos(camera.pitch) * sin(camera.yaw), sin(camera.pitch))
         fun depth(p: Point3) = camera.distance - ((DragVector(p.x - camera.target.x, p.y - camera.target.y, p.z - camera.target.z)) dot outward)
-        val near = max(1e-5, camera.distance * 0.0001) * 1.0001
+        val near = camera.clipDistances().near * 1.0001
         val da = depth(edge.a); val db = depth(edge.b)
         val t = ((near - da) / (db - da)).coerceIn(0.0, 1.0)
         val clipped = Point3(edge.a.x + (edge.b.x - edge.a.x) * t, edge.a.y + (edge.b.y - edge.a.y) * t, edge.a.z + (edge.b.z - edge.a.z) * t)

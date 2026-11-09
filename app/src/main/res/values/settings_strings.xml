@@ -64,11 +64,7 @@
     <string name="settings_stylus">Stylus</string>
     <string name="settings_gesture">Gesture sensitivity</string>
     <string name="settings_gesture_help">Enter a multiplier from 0.25 to 4.</string>
-    <string name="settings_quality">Performance and quality preference</string>
-    <string name="settings_performance">Performance</string>
-    <string name="settings_balanced">Balanced</string>
-    <string name="settings_quality_high">Quality</string>
-    <string name="settings_editor_defaults_help">Input, rendering and undo preferences are stored for the drawing tools as they become available.</string>
+    <string name="settings_quality">Graphics quality</string>
     <string name="settings_undo">Undo history size</string>
     <string name="settings_undo_help">Enter a whole number from 1 to 10000.</string>
     <string name="settings_exports">Exports and filenames</string>

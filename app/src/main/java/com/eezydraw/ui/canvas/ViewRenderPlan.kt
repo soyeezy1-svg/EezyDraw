@@ -59,3 +59,6 @@ internal fun filledPlanMatrix(
         it[15] = 1f
     }
 }
+
+/** Filled solids retain unobtrusive outlines; technical hidden-line/wire passes stay full strength. */
+internal fun edgeEmphasis(mode:ViewMode):Float=if(mode==ViewMode.SHADED_WITH_EDGES).55f else 1f

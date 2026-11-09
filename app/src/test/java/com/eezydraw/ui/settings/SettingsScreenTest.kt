@@ -40,6 +40,26 @@ class SettingsScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
+    @Test fun graphicsChoicesSurviveDraftRestorationAndSave() {
+        var saved:AppSettings?=null
+        val restore=StateRestorationTester(compose)
+        restore.setContent {EezyDrawTheme {SettingsScreen(AppSettings(),{saved=it},{},{},{},{})}}
+        choose("settings_quality","Medium")
+        choose("settings_lighting","Strong")
+        choose("settings_texture_detail","High")
+        visible("settings_anti_aliasing").assertIsOn().performClick()
+        visible("settings_contact_shadows").assertIsOn().performClick()
+        visible("settings_automatic_quality").assertIsOn().performClick()
+        visible("settings_frame_rate").assertIsOff().performClick()
+        restore.emulateSavedInstanceStateRestore()
+        visible("settings_frame_rate").assertIsOn()
+        compose.onNodeWithTag("settings_save").performClick()
+        compose.runOnIdle {
+            assertEquals(com.eezydraw.core.model.RenderQuality.BALANCED,saved!!.renderQuality)
+            assertEquals(com.eezydraw.core.model.GraphicsOptions(false,com.eezydraw.core.model.LightingStrength.STRONG,com.eezydraw.core.model.TextureDetail.HIGH,false,false,true),saved!!.graphics)
+        }
+    }
+
     @Test fun barLabelsAndPositionPersistThroughDraftRestorationAndSettingsStorageFormat() {
         var saved:AppSettings?=null
         val restoration=StateRestorationTester(compose)

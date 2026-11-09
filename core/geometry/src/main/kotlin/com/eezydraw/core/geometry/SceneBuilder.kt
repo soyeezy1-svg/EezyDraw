@@ -43,7 +43,7 @@ fun buildDrawingScene(
     val segments = ArrayList<SceneSegment>(minOf(document.elements.size * 12L, MAX_SEGMENTS.toLong()).toInt())
     val bounds = SceneBounds()
     val levelBounds = linkedMapOf<String?, SceneBounds>()
-    val chunks = ChunkCollector()
+    val chunks = ChunkCollector(document.elements.filter(::renderLodEligible).mapTo(hashSetOf()){it.id.value})
     val wallFrames=wallFrames(document).associateBy {it.host.id to it.roomSide}
     val allWallCuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
     val architecture=document.elements.mapNotNull {e->(e.body as? ElementBody.Component)?.let {b->if(library[b.libraryItemId]?.openingKind()!=null)e.id else null}}.toSet()
@@ -65,8 +65,7 @@ fun buildDrawingScene(
         val transform = SceneTransform(element.transform)
         val levelId = element.levelId?.value
         val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
-        val color = element.colourOverride ?: system?.colourArgb ?: (element.materialId ?: definitionMaterial)?.let(materials::get)?.colourArgb
-            ?: layer?.colourArgb ?: 0xFF334455
+        val color = renderColour(element,layer,system,(element.materialId ?: definitionMaterial)?.let(materials::get))
         val partSide = if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter = presentation.roomCenter(element)
         fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { originalA,originalB ->
@@ -625,9 +624,9 @@ private class SceneBounds {
 }
 
 private data class ChunkKey(val x: Long,val y: Long,val z: Long,val levelId: String?,
-    val display:ObjectDisplay,val roomSide:RoomSideRef?,val roomCenter:Point3?,val elementId:String?)
+    val display:ObjectDisplay,val roomSide:RoomSideRef?,val roomCenter:Point3?,val elementId:String?,val lodAllowed:Boolean)
 
-private class ChunkCollector {
+private class ChunkCollector(private val lodIds:Set<String>) {
     private val pending = linkedMapOf<ChunkKey, ChunkBuffer>()
     private val complete = ArrayList<SceneChunk>()
     private var edgeCount = 0
@@ -651,13 +650,13 @@ private class ChunkCollector {
                 floor((a.x + (b.x - a.x) * 0.5) / TILE_SIZE).toLong(),
                 floor((a.y + (b.y - a.y) * 0.5) / TILE_SIZE).toLong(),
                 floor((a.z + (b.z - a.z) * 0.5) / TILE_SIZE).toLong(), edge.levelId,
-                edge.display,edge.roomSide,edge.roomCenter.takeIf {edge.roomSide!=null},edge.elementId.takeIf {edge.roomSide!=null},
+                edge.display,edge.roomSide,edge.roomCenter.takeIf {edge.roomSide!=null},edge.elementId.takeIf {edge.roomSide!=null},edge.elementId in lodIds,
             )
             var buffer = pending[key]
             if (buffer == null || buffer.count == CHUNK_SEGMENTS) {
                 if (buffer != null) complete.add(buffer.finish())
                 require(complete.size + pending.size < MAX_CHUNKS) { "Drawing exceeds the $MAX_CHUNKS spatial chunk limit." }
-                buffer = ChunkBuffer(a,edge.levelId,edge.display,edge.roomSide,edge.roomCenter,edge.elementId.takeIf {edge.roomSide!=null})
+                buffer = ChunkBuffer(a,edge.levelId,edge.display,edge.roomSide,edge.roomCenter,edge.elementId.takeIf {edge.roomSide!=null},edge.elementId in lodIds)
                 pending[key] = buffer
             }
             buffer.add(a, b, edge.colorArgb)
@@ -672,7 +671,7 @@ private class ChunkCollector {
 }
 
 private class ChunkBuffer(private val origin: Point3,private val levelId: String?,
-    private val display:ObjectDisplay,private val roomSide:RoomSideRef?,private val roomCenter:Point3?,private val elementId:String?) {
+    private val display:ObjectDisplay,private val roomSide:RoomSideRef?,private val roomCenter:Point3?,private val elementId:String?,private val lodAllowed:Boolean) {
     var count = 0
         private set
     private var values = FloatArray(14 * 8)
@@ -693,7 +692,7 @@ private class ChunkBuffer(private val origin: Point3,private val levelId: String
         values[offset + 5] = (color and 255) / 255f
         values[offset + 6] = ((color shr 24) and 255) / 255f
     }
-    fun finish() = SceneChunk(origin,bounds.build(),levelId,values.copyOf(count*14),display,roomSide,roomCenter,elementId)
+    fun finish() = SceneChunk(origin,bounds.build(),levelId,values.copyOf(count*14),display,roomSide,roomCenter,elementId,lodAllowed)
 }
 
 private fun clipWallSectionLine(a:Point3,b:Point3,height:Double?):Pair<Point3,Point3>? {

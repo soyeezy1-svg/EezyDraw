@@ -30,6 +30,7 @@ data class SceneChunk(
     val roomSide: RoomSideRef? = null,
     val roomCenter: Point3? = null,
     val elementId: String? = null,
+    val lodAllowed:Boolean=false,
 )
 
 data class DrawingScene(

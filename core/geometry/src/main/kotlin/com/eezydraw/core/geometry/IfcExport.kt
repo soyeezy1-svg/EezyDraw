@@ -45,12 +45,22 @@ internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:M
     for(m in meshes) {
         val points=entity("IFCCARTESIANPOINTLIST3D",m.vertices.joinToString(",","(",")"){"(${it.x*f},${it.y*f},${it.z*f})"})
         val faces=entity("IFCTRIANGULATEDFACESET","#$points,$,.F.,${m.vertices.indices.step(3).joinToString(",","(",")"){"(${it+1},${it+2},${it+3})"}},$")
+        val colour=entity("IFCCOLOURRGB","$,${rgb(m.colourArgb).joinToString()}")
+        val shading=entity("IFCSURFACESTYLERENDERING","#$colour,${1-(m.colourArgb shr 24 and 255)/255.0},$,$,$,$,$,$,.MATT.")
+        val style=entity("IFCSURFACESTYLE","${str(m.name+" matte")},.BOTH.,(#$shading)")
+        entity("IFCSTYLEDITEM","#$faces,(#$style),$")
         val shape=entity("IFCSHAPEREPRESENTATION","#$context,'Body','Tessellation',(#$faces)")
         val representation=entity("IFCPRODUCTDEFINITIONSHAPE","$,$,(#$shape)")
         val type=if(m.host!=null && (meshes.none {it.element.id==m.host} || meshes.any {it.element.id==m.host && it.element.body is ElementBody.Room}))"IFCBUILDINGELEMENTPROXY"else ifcClass(document,m)
         val base="${guid()},$,${str(m.name)},$,$,#$placement,#$representation,${str(m.element.id.value)}"
         val args=when(type){"IFCDOOR","IFCWINDOW"->"$base,$,$,.NOTDEFINED.,.NOTDEFINED.,$";"IFCSPACE"->"$base,.ELEMENT.,.NOTDEFINED.,$";else->"$base,.NOTDEFINED."}
         val id=entity(type,args);objects[m.element.id]=id
+        // Spaces and opening voids may have styled geometry, but no material association.
+        if(type!="IFCSPACE" && type!="IFCOPENINGELEMENT") {
+            val materialName=document.materials.find {it.id==m.element.materialId}?.name ?: renderMaterial(m.element).name.lowercase()+" matte"
+            val material=entity("IFCMATERIAL","${str(materialName)},$,$")
+            entity("IFCRELASSOCIATESMATERIAL","${guid()},$,$,$,(#$id),#$material")
+        }
         if(m.host!=null && type=="IFCOPENINGELEMENT")pendingVoids+=id to m.host else if(type=="IFCSPACE")entity("IFCRELAGGREGATES","${guid()},$,$,$,#${levels.getValue(m.element.levelId)},(#$id)")else contained.getOrPut(m.element.levelId){mutableListOf()}.add(id)
         val layer=document.layers.find {it.id==m.element.layerId}?.name.orEmpty()
         entity("IFCPRESENTATIONLAYERASSIGNMENT","${str(layer)},$,(#$faces),$")
