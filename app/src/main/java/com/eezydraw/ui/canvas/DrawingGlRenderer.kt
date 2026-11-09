@@ -36,7 +36,7 @@ import kotlin.math.tan
  * gestures change only uniforms, culling and a bounded construction-grid buffer. All origin
  * subtraction happens in doubles before values reach the GPU.
  */
-internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GLSurfaceView.Renderer {
+internal class DrawingGlRenderer(private val publishLoupe: (CapturedLoupe?) -> Unit = {}, private val reportError: (String) -> Unit) : GLSurfaceView.Renderer {
     private data class RenderState(val scene: DrawingScene?, val frame: CanvasFrame)
     private val state = AtomicReference(RenderState(null, CanvasFrame(Viewport2D(), OrbitCamera())))
     private val disposed = AtomicBoolean(false)
@@ -302,6 +302,7 @@ internal class DrawingGlRenderer(private val reportError: (String) -> Unit) : GL
         }
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
         disableLineAttributes()
+        publishLoupe(current.loupe?.let { captureLoupe(it, width, height)?.copy(renderFrame = current, scene = pendingScene) })
         if(pendingScene?.segments?.isNotEmpty()==true)current.performanceCounter?.frame(System.nanoTime())
     }
 

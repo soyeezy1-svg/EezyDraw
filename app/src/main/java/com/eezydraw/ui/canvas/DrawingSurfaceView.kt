@@ -35,6 +35,7 @@ data class CanvasFrame(
     val selectionMeasurementScene: DrawingScene? = null,
     /** Presentation-only camera classification of the front sides of rooms. */
     val autoXrayFrontWalls: Boolean = false,
+    val loupe: LoupeSource? = null,
     val sectionBox:com.eezydraw.core.model.Bounds3?=null,
     val performanceCounter:com.eezydraw.ui.developer.RenderFrameCounter?=null,
 ) {
@@ -58,9 +59,18 @@ class DrawingSurfaceView @JvmOverloads constructor(
     @Volatile
     var onRenderError: ((String) -> Unit)? = null
 
-    private val drawingRenderer = DrawingGlRenderer { message ->
+    internal var onLoupe: ((CapturedLoupe?) -> Unit)? = null
+    private val latestLoupe = java.util.concurrent.atomic.AtomicReference<CapturedLoupe?>()
+    private val loupeDeliveryPending = AtomicBoolean(false)
+    private val drawingRenderer = DrawingGlRenderer(publishLoupe = { capture ->
+        latestLoupe.set(capture)
+        if (loupeDeliveryPending.compareAndSet(false, true)) post {
+            loupeDeliveryPending.set(false)
+            if (!released.get()) onLoupe?.invoke(latestLoupe.get())
+        }
+    }, reportError = { message ->
         post { if (!released.get()) onRenderError?.invoke(message) }
-    }
+    })
 
     init {
         setEGLContextClientVersion(2)
@@ -95,6 +105,8 @@ class DrawingSurfaceView @JvmOverloads constructor(
     /** Idempotent. EGL also reclaims resources if an already-paused surface has lost its context. */
     fun release() {
         if (!released.compareAndSet(false, true)) return
+        latestLoupe.set(null)
+        onLoupe = null
         drawingRenderer.dispose()
         queueEvent { drawingRenderer.releaseGlResources() }
         requestRender()

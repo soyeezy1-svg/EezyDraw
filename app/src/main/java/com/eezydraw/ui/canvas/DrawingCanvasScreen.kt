@@ -47,6 +47,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -217,6 +220,10 @@ fun DrawingCanvasScreen(
     var precisionPick by remember(document.project.id) {mutableStateOf<PrecisionPick?>(null)}
     var precisionFinger by remember {mutableStateOf<Point2?>(null)}
     var precisionDragging by remember {mutableStateOf(false)}
+    val loupeObstacles = remember { LoupeObstacles() }
+    var canvasBounds by remember { mutableStateOf(Rect.Zero) }
+    var previousLoupe by remember { mutableStateOf<PointerRect?>(null) }
+    var loupeCapture by remember { mutableStateOf<CapturedLoupe?>(null) }
     var precisionSnap by remember {mutableStateOf<PrecisionSnapKey?>(null)}
     var pointUndo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
     var pointRedo by remember(document.project.id) {mutableStateOf(emptyList<PointInputSnapshot>())}
@@ -725,12 +732,24 @@ fun DrawingCanvasScreen(
     val accent = MaterialTheme.colorScheme.primary
     val activeBenchmark=benchmark?.takeIf {it.projectId==document.project.id}
     var benchmarkOrbit by remember {mutableStateOf(OrbitCamera())}
+    val safeInsets=WindowInsets.safeDrawing
+    val layoutDirection=LocalLayoutDirection.current
+    val safeRect=PointerRect(safeInsets.getLeft(LocalDensity.current,layoutDirection).toDouble(),
+        safeInsets.getTop(LocalDensity.current).toDouble(),
+        size.width-safeInsets.getRight(LocalDensity.current,layoutDirection).toDouble(),
+        size.height-safeInsets.getBottom(LocalDensity.current).toDouble())
+    val loupeBounds=if(precisionActive && precisionDragging && !zoomWindow && settings.precisionPointer.magnifier)
+        displayedPrecisionPick?.let {pick->precisionLoupeBounds(precisionFinger,pick.screen,size.width.toDouble(),size.height.toDouble(),density.toDouble(),
+            occupied=loupeObstacles.bounds.values.map {r->PointerRect((r.left-canvasBounds.left).toDouble(),(r.top-canvasBounds.top).toDouble(),
+                (r.right-canvasBounds.left).toDouble(),(r.bottom-canvasBounds.top).toDouble())},safe=safeRect,previous=previousLoupe)} else null
+    SideEffect {if(previousLoupe!=loupeBounds)previousLoupe=loupeBounds}
+    val loupeSource=loupeBounds?.let {LoupeSource(displayedPrecisionPick!!.screen,it.width,settings.precisionPointer.magnifierZoom)}
     val frame = CanvasFrame(viewport, orbit, is3D, selectedLevel, snapSettings.gridSpacing, grid,
         MaterialTheme.colorScheme.background.luminance() < .5f, floorZ, ready?.selectionScene, preview,
         surfaceScene=ready?.mainSurfaces,selectionSurfaceScene=ready?.selectedSurfaces,viewMode=renderDocument.project.settings.viewMode,
         annotationScene=ready?.annotationScene,selectionAnnotationScene=ready?.selectedAnnotationScene,
         measurementScene=ready?.measurementScene,selectionMeasurementScene=ready?.selectedMeasurementScene,
-        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,sectionBox=sectionBox,performanceCounter=activeBenchmark?.takeIf {it.result==null}?.counter)
+        autoXrayFrontWalls=renderDocument.project.settings.autoXrayFrontWalls,loupe=loupeSource,sectionBox=sectionBox,performanceCounter=activeBenchmark?.takeIf {it.result==null}?.counter)
     StressBenchmarkEffect(activeBenchmark,geometryMatches && initialized && !busy && ready!=null,
         onPrepare={cancelConstruction();level=null;orbitLevel=null;is3D=true;benchmarkOrbit=orbit.preset(ViewPreset.ISOMETRIC).fit(ready!!.scene.bounds,size.width.toDouble()/size.height.coerceAtLeast(1));orbit=benchmarkOrbit},
         onOrbit={orbit=benchmarkOrbit.copy(yaw=benchmarkOrbit.yaw+it*PI/2)},onComplete=onBenchmarkComplete)
@@ -915,8 +934,9 @@ fun DrawingCanvasScreen(
     })else null
 
     if(clashDialog)ClashCheckDialog(document,selectedLevel,{options->clashDialog=false;setPanel(CanvasPanelId.CLASHES,PanelVisibility.OPEN);onRunClash(options.copy(planView=!is3D))},{clashDialog=false})
+    CompositionLocalProvider(LocalLoupeObstacles provides loupeObstacles) {
     Box(
-        modifier = modifier.testTag("drawing_canvas").focusRequester(focus).onPreviewKeyEvent { event ->
+        modifier = modifier.onGloballyPositioned {canvasBounds=it.boundsInRoot()}.testTag("drawing_canvas").focusRequester(focus).onPreviewKeyEvent { event ->
             val actions = editor
             if (actions == null || busy || !canvasFocused || event.type != KeyEventType.KeyDown) false
             else when {
@@ -1045,7 +1065,7 @@ fun DrawingCanvasScreen(
                     },
             ) {
                 if (surface != null) surface(ready?.mainScene, frame, Modifier.fillMaxSize())
-                else NativeDrawingSurface(ready?.mainScene, frame, Modifier.fillMaxSize(), onError = { rendererFailed = true })
+                else NativeDrawingSurface(ready?.mainScene, frame, Modifier.fillMaxSize(), onError = { rendererFailed = true }, onLoupe = {loupeCapture=it})
                 issuePins(renderDocument,frame,size.width,size.height).forEach {(id,screen)->
                     TextButton({document.issues.find {it.id==id}?.let(::openIssue)},Modifier.offset {androidx.compose.ui.unit.IntOffset((screen.x-20*density).toInt(),(screen.y-20*density).toInt())}.size(40.dp)){Text("●",color=androidx.compose.ui.graphics.Color(0xFFFF8800))}
                 }
@@ -1136,17 +1156,16 @@ fun DrawingCanvasScreen(
                         mode=gizmoMode,rotationAngleDegrees=rotationAngle,pivotOverride=positionLockedPivot)
                 }
                 if(pendingLibraryItem!=null) LibraryPlacementFeedback(document,pendingLibraryItem,libraryPlacement,
-                    libraryPlacementResult?.exceptionOrNull()?.message,Modifier.align(Alignment.TopCenter).padding(8.dp))
-                if(precisionActive && !zoomWindow) PrecisionPointerOverlay(displayedPrecisionPick,precisionFinger,precisionDragging,
-                    settings.precisionPointer,viewport,orbit,is3D,ready?.scene,ready?.surfaces,snapSettings.gridSpacing,grid,floorZ,
+                    libraryPlacementResult?.exceptionOrNull()?.message,Modifier.align(Alignment.TopCenter).padding(8.dp).loupeObstacle("library_feedback"))
+                if(precisionActive && !zoomWindow) PrecisionPointerOverlay(displayedPrecisionPick,precisionFinger,settings.precisionPointer,
                     measurementPicks.firstOrNull()?.point ?: points.firstOrNull(),document.project.settings.lengthUnit,
                     document.project.settings.decimalPlaces,onPlace={confirmPrecisionPoint()},onCancel={cancelConstruction()},
                     onNudge={dx,dy->nudgePrecision(dx,dy)},enabled=!busy && geometryMatches,
-                    pickContext=ready?.pointPicks,viewMode=renderDocument.project.settings.viewMode,levelId=selectedLevel,
+                    loupeBounds=loupeBounds,capture=loupeCapture?.takeIf {it.matches(ready?.mainScene,frame)},
                     canPlace=pendingLibrary==null || libraryPlacement!=null,controlsBottomInset=if(panelsHidden || !canvasLayout.bottomBarVisible)0.dp else with(LocalDensity.current){chromeHeight.toDp()},controlsVisible=!panelsHidden,controlsLeftInset=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)76.dp else 0.dp)
-                if(!is3D && (probe || placementActive))cursor.value?.mode?.let {mode->Surface(Modifier.align(Alignment.TopCenter).padding(top=140.dp),tonalElevation=3.dp){Text(stringResource(snapLabel(mode)),Modifier.padding(8.dp))}}
+                if(!is3D && (probe || placementActive))cursor.value?.mode?.let {mode->Surface(Modifier.align(Alignment.TopCenter).padding(top=140.dp).loupeObstacle("snap_hint"),tonalElevation=3.dp){Text(stringResource(snapLabel(mode)),Modifier.padding(8.dp))}}
                 if(placedFeedback && !placementActive)Text(stringResource(R.string.placement_placed),Modifier.align(Alignment.TopCenter).padding(top=140.dp).testTag("placement_placed"))
-                if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)84.dp else 8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}))
+                if(settings.showAxisIndicator)AxisIndicator(viewport,orbit,is3D,Modifier.align(Alignment.BottomStart).padding(start=if(settings.barPosition==CanvasBarPosition.LEFT && canvasLayout.bottomBarVisible && !panelsHidden)84.dp else 8.dp,bottom=if(panelsHidden || !canvasLayout.bottomBarVisible)8.dp else with(LocalDensity.current){chromeHeight.toDp()+8.dp}).loupeObstacle("axis_indicator"))
                 if(sectionOptions && !panelsHidden)sectionBox?.let {SectionBoxOverlay(it,viewport,orbit,is3D,size.width,size.height,{sectionBox=it})}
                 if(navigationTool==NavigationTool.WALK && !panelsHidden)WalkPad({right,forward->orbit=orbit.walk(right*.02*settings.gestureSensitivity,forward*.02*settings.gestureSensitivity)},Modifier.align(Alignment.BottomEnd).padding(end=8.dp,bottom=with(LocalDensity.current){chromeHeight.toDp()+12.dp}))
             } // Gesture surface ends here; control overlays are siblings.
@@ -1191,7 +1210,7 @@ fun DrawingCanvasScreen(
                 if(placedFeedback) Text(stringResource(R.string.placement_placed),Modifier.padding(8.dp).testTag("placement_placed"),style=MaterialTheme.typography.labelMedium)
                         if(tool!=DrawingTool.SELECT && buildingTool==null && routeKind==null)ToolOptionsFields(tool,options,document.project.settings.lengthUnit,{options=it})
                     }})else null,detail=detailContent)
-                activeBenchmark?.let {run->Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top=136.dp)){StressStatus(run,onDismissBenchmark)}}
+                activeBenchmark?.let {run->Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top=136.dp).loupeObstacle("benchmark")){StressStatus(run,onDismissBenchmark)}}
                 if(selectedIds.isNotEmpty() && document.elements.any {it.id in selectedIds && it.lockMode!=LockMode.NONE}) {
                     val p=selectedBounds?.center()
                     val at=p?.let {projectPrecisionPoint(it,viewport,orbit,is3D,size.width.toDouble(),size.height.toDouble())}
@@ -1203,6 +1222,7 @@ fun DrawingCanvasScreen(
                 if (rendererFailed) Text(stringResource(R.string.canvas_renderer_error), Modifier.align(Alignment.Center).padding(32.dp))
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))
     }
+    } // Measured canvas chrome / loupe obstacles.
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,
         onApply = { columns, rows, dx, dy -> editor.onArray(columns,rows,dx,dy); arrayOpen = false },onDismiss = { arrayOpen = false })
@@ -1224,7 +1244,7 @@ private fun CanvasStatus(
     val p = if (is3D) orbit.target else cursor.value?.point?.let { Point3(it.x,it.y,document.levels.find { level -> level.id.value==selectedLevel }?.elevation ?: 0.0) } ?: Point3()
     val precision = document.project.settings.decimalPlaces
     Surface(tonalElevation = 2.dp) {
-        Row(Modifier.fillMaxWidth().navigationBarsPadding().horizontalScroll(rememberScrollState()).heightIn(min = 48.dp).testTag("canvas_status"),
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).heightIn(min = 48.dp).testTag("canvas_status"),
             verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(if (is3D) R.string.canvas_target else R.string.canvas_coordinates) + ": " +
                 "X ${coordinate(p.x,unit,precision)}  Y ${coordinate(p.y,unit,precision)}  Z ${coordinate(p.z,unit,precision)}",

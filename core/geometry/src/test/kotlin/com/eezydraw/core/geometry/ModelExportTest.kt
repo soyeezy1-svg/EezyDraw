@@ -3,12 +3,17 @@ package com.eezydraw.core.geometry
 import com.eezydraw.core.model.*
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class ModelExportTest {
+    @Before fun prepareReaderFixtureDirectory() {
+        val directory=File(System.getProperty("java.io.tmpdir"),"eezy-model-export")
+        check(directory.isDirectory || directory.mkdirs()) { "Cannot create model reader fixtures" }
+    }
     private val p=ProjectId("export")
     private val layer=LayerId("base")
     private val level=Level(LevelId("ground"),p,"Ground",3.0,.2,3.0)

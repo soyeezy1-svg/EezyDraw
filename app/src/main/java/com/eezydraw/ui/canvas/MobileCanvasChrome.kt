@@ -52,6 +52,7 @@ private val selectedColour=CadStyle.accent
     onClose:()->Unit,onUndo:()->Unit,onRedo:()->Unit,onFit:()->Unit,onToggle3D:()->Unit,
     canUndo:Boolean,canRedo:Boolean,is3D:Boolean,modifier:Modifier=Modifier,
     canFit:Boolean=true,onBottomHeight:(Int)->Unit={},
+    safeInsets:WindowInsets=WindowInsets.safeDrawing,
     showLabels:Boolean=true,barPosition:CanvasBarPosition=CanvasBarPosition.BOTTOM,
     onGroup:((CanvasGroup)->Unit)?=null,detailKey:String="panel",detailTitle:String="Tools",onCloseDetail:()->Unit={},
     cube:@Composable ()->Unit,options:(@Composable ()->Unit)?=null,detail:(@Composable ()->Unit)?=null,
@@ -60,9 +61,9 @@ private val selectedColour=CadStyle.accent
         val left=barPosition==CanvasBarPosition.LEFT
         val leftInset=if(left)76.dp else 0.dp
         if(layout.hideAll) {
-            RoundControl("Show controls",Icons.Outlined.FullscreenExit,{onLayout(layout.copy(hideAll=false))},Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp).testTag("canvas_show_panels"))
+            RoundControl("Show controls",Icons.Outlined.FullscreenExit,{onLayout(layout.copy(hideAll=false))},Modifier.align(Alignment.TopEnd).windowInsetsPadding(safeInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(8.dp).testTag("canvas_show_panels").loupeObstacle("show_controls"))
         } else {
-            Row(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp),verticalAlignment=Alignment.Top) {
+            Row(Modifier.align(Alignment.TopStart).windowInsetsPadding(safeInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(8.dp).loupeObstacle("close_cube"),verticalAlignment=Alignment.Top) {
                 RoundControl(stringResource(R.string.canvas_back),Icons.Outlined.Close,onClose,Modifier.testTag("canvas_close"))
                 Spacer(Modifier.width(8.dp));cube()
             }
@@ -71,11 +72,11 @@ private val selectedColour=CadStyle.accent
                 CadAction("canvas_extents",stringResource(R.string.canvas_extents),Icons.Outlined.FitScreen,enabled=canFit,run=onFit),
                 CadAction("canvas_2d_3d",if(is3D)"2D"else "3D",Icons.Outlined.ViewInAr,selected=is3D,run=onToggle3D),
                 CadAction("canvas_hide_panels","Full screen",Icons.Outlined.Fullscreen,run={onLayout(layout.copy(hideAll=true))}))
-            Surface(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),shape=RoundedCornerShape(24.dp),color=barColour,shadowElevation=5.dp) {
+            Surface(Modifier.align(Alignment.TopEnd).windowInsetsPadding(safeInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(8.dp).testTag("cad_top_toolbar").loupeObstacle("top_toolbar"),shape=RoundedCornerShape(24.dp),color=barColour,shadowElevation=5.dp) {
                 if(maxWidth<520.dp)Column {mini.forEach {MiniControl(it)}}else Row {mini.forEach {MiniControl(it)}}
             }
             if(layout.bottomBarVisible) {
-                if(left)Surface(Modifier.align(Alignment.TopStart).padding(top=144.dp).statusBarsPadding().navigationBarsPadding().width(76.dp).fillMaxHeight().testTag("cad_left_bar"),color=barColour) {
+                if(left)Surface(Modifier.align(Alignment.TopStart).padding(top=144.dp).statusBarsPadding().background(barColour).windowInsetsPadding(safeInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)).width(76.dp).fillMaxHeight().testTag("cad_left_bar").loupeObstacle("left_bar"),color=barColour) {
                     val scroll=rememberScrollState()
                     Box {
                         Column(Modifier.verticalScroll(scroll).testTag("cad_group_scroll")){CanvasGroup.entries.forEach {group->GroupButton(group,layout.openGroup==group,showLabels){onGroup?.invoke(group) ?: onLayout(layout.toggleGroup(group))}}}
@@ -85,7 +86,7 @@ private val selectedColour=CadStyle.accent
                         }
                     }
                 }
-                BoxWithConstraints(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start=leftInset).onSizeChanged {onBottomHeight(it.height)}.navigationBarsPadding().imePadding().testTag("cad_bottom_controls")) {
+                BoxWithConstraints(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start=leftInset).background(barColour).onSizeChanged {onBottomHeight(it.height)}.testTag("cad_bottom_controls").loupeObstacle("bottom_controls").windowInsetsPadding(safeInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
                     val optionsLimit=if(options==null)0.dp else minOf(170.dp,maxHeight*.20f)
                     val reserve=(if(left)0.dp else if(showLabels)72.dp else 64.dp)+(if(layout.openGroup==null)0.dp else if(showLabels)72.dp else 64.dp)
                     val detailLimit=(maxHeight-optionsLimit-reserve-16.dp).coerceAtLeast(96.dp)
@@ -100,7 +101,7 @@ private val selectedColour=CadStyle.accent
                         }
                     }
                 }
-            } else RoundControl("Show bottom bar",Icons.Outlined.ExpandLess,{onLayout(layout.copy(bottomBarVisible=true))},Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(8.dp).testTag("cad_show_bottom"))
+            } else RoundControl("Show bottom bar",Icons.Outlined.ExpandLess,{onLayout(layout.copy(bottomBarVisible=true))},Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(8.dp).testTag("cad_show_bottom").loupeObstacle("show_bottom"))
         }
     }
 }
