@@ -22,6 +22,7 @@ data class OrbitCamera(
     val distance: Double = 30.0,
     val orthographicHeight: Double = 20.0,
     val projection: Projection = Projection.ORTHOGRAPHIC,
+    val clip:ClipDistances?=null,
 ) {
     init {
         require(yaw.isFinite() && pitch.isFinite() && pitch in -PI / 2..PI / 2)
@@ -33,7 +34,7 @@ data class OrbitCamera(
         if (!dxRadians.isFinite() || !dyRadians.isFinite()) return this
         // Reduce increments first so a finite, very large gesture cannot overflow the yaw.
         val nextYaw = (yaw % (2 * PI) + dxRadians % (2 * PI)) % (2 * PI)
-        return copy(yaw = nextYaw, pitch = (pitch + dyRadians).coerceIn(-PI / 2, PI / 2))
+        return copy(clip=null,yaw = nextYaw, pitch = (pitch + dyRadians).coerceIn(-PI / 2, PI / 2))
     }
 
     fun pan(dxPixels: Double, dyPixels: Double, width: Double, height: Double): OrbitCamera {
@@ -42,12 +43,12 @@ data class OrbitCamera(
         val scale = visibleHeight() / height
         val shift = basis.right * (-dxPixels * scale) + basis.up * (dyPixels * scale)
         val moved = vector(target) + shift
-        return if (moved.finite()) copy(target = moved.point()) else this
+        return if (moved.finite()) copy(clip=null,target = moved.point()) else this
     }
 
     fun zoom(factor: Double): OrbitCamera {
         if (!factor.isFinite() || factor <= 0) return this
-        return copy(distance = (distance / factor).coerceIn(MIN_SIZE, MAX_SIZE),
+        return copy(clip=null,distance = (distance / factor).coerceIn(MIN_SIZE, MAX_SIZE),
             orthographicHeight = (orthographicHeight / factor).coerceIn(MIN_SIZE, MAX_SIZE))
     }
 
@@ -66,23 +67,23 @@ data class OrbitCamera(
     fun walk(right:Double,forward:Double,up:Double=0.0):OrbitCamera {
         if(!listOf(right,forward,up).all {it.isFinite()})return this
         val moved=vector(target)+Vec(-sin(yaw)*right-cos(yaw)*forward,cos(yaw)*right-sin(yaw)*forward,up)
-        return if(moved.finite())copy(target=moved.point())else this
+        return if(moved.finite())copy(clip=null,target=moved.point())else this
     }
 
     /** Preserve the target plane's apparent height while switching between lens types. */
     fun withProjection(value: Projection): OrbitCamera = when {
         value == projection -> this
-        value == Projection.PERSPECTIVE -> copy(projection = value,
+        value == Projection.PERSPECTIVE -> copy(clip=null,projection = value,
             distance = (orthographicHeight / (2 * tan(FOV_Y / 2))).coerceIn(MIN_SIZE, MAX_SIZE))
-        else -> copy(projection = value,
+        else -> copy(clip=null,projection = value,
             orthographicHeight = (2 * distance * tan(FOV_Y / 2)).coerceIn(MIN_SIZE, MAX_SIZE))
     }
 
     fun preset(value: ViewPreset): OrbitCamera = when (value) {
-        ViewPreset.TOP -> copy(yaw = -PI / 2, pitch = PI / 2)
-        ViewPreset.FRONT -> copy(yaw = -PI / 2, pitch = 0.0)
-        ViewPreset.SIDE -> copy(yaw = 0.0, pitch = 0.0)
-        ViewPreset.ISOMETRIC -> copy(yaw = PI / 4, pitch = asin(1 / sqrt(3.0)))
+        ViewPreset.TOP -> copy(clip=null,yaw = -PI / 2, pitch = PI / 2)
+        ViewPreset.FRONT -> copy(clip=null,yaw = -PI / 2, pitch = 0.0)
+        ViewPreset.SIDE -> copy(clip=null,yaw = 0.0, pitch = 0.0)
+        ViewPreset.ISOMETRIC -> copy(clip=null,yaw = PI / 4, pitch = asin(1 / sqrt(3.0)))
     }
 
     fun fit(bounds: Bounds3, aspect: Double): OrbitCamera {
@@ -102,7 +103,7 @@ data class OrbitCamera(
             fitDistance = max(fitDistance, depth + max(y / tan(FOV_Y / 2), x / (aspect * tan(FOV_Y / 2))))
             frontExtent = max(frontExtent, abs(depth))
         }
-        return copy(target = middle,
+        return copy(clip=null,target = middle,
             orthographicHeight = (halfHeight * 2.4).coerceIn(MIN_SIZE, MAX_SIZE),
             distance = max(fitDistance * 1.2, frontExtent * 1.2 + MIN_SIZE).coerceIn(MIN_SIZE, MAX_SIZE))
     }
@@ -201,8 +202,10 @@ data class OrbitCamera(
     }
 
     private fun visibleHeight() = if (projection == Projection.PERSPECTIVE) 2 * distance * tan(FOV_Y / 2) else orthographicHeight
-    private fun nearPlane() = max(1e-5, distance * 0.0001)
-    private fun farPlane() = max(distance * 100, orthographicHeight * 100)
+    fun clipDistances():ClipDistances = clip ?: adaptiveClip(this)
+    fun withSceneClipping(bounds:Bounds3)=copy(clip=adaptiveClip(this,bounds))
+    private fun nearPlane() = clipDistances().near
+    private fun farPlane() = clipDistances().far
     private fun basis(): Basis {
         // An analytic basis remains defined at both poles, unlike cross(forward, worldUp).
         val cy = cos(yaw)

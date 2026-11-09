@@ -16,7 +16,7 @@ class IssueReviewTest {
  val p=ProjectId("issue-test");val doc=ProjectDocument(Project(p,"Review",0,0))
  @Test fun cameraCaptureAndVisibilityRestore(){val frame=CanvasFrame(Viewport2D(Point2(2.0,3.0),100.0),OrbitCamera(target=Point3(2.0,3.0,4.0)),is3D=true,viewMode=ViewMode.XRAY);val view=captureIssueView(ViewExportRequest(doc,frame,400,300));assertEquals(frame.orbit.target,view.target);assertEquals(frame.viewport.center,view.centre);assertEquals(400,view.width);val styled=restoreIssuePresentation(doc,view);assertEquals(view.settings,styled.project.settings)}
  @Test fun historicalViewMarkupsRestoreWithoutChangingGeometry(){
-  val frame=CanvasFrame(Viewport2D(Point2(2.0,3.0),100.0),OrbitCamera(),is3D=true)
+  val frame=CanvasFrame(Viewport2D(Point2(2.0,3.0),100.0),OrbitCamera(),is3D=true,viewMode=doc.project.settings.viewMode)
   val old=captureIssueView(ViewExportRequest(doc,frame,400,300));val current=old.copy(id="current")
   val mark=IssueMarkup(MarkupTool.ARROW,listOf(Point2(.1,.1),Point2(.8,.8)),viewId=old.id)
   val issue=Issue(IssueId("review"),p,"Review",1,capture=current,savedViews=listOf(old),annotations=listOf(mark))

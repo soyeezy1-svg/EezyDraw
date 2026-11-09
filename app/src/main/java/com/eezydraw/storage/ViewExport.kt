@@ -1,5 +1,8 @@
 package com.eezydraw.storage
 
+import com.eezydraw.core.geometry.*
+import com.eezydraw.core.model.*
+import androidx.core.graphics.scale
 import android.graphics.Bitmap
 import android.graphics.Color
 import com.eezydraw.core.geometry.SceneSegment
@@ -76,8 +79,11 @@ object ViewExport {
         val scale = min(1.0, MAX_SIDE.toDouble() / max(request.width, request.height))
         val width = max(1, (request.width * scale).toInt())
         val height = max(1, (request.height * scale).toInt())
-        val raster = Raster(request, width, height)
         val scene = com.eezydraw.core.geometry.SectionClip.drawing(buildDrawingScene(request.document,planSymbols=!request.frame.is3D),request.frame.sectionBox)
+        val exportRequest=if(request.frame.is3D)request.copy(frame=request.frame.copy(orbit=request.frame.orbit.withSceneClipping(scene.boundsForLevel(request.frame.levelId))))else request
+        // Bounded 2x supersampling for small 3D images; large exports retain the 4M-pixel cap.
+        val samples=if(request.frame.is3D && request.frame.graphics.antiAliasing && width.toLong()*height<=MAX_PIXELS/4 && request.underlayBackground==null)2 else 1
+        val raster = Raster(exportRequest, width*samples, height*samples)
         val mode = request.frame.viewMode
         val autoWalls = request.frame.autoXrayFrontWalls || request.document.project.settings.autoXrayFrontWalls
         val surfaces = if (mode != ViewMode.WIREFRAME || autoWalls && request.frame.is3D || hasXrayOverrides(request.document))
@@ -100,7 +106,12 @@ object ViewExport {
             val opaque = chunks.filter { val plan=objectRenderPlan(mode,it.display,front(it.roomSide));plan.surfaces && !plan.transparent }
             val transparent = chunks.filter { val plan=objectRenderPlan(mode,it.display,front(it.roomSide));plan.surfaces && plan.transparent }
                 .sortedByDescending { raster.depth(it) }
-            (opaque + transparent).forEach { raster.surface(it, objectViewMode(mode,it.display,front(it.roomSide))) }
+            opaque.forEach {raster.surface(it,objectViewMode(mode,it.display,front(it.roomSide)))}
+            if(request.frame.is3D && request.frame.graphics.contactShadows && request.frame.quality!=RenderQuality.PERFORMANCE && com.eezydraw.ui.canvas.viewRenderPlan(mode).lighting>0 && !com.eezydraw.ui.canvas.viewRenderPlan(mode).transparent) {
+                SectionClip.surfaces(buildContactShadows(request.document),request.frame.sectionBox).chunks
+                    .filter {request.frame.levelId==null || it.levelId==null || it.levelId==request.frame.levelId}.forEach {raster.surface(it,mode)}
+            }
+            transparent.forEach {raster.surface(it,objectViewMode(mode,it.display,front(it.roomSide)))}
         }
         for (segment in scene.segments) {
             if (segment.elementId in annotations) continue
@@ -109,14 +120,16 @@ object ViewExport {
             if (plan.fullEdges || segment.elementId !in meshIds) raster.segment(segment,
                 depthTest = mode != ViewMode.WIREFRAME && !plan.transparent &&
                     segment.display != ObjectDisplay.WIREFRAME && segment.display != ObjectDisplay.HIDDEN,
-                opacity=objectEdgeOpacity(segment.display,isFront).toDouble())
+                opacity=(objectEdgeOpacity(segment.display,isFront)*com.eezydraw.ui.canvas.edgeEmphasis(objectViewMode(mode,segment.display,isFront))).toDouble())
         }
         // Dimensions and annotation strokes remain readable over filled geometry in both outputs.
         scene.segments.filter { it.elementId in annotations }.forEach {
             raster.segment(it,depthTest=false,annotation=true,
                 opacity=objectEdgeOpacity(it.display,front(it.roomSide)).toDouble())
         }
-        return Bitmap.createBitmap(raster.pixels, width, height, Bitmap.Config.ARGB_8888)
+        val bitmap=Bitmap.createBitmap(raster.pixels,width*samples,height*samples,Bitmap.Config.ARGB_8888)
+        if(samples==1)return bitmap
+        return bitmap.scale(width,height,true).also {bitmap.recycle()}
     }
 
     /** Portable one-page PDF with the exact opaque view raster, without platform PDF state. */
@@ -169,10 +182,14 @@ object ViewExport {
         private val depths = FloatArray(width * height) { Float.POSITIVE_INFINITY }
         private val frame = request.frame
         private val projector = Projector(request, width, height)
-        private val keyLight = normalized(.45, -.40, .80)
-        private val fillLight = normalized(-.60, .35, .55)
+        private val keyLight=if(frame.is3D)cameraKeyLight(frame.orbit)else normalizeRender(Point3(.2,-.3,.9))
         private val halfLight = normalized(keyLight.x + projector.viewDirection.x,
             keyLight.y + projector.viewDirection.y, keyLight.z + projector.viewDirection.z)
+        private var grainStrength=0.0
+        private var grainFacing=1.0
+        private var grainDetail=frame.graphics.textureDetail
+        private var contact=false
+        private var surfaceBias=0.0
 
         fun depth(chunk: SurfaceChunk): Double = projector.project(Point3(
             chunk.bounds.min.x / 2 + chunk.bounds.max.x / 2,
@@ -182,24 +199,27 @@ object ViewExport {
 
         fun surface(chunk: SurfaceChunk, mode: ViewMode) {
             val values = chunk.vertices
+            contact=chunk.material==RenderMaterial.CONTACT_SHADOW
+            surfaceBias=if(contact)-1e-7 else chunk.depthBias*1e-7
+            grainDetail=when(frame.quality){RenderQuality.PERFORMANCE->TextureDetail.LOW;RenderQuality.BALANCED->if(frame.graphics.textureDetail==TextureDetail.HIGH)TextureDetail.MEDIUM else frame.graphics.textureDetail;else->frame.graphics.textureDetail}
+            grainStrength=if(!frame.is3D || contact || grainDetail==TextureDetail.LOW)0.0 else 1.0
             val depthOnly = mode == ViewMode.HIDDEN_LINE || mode == ViewMode.SECTION
             val transparent = mode == ViewMode.XRAY || mode == ViewMode.TRANSPARENT
             for (offset in values.indices step 30) {
                 val triangle = ArrayList<Vertex>(3)
+                grainFacing=0.0
                 repeat(3) { index ->
                     val start = offset + index * 10
                     val point = Point3(chunk.origin.x + values[start], chunk.origin.y + values[start + 1], chunk.origin.z + values[start + 2])
                     val normal = Point3(values[start + 3].toDouble(), values[start + 4].toDouble(), values[start + 5].toDouble())
                     val facingNormal = if (dot(normal, projector.viewDirection) < 0) Point3(-normal.x,-normal.y,-normal.z) else normal
-                    val shade = when (mode) {
-                        ViewMode.REALISTIC -> .22 + .62 * max(0.0, dot(facingNormal,keyLight)) + .16 * max(0.0,dot(facingNormal,fillLight))
-                        ViewMode.SHADED, ViewMode.SHADED_WITH_EDGES -> .36 + .64 * max(0.0,dot(facingNormal,keyLight))
-                        else -> 1.0
-                    }
-                    val specular = if (mode == ViewMode.REALISTIC) .22 * max(0.0,dot(facingNormal,halfLight)).pow(32) else 0.0
-                    val rgb = contrast(values[start + 6].toDouble(), values[start + 7].toDouble(), values[start + 8].toDouble(), surface = true)
+                    grainFacing+=abs(dot(facingNormal,projector.viewDirection))/3
+                    val shade=if(!contact && mode in listOf(ViewMode.REALISTIC,ViewMode.SHADED,ViewMode.SHADED_WITH_EDGES,ViewMode.XRAY,ViewMode.TRANSPARENT))matteIllumination(facingNormal,keyLight,frame.graphics.lighting)else 1.0
+                    val specular = if(!contact && mode == ViewMode.REALISTIC) .035 * max(0.0,dot(facingNormal,halfLight)).pow(12) else 0.0
+                    val rgb = if(contact)doubleArrayOf(0.0,0.0,0.0)else contrast(values[start + 6].toDouble(), values[start + 7].toDouble(), values[start + 8].toDouble(), surface = true)
                     triangle.add(projector.clip(point, rgb[0] * shade + specular, rgb[1] * shade + specular, rgb[2] * shade + specular,
-                        values[start + 9].toDouble() * if (transparent) .28 else 1.0))
+                        values[start + 9].toDouble() * if (transparent) .28 else 1.0).copy(
+                            tx=values[start].toDouble()+chunk.origin.x%64,ty=values[start+1].toDouble()+chunk.origin.y%64,tz=values[start+2].toDouble()+chunk.origin.z%64))
                 }
                 val clipped = clipPolygon(triangle)
                 for (index in 1 until clipped.lastIndex) {
@@ -293,15 +313,21 @@ object ViewExport {
                 val v = edge(c, a, x + .5, y + .5) / area
                 val w = 1 - u - v
                 if (min(u, min(v, w)) < -1e-9) continue
-                val z = u * a.z + v * b.z + w * c.z
+                val z = u * a.z + v * b.z + w * c.z + surfaceBias
                 val index = y * width + x
                 if (!transparent && z > depths[index] + 1e-7) continue
-                if (!transparent) depths[index] = z.toFloat()
+                if (!transparent && !contact) depths[index] = z.toFloat()
                 if (depthOnly) continue
                 val divisor = u * a.inverseW + v * b.inverseW + w * c.inverseW
                 if (divisor <= 0 || !divisor.isFinite()) continue
                 fun value(f: (Screen) -> Double) = (u * f(a) * a.inverseW + v * f(b) * b.inverseW + w * f(c) * c.inverseW) / divisor
-                val color = Color.argb(channel(value { it.alpha }), channel(value { it.r }), channel(value { it.g }), channel(value { it.b }))
+                val density=if(frame.orbit.projection==Projection.PERSPECTIVE)request.height*divisor/(2*tan(OrbitCamera.FOV_Y/2))else request.height/frame.orbit.orthographicHeight
+                val amount=if(grainStrength==0.0)0.0 else textureStrength(grainDetail,density*grainFacing)
+                val grain=if(amount==0.0)1.0 else matteTexture(Point3(
+                    (u*a.tx*a.inverseW+v*b.tx*b.inverseW+w*c.tx*c.inverseW)/divisor,
+                    (u*a.ty*a.inverseW+v*b.ty*b.inverseW+w*c.ty*c.inverseW)/divisor,
+                    (u*a.tz*a.inverseW+v*b.tz*b.inverseW+w*c.tz*c.inverseW)/divisor),grainDetail,amount)
+                val color = Color.argb(channel(value { it.alpha }), channel(value { it.r }*grain), channel(value { it.g }*grain), channel(value { it.b }*grain))
                 pixels[index] = if (transparent || Color.alpha(color) < 255) blend(pixels[index], color) else color
             }
         }
@@ -318,8 +344,8 @@ object ViewExport {
         private val camera = request.frame.orbit
         private val cy = cos(camera.yaw); private val sy = sin(camera.yaw)
         private val cp = cos(camera.pitch); private val sp = sin(camera.pitch)
-        private val near = max(1e-5, camera.distance * .0001)
-        private val far = max(camera.distance * 100, camera.orthographicHeight * 100)
+        private val near = camera.clipDistances().near
+        private val far = camera.clipDistances().far
         val viewDirection = Point3(cp * cy,cp * sy,sp)
 
         fun project(point: Point3): Screen? {
@@ -350,19 +376,20 @@ object ViewExport {
 
         fun screen(vertex: Vertex) = Screen((vertex.x / vertex.w + 1) * width / 2,
             (1 - vertex.y / vertex.w) * height / 2, vertex.z / vertex.w, 1 / vertex.w,
-            vertex.r, vertex.g, vertex.b, vertex.alpha)
+            vertex.r, vertex.g, vertex.b, vertex.alpha,vertex.tx,vertex.ty,vertex.tz)
     }
 
     private data class Vertex(val x: Double, val y: Double, val z: Double, val w: Double,
-        val r: Double, val g: Double, val b: Double, val alpha: Double) {
+        val r: Double, val g: Double, val b: Double, val alpha: Double,val tx:Double=0.0,val ty:Double=0.0,val tz:Double=0.0) {
         fun distance(plane: Int): Double = when (plane) { 0 -> w + x; 1 -> w - x; 2 -> w + y; 3 -> w - y; 4 -> w + z; else -> w - z }
         fun mix(other: Vertex, t: Double) = Vertex(x + (other.x - x) * t, y + (other.y - y) * t,
             z + (other.z - z) * t, w + (other.w - w) * t, r + (other.r - r) * t,
-            g + (other.g - g) * t, b + (other.b - b) * t, alpha + (other.alpha - alpha) * t)
+            g + (other.g - g) * t, b + (other.b - b) * t, alpha + (other.alpha - alpha) * t,
+            tx+(other.tx-tx)*t,ty+(other.ty-ty)*t,tz+(other.tz-tz)*t)
     }
 
     private data class Screen(val x: Double, val y: Double, val z: Double, val inverseW: Double,
-        val r: Double, val g: Double, val b: Double, val alpha: Double)
+        val r: Double, val g: Double, val b: Double, val alpha: Double,val tx:Double=0.0,val ty:Double=0.0,val tz:Double=0.0)
 
     private fun clipPolygon(input: List<Vertex>): List<Vertex> {
         var result = input

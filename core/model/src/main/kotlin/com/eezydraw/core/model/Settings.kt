@@ -34,7 +34,7 @@ data class ProjectSettings(
     val defaultWallHeight: Double = 3.0,
     val routeDefaults: Map<RouteKind, RoutingSettings> = emptyMap(),
     val defaultRouteElevations: Map<RouteKind, ElevationSetting> = emptyMap(),
-    val viewMode: ViewMode = ViewMode.WIREFRAME,
+    val viewMode: ViewMode = ViewMode.SHADED_WITH_EDGES,
     val showCeilings:Boolean=true,
     val showMeasurements: Boolean = true,
     /** Render/readout option; the app's detailed-measurement preference overrides this at display time. */
@@ -84,7 +84,8 @@ data class AppSettings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val languageTag: String = "en",
     val inputMode: InputMode = InputMode.TOUCH,
-    val renderQuality: RenderQuality = RenderQuality.BALANCED,
+    val renderQuality: RenderQuality = RenderQuality.QUALITY,
+    val graphics:GraphicsOptions=GraphicsOptions(),
     val autosaveIntervalSeconds: Int = 60,
     val backupEnabled: Boolean = true,
     val undoLimit: Int = 100,

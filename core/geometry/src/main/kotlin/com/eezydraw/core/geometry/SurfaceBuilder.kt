@@ -50,7 +50,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val component = element.body as? ElementBody.Component
         val definition = component?.let { library[it.libraryItemId] }
         val material = (element.materialId ?: definition?.materialId)?.let(materials::get)
-        val colour = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb ?: 0xFF6688AA
+        val colour = renderColour(element,layer,system,material)
         val transform = SurfaceTransform(element.transform)
         val partSide=if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter=presentation.roomCenter(element)
@@ -113,7 +113,11 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
             }
         }
     }
-    return collector.finish()
+    val byId=document.elements.associateBy {it.id.value}
+    return collector.finish().let {scene->scene.copy(chunks=scene.chunks.map {chunk->
+        val e=byId.getValue(chunk.elementId)
+        chunk.copy(depthBias=if(e.body is ElementBody.Room)2f else 1f,material=renderMaterial(e),lodAllowed=e.body is ElementBody.Component && (e.body as ElementBody.Component).wallService==null && !e.isCeiling)
+    })}
 }
 
 private fun surfaceShape(shape: Shape, emit: SurfaceEmitter) {

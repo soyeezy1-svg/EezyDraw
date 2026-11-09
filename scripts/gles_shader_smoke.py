@@ -27,7 +27,7 @@ initialize = proc('eglInitialize', C.c_uint, C.c_void_p, C.POINTER(C.c_int), C.P
 major, minor = C.c_int(), C.c_int()
 assert initialize(display, C.byref(major), C.byref(minor))
 assert proc('eglBindAPI', C.c_uint, C.c_uint)(0x30A0)
-attributes = (C.c_int * 17)(0x3033, 1, 0x3040, 4, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3025, 16, 0x3038, 0, 0)
+attributes = (C.c_int * 17)(0x3033, 1, 0x3040, 4, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3025, 24, 0x3038, 0, 0)
 config, count = C.c_void_p(), C.c_int()
 assert proc('eglChooseConfig', C.c_uint, C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_void_p), C.c_int, C.POINTER(C.c_int))(display, attributes, C.byref(config), 1, C.byref(count)) and count.value
 surface_attrs = (C.c_int * 5)(0x3057, 64, 0x3056, 64, 0x3038)
@@ -233,6 +233,12 @@ def surface_inputs(lighting=0, opacity=1, model=identity, normals=identity3):
     normal_uniform(uniform(surface_program, b'uNormalMatrix'), 1, 0, (C.c_float * 9)(*normals))
     set_offset(uniform(surface_program, b'uOffset'), 0, 0, 0)
     set_offset(uniform(surface_program, b'uViewDirection'), 0, 0, 1)
+    set_offset(uniform(surface_program, b'uKeyLight'), .45, -.40, .80)
+    proc('glUniform2f', None, C.c_int, C.c_float, C.c_float)(uniform(surface_program,b'uLightStrength'),.48,.52)
+    set_offset(uniform(surface_program,b'uTextureOffset'),0,0,0)
+    set_dark(uniform(surface_program,b'uGrain'),0)
+    set_dark(uniform(surface_program,b'uFrequency'),0)
+    proc('glUniform2f',None,C.c_int,C.c_float,C.c_float)(uniform(surface_program,b'uTextureDensity'),64,0)
     for name, value in [(b'uLighting', lighting), (b'uOpacity', opacity), (b'uSelection', 0), (b'uDark', 0)]:
         set_dark(uniform(surface_program, name), value)
 def square(z=0, rgb=(.8,.4,.2), normal=(0,0,1)):
@@ -256,7 +262,7 @@ surface_inputs(lighting=1,model=nonuniform,normals=[.5,0,0, 0,1,0, 0,0,2])
 reset(); square(normal=(1,0,1)); normal_pixel = pixel()
 normal_length = math.sqrt(.5**2+2**2)
 key_length = math.sqrt(.45**2+.40**2+.80**2)
-illumination = .36 + .64 * ((.5*.45+2*.80)/(normal_length*key_length))
+illumination = .48 + .52 * ((.5*.45+2*.80)/(normal_length*key_length))
 assert abs(normal_pixel[0]-204*illumination) <= 3, (normal_pixel,illumination)
 # Tilting a selected surface must rotate its normal as well as its positions. Work
 # in chunk-local coordinates around the same billion-metre project origin as the lines.
@@ -272,7 +278,7 @@ for label, rotation in [('X tilt', (.6,0,0)), ('Y tilt', (0,-.5,0)), ('XYZ tilt'
     reset(); square(); tilted = pixel()
     normal = [linear[i][2] for i in range(3)]
     diffuse = max(0, (normal[0]*.45 - normal[1]*.40 + normal[2]*.80)/key_length)
-    expected = 204*(.36+.64*diffuse)
+    expected = 204*(.48+.52*diffuse)
     assert abs(tilted[0]-expected) <= 3, (label, tilted, expected)
     tilted_surface_samples.append((label, tilted))
 surface_inputs(opacity=.28)
@@ -304,6 +310,128 @@ line((1,0,0),z=.5); hidden_pixel=pixel()
 assert max(hidden_pixel[:3]) == 0, hidden_pixel
 line((0,1,0),z=-.5); front_pixel=pixel()
 assert front_pixel[1] > 240, front_pixel
+# Camera-relative directional light and soft/strong ambient coefficients are real uniforms.
+surface_inputs(lighting=1)
+proc('glDisable',None,C.c_uint)(0x0B71)
+set_offset(uniform(surface_program,b'uKeyLight'),1,0,1)
+reset();square(normal=(1,0,0));camera_lit=pixel()
+set_offset(uniform(surface_program,b'uKeyLight'),-1,0,1)
+reset();square(normal=(1,0,0));camera_unlit=pixel()
+assert camera_lit[0] > camera_unlit[0]+50,(camera_lit,camera_unlit)
+proc('glUniform2f',None,C.c_int,C.c_float,C.c_float)(uniform(surface_program,b'uLightStrength'),.64,.36)
+reset();square(normal=(1,0,0));soft_ambient=pixel()
+proc('glUniform2f',None,C.c_int,C.c_float,C.c_float)(uniform(surface_program,b'uLightStrength'),.32,.68)
+reset();square(normal=(1,0,0));strong_ambient=pixel()
+assert soft_ambient[0]>strong_ambient[0]+50,(soft_ambient,strong_ambient)
+# Production FXAA: a single-sample diagonal gains fractional edge coverage, without blurring
+# flat background. Native EGL depth stays 24-bit; the colour copy has no offscreen depth buffer.
+for attrib in surface_attributes:disable_attribute(attrib)
+use_program(program)
+proc('glBindBuffer',None,C.c_uint,C.c_uint)(0x8892,buffer)
+for attrib in [position,color]:proc('glEnableVertexAttribArray',None,C.c_uint)(attrib)
+vertex_pointer(position,3,0x1406,0,28,None);vertex_pointer(color,4,0x1406,0,28,C.c_void_p(12))
+matrix(identity);matrix_uniform(uniform(program,b'uModel'),1,0,(C.c_float*16)(*identity))
+set_offset(uniform(program,b'uOffset'),0,0,0);set_dark(uniform(program,b'uDark'),0);set_dark(uniform(program,b'uSelection'),0);set_dark(uniform(program,b'uOpacity'),1)
+clear_color(1,1,1,1);reset()
+diagonal=(C.c_float*14)(-.9,-.63,0,0,0,0,1,.9,.71,0,0,0,0,1)
+proc('glBufferData',None,C.c_uint,C.c_ssize_t,C.c_void_p,C.c_uint)(0x8892,C.sizeof(diagonal),diagonal,0x88E4)
+proc('glDrawArrays',None,C.c_uint,C.c_int,C.c_int)(1,0,2)
+def read_image():
+    out=(C.c_ubyte*(64*64*4))()
+    proc('glReadPixels',None,C.c_int,C.c_int,C.c_int,C.c_int,C.c_uint,C.c_uint,C.c_void_p)(0,0,64,64,0x1908,0x1401,out)
+    return list(out)[::4]
+before_aa=read_image()
+fxaa_source=(Path(__file__).resolve().parents[1]/'app/src/main/java/com/eezydraw/ui/canvas/FxaaPass.kt').read_text()
+fxaa_program=create_program()
+for name,kind in [('VERTEX',0x8B31),('FRAGMENT',0x8B30)]:
+    body=re.search(r'const val '+name+r'\s*=\s*"""(.*?)"""',fxaa_source,re.S).group(1).encode()
+    shader=create_shader(kind);shader_source(shader,1,C.byref(C.c_char_p(body)),None);compile_shader(shader)
+    shader_status(shader,0x8B81,C.byref(status));assert status.value==1,name+' FXAA compile'
+    attach_shader(fxaa_program,shader)
+link_program(fxaa_program);program_status(fxaa_program,0x8B82,C.byref(status));assert status.value==1,'FXAA link'
+texture=C.c_uint();proc('glGenTextures',None,C.c_int,C.POINTER(C.c_uint))(1,C.byref(texture))
+proc('glActiveTexture',None,C.c_uint)(0x84C0);proc('glBindTexture',None,C.c_uint,C.c_uint)(0x0DE1,texture)
+for name,value in [(0x2801,0x2601),(0x2800,0x2601),(0x2802,0x812F),(0x2803,0x812F)]:proc('glTexParameteri',None,C.c_uint,C.c_uint,C.c_int)(0x0DE1,name,value)
+proc('glCopyTexImage2D',None,C.c_uint,C.c_int,C.c_uint,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int)(0x0DE1,0,0x1908,0,0,64,64,0)
+for attrib in [position,color]:disable_attribute(attrib)
+use_program(fxaa_program);proc('glUniform1i',None,C.c_int,C.c_int)(uniform(fxaa_program,b'uImage'),0)
+proc('glUniform2f',None,C.c_int,C.c_float,C.c_float)(uniform(fxaa_program,b'uPixel'),1/64,1/64)
+quad=(C.c_float*8)(-1,-1,1,-1,-1,1,1,1)
+proc('glBufferData',None,C.c_uint,C.c_ssize_t,C.c_void_p,C.c_uint)(0x8892,C.sizeof(quad),quad,0x88E4)
+a=attribute(fxaa_program,b'aPosition');proc('glEnableVertexAttribArray',None,C.c_uint)(a);vertex_pointer(a,2,0x1406,0,8,None)
+proc('glDrawArrays',None,C.c_uint,C.c_int,C.c_int)(5,0,4)
+after_aa=read_image()
+assert sum(10<x<245 for x in after_aa)>sum(10<x<245 for x in before_aa)+20,'FXAA must smooth diagonal coverage'
+assert after_aa[0]==255 and min(after_aa)<160,'FXAA must preserve flat background and visible thin lines'
+print('Graphics quality smoke: camera light, soft/strong ambient and production FXAA diagonal coverage passed.')
+
+# Exercise the app's GLES3 offscreen MSAA -> single-sample resolve -> window FXAA path.
+modern_attrs=(C.c_int*19)(0x3033,1,0x3040,64,0x3024,8,0x3023,8,0x3022,8,0x3021,8,0x3025,24,0x3031,0,0x3038)
+modern_config,modern_count=C.c_void_p(),C.c_int()
+modern_supported=proc('eglChooseConfig',C.c_uint,C.c_void_p,C.POINTER(C.c_int),C.POINTER(C.c_void_p),C.c_int,C.POINTER(C.c_int))(display,modern_attrs,C.byref(modern_config),1,C.byref(modern_count)) and modern_count.value
+if modern_supported:
+    modern_surface=proc('eglCreatePbufferSurface',C.c_void_p,C.c_void_p,C.c_void_p,C.POINTER(C.c_int))(display,modern_config,surface_attrs)
+    modern_context=proc('eglCreateContext',C.c_void_p,C.c_void_p,C.c_void_p,C.c_void_p,C.POINTER(C.c_int))(display,modern_config,context,(C.c_int*3)(0x3098,3,0x3038))
+    assert modern_surface and modern_context
+    assert proc('eglMakeCurrent',C.c_uint,C.c_void_p,C.c_void_p,C.c_void_p,C.c_void_p)(display,modern_surface,modern_surface,modern_context)
+    proc('glViewport',None,C.c_int,C.c_int,C.c_int,C.c_int)(0,0,64,64)
+    def new_name(function):
+        out=C.c_uint();proc(function,None,C.c_int,C.POINTER(C.c_uint))(1,C.byref(out));return out
+    supported_counts=[]
+    for internal_format in [0x8058,0x81A6]:
+        number=C.c_int();proc('glGetInternalformativ',None,C.c_uint,C.c_uint,C.c_uint,C.c_int,C.POINTER(C.c_int))(0x8D41,internal_format,0x9380,1,C.byref(number))
+        counts=(C.c_int*number.value)();proc('glGetInternalformativ',None,C.c_uint,C.c_uint,C.c_uint,C.c_int,C.POINTER(C.c_int))(0x8D41,internal_format,0x80A9,number.value,counts)
+        supported_counts.append(set(counts))
+    assert 4 in supported_counts[0].intersection(supported_counts[1]),'RGBA8/depth24 common sample support'
+    msaa_fbo=new_name('glGenFramebuffers');resolve_fbo=new_name('glGenFramebuffers')
+    msaa_colour=new_name('glGenRenderbuffers');msaa_depth=new_name('glGenRenderbuffers');resolved_texture=new_name('glGenTextures')
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8D40,msaa_fbo)
+    proc('glBindRenderbuffer',None,C.c_uint,C.c_uint)(0x8D41,msaa_colour)
+    proc('glRenderbufferStorageMultisample',None,C.c_uint,C.c_int,C.c_uint,C.c_int,C.c_int)(0x8D41,4,0x8058,64,64)
+    proc('glFramebufferRenderbuffer',None,C.c_uint,C.c_uint,C.c_uint,C.c_uint)(0x8D40,0x8CE0,0x8D41,msaa_colour)
+    proc('glBindRenderbuffer',None,C.c_uint,C.c_uint)(0x8D41,msaa_depth)
+    proc('glRenderbufferStorageMultisample',None,C.c_uint,C.c_int,C.c_uint,C.c_int,C.c_int)(0x8D41,4,0x81A6,64,64)
+    proc('glFramebufferRenderbuffer',None,C.c_uint,C.c_uint,C.c_uint,C.c_uint)(0x8D40,0x8D00,0x8D41,msaa_depth)
+    assert proc('glCheckFramebufferStatus',C.c_uint,C.c_uint)(0x8D40)==0x8CD5
+    actual_samples=C.c_int();proc('glGetRenderbufferParameteriv',None,C.c_uint,C.c_uint,C.POINTER(C.c_int))(0x8D41,0x8CAB,C.byref(actual_samples))
+    assert actual_samples.value>=4
+    proc('glActiveTexture',None,C.c_uint)(0x84C0);proc('glBindTexture',None,C.c_uint,C.c_uint)(0x0DE1,resolved_texture)
+    for name,value in [(0x2801,0x2601),(0x2800,0x2601),(0x2802,0x812F),(0x2803,0x812F)]:proc('glTexParameteri',None,C.c_uint,C.c_uint,C.c_int)(0x0DE1,name,value)
+    proc('glTexImage2D',None,C.c_uint,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int,C.c_uint,C.c_uint,C.c_void_p)(0x0DE1,0,0x8058,64,64,0,0x1908,0x1401,None)
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8D40,resolve_fbo)
+    proc('glFramebufferTexture2D',None,C.c_uint,C.c_uint,C.c_uint,C.c_uint,C.c_int)(0x8D40,0x8CE0,0x0DE1,resolved_texture,0)
+    assert proc('glCheckFramebufferStatus',C.c_uint,C.c_uint)(0x8D40)==0x8CD5
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8D40,msaa_fbo)
+    use_program(program);proc('glBindBuffer',None,C.c_uint,C.c_uint)(0x8892,buffer)
+    for attrib in [position,color]:proc('glEnableVertexAttribArray',None,C.c_uint)(attrib)
+    vertex_pointer(position,3,0x1406,0,28,None);vertex_pointer(color,4,0x1406,0,28,C.c_void_p(12))
+    matrix(identity);matrix_uniform(uniform(program,b'uModel'),1,0,(C.c_float*16)(*identity))
+    set_offset(uniform(program,b'uOffset'),0,0,0);set_dark(uniform(program,b'uDark'),0);set_dark(uniform(program,b'uSelection'),0);set_dark(uniform(program,b'uOpacity'),1)
+    clear_color(1,1,1,1);reset()
+    proc('glBufferData',None,C.c_uint,C.c_ssize_t,C.c_void_p,C.c_uint)(0x8892,C.sizeof(diagonal),diagonal,0x88E4)
+    proc('glDrawArrays',None,C.c_uint,C.c_int,C.c_int)(1,0,2)
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8CA8,msaa_fbo)
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8CA9,resolve_fbo)
+    proc('glBlitFramebuffer',None,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int,C.c_uint,C.c_uint)(0,0,64,64,0,0,64,64,0x4000,0x2600)
+    assert proc('glGetError',C.c_uint)()==0,'MSAA resolve'
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8D40,resolve_fbo);raw_msaa=read_image()
+    proc('glBindFramebuffer',None,C.c_uint,C.c_uint)(0x8D40,0)
+    for attrib in [position,color]:disable_attribute(attrib)
+    use_program(fxaa_program);proc('glUniform1i',None,C.c_int,C.c_int)(uniform(fxaa_program,b'uImage'),0)
+    proc('glUniform2f',None,C.c_int,C.c_float,C.c_float)(uniform(fxaa_program,b'uPixel'),1/64,1/64)
+    quad_buffer=new_name('glGenBuffers');proc('glBindBuffer',None,C.c_uint,C.c_uint)(0x8892,quad_buffer)
+    proc('glBufferData',None,C.c_uint,C.c_ssize_t,C.c_void_p,C.c_uint)(0x8892,C.sizeof(quad),quad,0x88E4)
+    quad_attribute=attribute(fxaa_program,b'aPosition');proc('glEnableVertexAttribArray',None,C.c_uint)(quad_attribute);vertex_pointer(quad_attribute,2,0x1406,0,8,None)
+    proc('glDrawArrays',None,C.c_uint,C.c_int,C.c_int)(5,0,4)
+    post_msaa=read_image()
+    assert sum(10<x<245 for x in post_msaa)>20,('MSAA + FXAA coverage',min(post_msaa),max(post_msaa))
+    assert post_msaa[0]==255 and min(post_msaa)<160
+    assert proc('glGetError',C.c_uint)()==0
+    print('Native GLES3 MSAA smoke:',actual_samples.value,'samples, 24-bit depth; explicit resolve, FXAA and single-sample readback passed.')
+    assert proc('eglMakeCurrent',C.c_uint,C.c_void_p,C.c_void_p,C.c_void_p,C.c_void_p)(display,surface,surface,context)
+else:
+    print('GLES3 offscreen MSAA unavailable in this driver; GLES2 FXAA was verified.')
+
 error=proc('glGetError', C.c_uint)()
 assert error == 0, hex(error)
 print('Mesa EGL/GLES2 smoke passed: production line/surface shaders, VBO layouts, dark contrast, material colours, plan elevation projection, hidden-line depth, lighting, transparency, inverse-transpose normals, XYZ tilt lighting and selected local resizing/XYZ rotation at distant origin, no GL errors.')

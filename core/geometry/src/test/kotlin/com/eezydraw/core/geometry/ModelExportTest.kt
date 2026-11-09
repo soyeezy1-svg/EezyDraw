@@ -36,8 +36,8 @@ class ModelExportTest {
         }
     }
     @Test fun unitsWorldOrientationAndOriginAreRetained() {
-        val metre=bytes(ModelExportOptions(format=ModelFormat.OBJ)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).map(String::toDouble)
-        val mm=bytes(ModelExportOptions(format=ModelFormat.OBJ,units=ModelUnits.MM)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).map(String::toDouble)
+        val metre=bytes(ModelExportOptions(format=ModelFormat.OBJ)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).take(3).map(String::toDouble)
+        val mm=bytes(ModelExportOptions(format=ModelFormat.OBJ,units=ModelUnits.MM)).toString(Charsets.UTF_8).lines().first {it.startsWith("v ")}.split(" ").drop(1).take(3).map(String::toDouble)
         metre.zip(mm).forEach {(m,n)->assertEquals(m*1000,n,1e-8)}
         assertTrue(metre[0]>1000);assertTrue(-metre[2]>2000)
         for(unit in ModelUnits.entries)for(format in ModelFormat.entries)File(System.getProperty("java.io.tmpdir"),"eezy-model-export/${unit.name}.${format.extension}").writeBytes(bytes(ModelExportOptions(format=format,units=unit)))

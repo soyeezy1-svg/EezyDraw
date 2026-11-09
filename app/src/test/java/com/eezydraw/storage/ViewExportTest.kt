@@ -100,7 +100,8 @@ class ViewExportTest {
         val wire=ViewExport.render(ViewExportRequest(document,frame(ViewMode.WIREFRAME).copy(is3D=true,orbit=camera),200,200))
         val hidden=ViewExport.render(ViewExportRequest(document,frame(ViewMode.HIDDEN_LINE).copy(is3D=true,orbit=camera),200,200))
         try {
-            assertEquals(red.toInt(),wire.getPixel(100,100))
+            val visible=wire.getPixel(100,100)
+            assertTrue("Antialiased wire retains the red rear edge",Color.red(visible)>Color.green(visible)+80 && Color.red(visible)>Color.blue(visible)+80)
             assertEquals("The face depth prepass must reject the rear edge",background,hidden.getPixel(100,100))
         } finally { wire.recycle(); hidden.recycle() }
     }

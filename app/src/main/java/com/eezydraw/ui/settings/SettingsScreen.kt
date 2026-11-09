@@ -62,6 +62,9 @@ import com.eezydraw.core.model.InputMode
 import com.eezydraw.core.model.LengthUnit
 import com.eezydraw.core.model.PrecisionOffsetSide
 import com.eezydraw.core.model.ProjectTemplate
+import com.eezydraw.core.model.GraphicsOptions
+import com.eezydraw.core.model.LightingStrength
+import com.eezydraw.core.model.TextureDetail
 import com.eezydraw.core.model.RenderQuality
 import com.eezydraw.core.model.RouteKind
 import com.eezydraw.core.model.SnapMode
@@ -339,14 +342,20 @@ fun SettingsScreen(
                 ChoiceField(
                     stringResource(R.string.settings_quality), current.renderQuality,
                     RenderQuality.entries.map { it to stringResource(when (it) {
-                        RenderQuality.PERFORMANCE -> R.string.settings_performance
-                        RenderQuality.BALANCED -> R.string.settings_balanced
-                        RenderQuality.QUALITY -> R.string.settings_quality_high
+                        RenderQuality.PERFORMANCE -> R.string.graphics_low
+                        RenderQuality.BALANCED -> R.string.graphics_medium
+                        RenderQuality.QUALITY -> R.string.graphics_high
                     }) },
                     { update(current.copy(renderQuality = it)) }, "settings_quality",
                 )
-                Text(stringResource(R.string.settings_editor_defaults_help), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.graphics_quality_help), style = MaterialTheme.typography.bodySmall)
             }
+            item {SettingCheckbox(stringResource(R.string.graphics_aa),current.graphics.antiAliasing,{update(current.copy(graphics=current.graphics.copy(antiAliasing=it)))},"settings_anti_aliasing")}
+            item {ChoiceField(stringResource(R.string.graphics_lighting),current.graphics.lighting,LightingStrength.entries.map {it to stringResource(when(it){LightingStrength.SOFT->R.string.graphics_soft;LightingStrength.NORMAL->R.string.graphics_normal;LightingStrength.STRONG->R.string.graphics_strong})},{update(current.copy(graphics=current.graphics.copy(lighting=it)))},"settings_lighting")}
+            item {ChoiceField(stringResource(R.string.graphics_texture),current.graphics.textureDetail,TextureDetail.entries.map {it to stringResource(when(it){TextureDetail.LOW->R.string.graphics_low;TextureDetail.MEDIUM->R.string.graphics_medium;TextureDetail.HIGH->R.string.graphics_high})},{update(current.copy(graphics=current.graphics.copy(textureDetail=it)))},"settings_texture_detail")}
+            item {SettingCheckbox(stringResource(R.string.graphics_contact),current.graphics.contactShadows,{update(current.copy(graphics=current.graphics.copy(contactShadows=it)))},"settings_contact_shadows")}
+            item {SettingCheckbox(stringResource(R.string.graphics_auto),current.graphics.automaticQuality,{update(current.copy(graphics=current.graphics.copy(automaticQuality=it)))},"settings_automatic_quality")}
+            item {SettingCheckbox(stringResource(R.string.graphics_fps),current.graphics.showFrameRate,{update(current.copy(graphics=current.graphics.copy(showFrameRate=it)))},"settings_frame_rate")}
             item { NumericField("undo", R.string.settings_undo, draft, errors, input, integer = true, help = R.string.settings_undo_help) }
             item { SectionHeading(stringResource(R.string.settings_exports)) }
             item {

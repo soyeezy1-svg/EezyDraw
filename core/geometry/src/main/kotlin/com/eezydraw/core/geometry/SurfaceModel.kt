@@ -18,6 +18,9 @@ data class SurfaceChunk(
     val display: ObjectDisplay = ObjectDisplay.NORMAL,
     val roomSide: RoomSideRef? = null,
     val roomCenter: Point3? = null,
+    val material:com.eezydraw.core.model.RenderMaterial=com.eezydraw.core.model.RenderMaterial.OTHER,
+    val lodAllowed:Boolean=false,
+    val depthBias:Float=1f,
 )
 
 data class SurfaceScene(val chunks: List<SurfaceChunk>, val bounds: Bounds3) {
