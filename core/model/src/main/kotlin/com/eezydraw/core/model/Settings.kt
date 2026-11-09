@@ -35,6 +35,7 @@ data class ProjectSettings(
     val routeDefaults: Map<RouteKind, RoutingSettings> = emptyMap(),
     val defaultRouteElevations: Map<RouteKind, ElevationSetting> = emptyMap(),
     val viewMode: ViewMode = ViewMode.WIREFRAME,
+    val showCeilings:Boolean=true,
     val showMeasurements: Boolean = true,
     /** Render/readout option; the app's detailed-measurement preference overrides this at display time. */
     val showDetailedMeasurements: Boolean = false,

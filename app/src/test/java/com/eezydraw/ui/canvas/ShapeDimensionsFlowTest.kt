@@ -279,12 +279,14 @@ class ShapeDimensionsFlowTest {
 
     private fun awaitRendered(element: Element) {
         val expected = compose.runOnIdle { elementWorldBounds(checkNotNull(model.state.value.document), setOf(element.id)) }
-        compose.waitUntil(10_000) {
+        try {compose.waitUntil(10_000) {
             renderedFrame.get()?.let {
                 val scene = it.selectionScene
                 it.selectionDelta == null && scene != null && scene.bounds == expected &&
                     scene.segments.any { segment -> segment.elementId == element.id.value }
             } == true
+        }} catch(error:androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Rendered selection did not reach ${element.body}: expected=$expected actual=${renderedFrame.get()?.selectionScene?.bounds} selected=${model.state.value.selectedIds}",error)
         }
         compose.waitForIdle()
     }

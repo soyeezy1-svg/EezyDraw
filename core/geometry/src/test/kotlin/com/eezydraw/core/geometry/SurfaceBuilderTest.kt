@@ -70,8 +70,8 @@ class SurfaceBuilderTest {
         val scene = buildSurfaceScene(document(room))
         val caps = triangles(scene).filter { t -> t.all { it.z == t[0].z } }
         assertEquals(15.0, caps.filter { it[0].z == 0.0 }.sumOf(::area), 1e-6)
-        assertEquals(15.0, caps.filter { it[0].z == 2.0 }.sumOf(::area), 1e-6)
-        assertEquals(70.0, triangles(scene).sumOf(::area), 1e-6)
+        assertEquals(0.0, caps.filter { it[0].z == 2.0 }.sumOf(::area), 1e-6)
+        assertEquals(55.0, triangles(scene).sumOf(::area), 1e-6)
         val slab = room.copy(body = ElementBody.Slab(boundary, .25))
         val slabScene = buildSurfaceScene(document(slab))
         assertEquals(-.25, slabScene.bounds.min.z, 0.0)

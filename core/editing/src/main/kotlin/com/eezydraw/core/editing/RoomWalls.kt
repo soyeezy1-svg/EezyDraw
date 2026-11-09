@@ -40,7 +40,7 @@ object RoomWalls {
      val reference=when(edge.options.alignment){RoomWallAlignment.CENTERLINE->WallReference.CENTERLINE;RoomWallAlignment.INSIDE_FACE->if(insideLeft)WallReference.LEFT_FINISH_FACE else WallReference.RIGHT_FINISH_FACE;RoomWallAlignment.OUTSIDE_FACE->if(insideLeft)WallReference.RIGHT_FINISH_FACE else WallReference.LEFT_FINISH_FACE}
      val old=before.elements.find {it.id==id}
      val wallBody=ElementBody.Wall(Point2(a.x,a.y),Point2(b.x,b.y),edge.options.thickness,edge.options.height*abs(edge.room.transform.scale.z),reference)
-     val base=old ?: Element(id,document.project.id,edge.room.layerId,wallBody,name="Room wall")
+     val base=document.elements.find {it.id==id} ?: old ?: Element(id,document.project.id,edge.room.layerId,wallBody,name="Room wall")
      base.copy(layerId=edge.room.layerId,body=wallBody,levelId=edge.room.levelId,transform=Transform3(Point3(z=a.z)),materialId=material.id,properties=base.properties+(GENERATED_ROOM_WALL to ParameterValue.Flag(true)))
     }
     val shape=wall.body as ElementBody.Wall

@@ -6,6 +6,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import com.eezydraw.core.data.SettingsRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
+import com.eezydraw.core.editing.RoomWalls
+import com.eezydraw.core.geometry.ScenePresentation
 import com.eezydraw.core.editing.EditDelta
 import com.eezydraw.core.editing.SketchGeometry
 import com.eezydraw.core.model.*
@@ -153,6 +155,53 @@ class AppViewModelPresentationTest {
             model.rename(saved.project.name)
             assertFalse("Reverting metadata compares against the recovered layout baseline",model.state.value.dirty)
         } finally {owner.clear()}
+    }
+
+    @Test fun generatedWallDisplayResetAndCeilingDeletionUseTheRealReconciliationAndHistoryPipeline()=runTest {
+        val store=fixture();val model=store.newViewModel();runCurrent()
+        model.create("Wall and ceiling controls",ProjectTemplate.EMPTY,LengthUnit.METRES);runCurrent()
+        val base=model.state.value.document!!;val layer=base.layers.first().id;val level=LevelId("coordination-level")
+        val room=Element(ElementId("room"),base.project.id,layer,ElementBody.Room(Polygon2(listOf(Point2(0.0,0.0),Point2(4.0,0.0),Point2(4.0,4.0),Point2(0.0,4.0)))),level,name="Room A")
+        val seed=base.copy(elements=listOf(room),levels=listOf(Level(level,base.project.id,"Level 1",0.0,.2,3.0)))
+        val generated=RoomWalls.generate(seed,setOf(room.id),RoomWallOptions()).preview(seed)
+        store.projects.documents[base.project.id.value]=generated;model.open(base.project.id.value);runCurrent()
+        val wall=generated.elements.first {it.body is ElementBody.Wall}
+        model.select(setOf(wall.id));model.setSelectionDisplay(ObjectDisplay.HIDDEN)
+        assertNull(model.state.value.error)
+        val hidden=model.state.value.document!!
+        assertEquals(ObjectDisplay.HIDDEN,hidden.elements.first {it.id==wall.id}.objectDisplay)
+        assertEquals(generated.elements.filter {it.id!=wall.id},hidden.elements.filter {it.id!=wall.id})
+        model.undo();assertEquals(generated,model.state.value.document)
+        model.redo();assertEquals(hidden,model.state.value.document)
+        // Hiding clears selection. Restore via the Visibility command, then reset a visible selection.
+        model.setElementsDisplay(setOf(wall.id),ObjectDisplay.NORMAL)
+        model.select(setOf(wall.id));model.setSelectionDisplay(ObjectDisplay.XRAY)
+        model.resetSelectionDisplay()
+        assertEquals(ObjectDisplay.NORMAL,ScenePresentation(model.state.value.document!!).display(model.state.value.document!!.elements.first {it.id==wall.id}))
+        model.setRoomCeiling(room.id,CeilingOptions(CeilingType.FLAT,2.6,.1))
+        assertNull(model.state.value.error)
+        val flat=model.state.value.document!!;val ceiling=flat.elements.single {it.isCeiling}
+        model.select(setOf(ceiling.id));model.deleteSelection()
+        assertNull(model.state.value.error);assertFalse(model.state.value.document!!.elements.any {it.isCeiling})
+        assertEquals(CeilingType.NONE,(model.state.value.document!!.elements.first {it.id==room.id}.body as ElementBody.Room).ceiling!!.type)
+        model.undo();assertEquals(flat,model.state.value.document)
+        model.redo();val removed=model.state.value.document!!
+        model.showCeilings(false);assertFalse(model.state.value.document!!.project.settings.showCeilings)
+        model.undo();assertEquals(removed,model.state.value.document)
+        model.setLevelCeiling(level,CeilingOptions(CeilingType.FLAT,2.5,.12))
+        assertNull(model.state.value.error)
+        assertEquals(2.5,model.state.value.document!!.levels.single().ceiling.height,0.0)
+        model.setRoomCeiling(room.id,null)
+        assertEquals(1,model.state.value.document!!.elements.count {it.isCeiling})
+        model.setLevelCeiling(level,CeilingOptions(CeilingType.NONE,2.5,.12))
+        assertFalse(model.state.value.document!!.elements.any {it.isCeiling})
+        assertNull((model.state.value.document!!.elements.first {it.id==room.id}.body as ElementBody.Room).ceiling)
+        model.setLevelCeiling(level,CeilingOptions(CeilingType.FLAT,2.5,.12))
+        assertEquals(1,model.state.value.document!!.elements.count {it.isCeiling})
+        model.save();runCurrent();val saved=model.state.value.document!!
+        model.open(saved.project.id.value);runCurrent();assertEquals(saved,model.state.value.document)
+        model.resetAllDisplay();assertNull(model.state.value.error)
+        assertTrue(model.state.value.document!!.elements.all {it.objectDisplay==ObjectDisplay.NORMAL})
     }
 
     private fun fixture()=TestAppRepositories(context,AppSettings(autosaveIntervalSeconds=0)).also(stores::add)

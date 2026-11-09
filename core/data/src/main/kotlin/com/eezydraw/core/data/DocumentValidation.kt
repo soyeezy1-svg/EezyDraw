@@ -50,6 +50,7 @@ internal fun validateDocument(document: ProjectDocument) {
         "The project thumbnail asset is missing.")
 
     document.elements.forEach { element ->
+        element.properties[CEILING_OWNER]?.let {ref->valid(ref is ParameterValue.Text && elements[ElementId(ref.value)]?.body is ElementBody.Room && element.body is ElementBody.Slab,"A ceiling room is missing.")}
         valid(element.layerId in layers, "An element refers to a missing layer.")
         valid(element.levelId == null || element.levelId in levels, "An element refers to a missing level.")
         valid(element.systemId == null || element.systemId in systems, "An element refers to a missing system.")

@@ -15,12 +15,16 @@ import kotlin.math.tan
 data class ElementProperties(val position: Point3, val rotation: Rotation3, val size: Point3)
 
 /** Hidden/locked metadata must not change the intrinsic dimensions displayed in Properties. */
-fun elementLocalBounds(document: ProjectDocument, element: Element): Bounds3 = buildDrawingScene(
-    unfilteredGeometryDocument(document.copy(elements=listOf(element.copy(transform=Transform3())))),
+fun elementLocalBounds(document: ProjectDocument, element: Element): Bounds3 {
+    val b=element.body as? ElementBody.Component
+    if(b!=null && document.libraryItems.find {it.id==b.libraryItemId}?.openingKind()!=null)return Bounds3(Point3(),Point3(b.size.width,b.size.depth,b.size.height))
+    return buildDrawingScene(
+    unfilteredGeometryDocument(document.copy(elements=listOf(element.copy(transform=Transform3())))), architecturalCuts=false,
 ).bounds
+}
 
 fun elementWorldBounds(document: ProjectDocument, ids: Set<ElementId>): Bounds3 = buildDrawingScene(
-    unfilteredGeometryDocument(document.copy(elements=document.elements.filter {it.id in ids})),
+    unfilteredGeometryDocument(document.copy(elements=document.elements.filter {it.id in ids})), architecturalCuts=false,
 ).bounds
 
 fun readProperties(document: ProjectDocument, element: Element): ElementProperties {

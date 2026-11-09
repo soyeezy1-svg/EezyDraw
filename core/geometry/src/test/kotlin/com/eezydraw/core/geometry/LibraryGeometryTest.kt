@@ -124,10 +124,18 @@ class LibraryGeometryTest {
             val physical = buildDrawingScene(doc)
             val plan = buildDrawingScene(doc, planSymbols = true)
             assertPoint(Point3(), physical.bounds.min, item.name)
-            assertPoint(Point3(resized.width, resized.depth, resized.height), physical.bounds.max, item.name)
+            val kind=item.openingKind()
+            val frame=minOf(.05,resized.width/10,resized.height/10)
+            val sweep=when(kind) {
+                OpeningKind.DOOR->resized.width-2*frame
+                OpeningKind.DOUBLE_DOOR->(resized.width-2*frame)/2
+                else->0.0
+            }
+            // An open leaf projects outside the nominal opening depth; the frame keeps W/H.
+            assertPoint(Point3(resized.width, maxOf(resized.depth,resized.depth/2+sweep), resized.height), physical.bounds.max, item.name)
             assertBounds(physical.bounds, plan.bounds)
             assertBounds(physical.bounds, buildSurfaceScene(doc).bounds)
-            assertTrue("${item.name} needs a plan symbol", plan.segments.size > physical.segments.size)
+            if(item.openingKind()==null)assertTrue("${item.name} needs a plan symbol", plan.segments.size > physical.segments.size)
         }
     }
 

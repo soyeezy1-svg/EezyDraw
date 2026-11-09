@@ -112,7 +112,7 @@ private sealed interface SceneLoad {
 
 private fun sameCanvasGeometry(a: ProjectDocument, b: ProjectDocument): Boolean =
     a.elements == b.elements && a.layers == b.layers && a.systems == b.systems && a.libraryItems == b.libraryItems &&
-        a.materials == b.materials && a.levels == b.levels && a.project.settings.showMeasurements == b.project.settings.showMeasurements &&
+        a.materials == b.materials && a.levels == b.levels && a.project.settings.showMeasurements == b.project.settings.showMeasurements && a.project.settings.showCeilings==b.project.settings.showCeilings &&
         a.project.settings.wallServices==b.project.settings.wallServices && a.project.settings.floorServices==b.project.settings.floorServices && a.project.settings.viewMode==b.project.settings.viewMode && a.project.settings.hiddenLevelIds==b.project.settings.hiddenLevelIds && a.project.settings.showHiddenObjects==b.project.settings.showHiddenObjects &&
         a.project.settings.lengthUnit == b.project.settings.lengthUnit &&
         a.project.settings.angleFormat == b.project.settings.angleFormat &&
@@ -233,6 +233,8 @@ fun DrawingCanvasScreen(
     var addSelection by rememberSaveable { mutableStateOf(false) }
     var propertiesSession by rememberSaveable { mutableIntStateOf(0) }
     var canvasLayout by remember(document.project.id) {mutableStateOf(document.project.settings.canvasLayout)}
+    var ceilingRoomDialog by remember(document.project.id){mutableStateOf<ElementId?>(null)}
+    var ceilingLevelDialog by remember(document.project.id){mutableStateOf<LevelId?>(null)}
     var selectedRoomSide by remember(document.project.id) {mutableStateOf<RoomSideRef?>(null)}
     LaunchedEffect(document.project.settings.canvasLayout) {canvasLayout=document.project.settings.canvasLayout}
     val panelsHidden=canvasLayout.hideAll
@@ -357,7 +359,7 @@ fun DrawingCanvasScreen(
 
     LaunchedEffect(document.project.id, document.elements, document.layers, document.systems, document.libraryItems,document.materials,document.levels,
         document.project.settings.lengthUnit, document.project.settings.angleFormat, document.project.settings.decimalPlaces,
-        document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
+        document.project.settings.showCeilings,document.project.settings.wallServices,document.project.settings.floorServices,document.project.settings.viewMode,document.project.settings.showMeasurements,document.project.settings.hiddenLevelIds,document.project.settings.showHiddenObjects,
         settings.showDetailedMeasurement,selectedIds,needsSurfaces,is3D,inspectionKey,issueView,sectionBox) {
         try {
             val previous = prepared
@@ -370,7 +372,7 @@ fun DrawingCanvasScreen(
                 val mainIds=allIds-selectedIds
                 val main = if (selectedIds.isEmpty()) scene else SectionClip.drawing(buildDrawingScene(renderDocument,mainIds,planSymbols),sectionBox)
                 val selected = if (selectedIds.isEmpty()) null else SectionClip.drawing(buildDrawingScene(renderDocument,selectedIds,planSymbols),sectionBox)
-                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)SectionClip.surfaces(buildSurfaceScene(renderDocument),sectionBox) else null
+                val surfaces=if(sameGeometry && previous!!.surfaces!=null) previous.surfaces else if(needsSurfaces)SectionClip.surfaces(buildSurfaceScene(renderDocument,planView=planSymbols),sectionBox) else null
                 val mainSurfaces=surfaces?.let {if(selectedIds.isEmpty())it else it.partition(selectedIds,false)}
                 val selectedSurfaces=if(selectedIds.isEmpty())null else surfaces?.partition(selectedIds,true)
                 val surfacedIds=surfaces?.chunks.orEmpty().mapTo(HashSet()) {ElementId(it.elementId)}
@@ -384,7 +386,7 @@ fun DrawingCanvasScreen(
                     if (selectedIds.size == 1) document.elements.find { it.id in selectedIds && !isMeasurement(it) }?.let { resizeFrame(document,it) } else null
                 SceneLoad.Ready(document, selectedIds, scene, main, selected,
                     if (sameGeometry) previous!!.snaps else SnapEngine(index),
-                    if (sameGeometry) previous!!.picker else EditorPicker(document, scene, index),resize,
+                    if (sameGeometry) previous!!.picker else EditorPicker(renderDocument, scene, index,planView=planSymbols),resize,
                     MoveContext(document,selectedIds,scene),surfaces,mainSurfaces,selectedSurfaces,annotations,selectedAnnotations,measurementScene,selectedMeasurements,settings.showDetailedMeasurement,
                     if(sameGeometry)previous!!.pointPicks else PointPickContext(document,scene),
                     if(sameGeometry)previous!!.componentReferences else document.elements.filter {it.body is ElementBody.Component}.associate {it.id to it.transform.translation},planSymbols,inspectionKey)
@@ -603,7 +605,7 @@ fun DrawingCanvasScreen(
         } else if(size.width>0 && size.height>0 && placementActive) {
             val point=orbit.rayToPlaneZ(position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble(),constructionZ)
                 ?: viewPlanePoint(orbit,position.x.toDouble(),position.y.toDouble(),size.width.toDouble(),size.height.toDouble())
-            val wallPick=if(routeKind!=null && routeConfig.wallOptions!=null)WallServices.pick(document,Point2(position.x.toDouble(),position.y.toDouble()),orbit,size.width.toDouble(),size.height.toDouble(),selectedLevel?.let(::LevelId)) else null
+            val wallPick=if(routeKind!=null && routeConfig.wallOptions!=null || pendingLibraryItem?.mounting==MountingType.WALL)WallServices.pick(document,Point2(position.x.toDouble(),position.y.toDouble()),orbit,size.width.toDouble(),size.height.toDouble(),selectedLevel?.let(::LevelId)) else null
             pointerWorld=wallPick?.point ?: if(measurementMode==MeasurementMode.NONE)point.copy(z=constructionZ) else point
         }
     })
@@ -628,7 +630,7 @@ fun DrawingCanvasScreen(
                         }
                     }
                 }
-                if(routeKind!=null && routeConfig.wallOptions!=null && is3D) {
+                if((routeKind!=null && routeConfig.wallOptions!=null || pendingLibraryItem?.mounting==MountingType.WALL) && is3D) {
                     WallServices.pick(document,target,orbit,size.width.toDouble(),size.height.toDouble(),selectedLevel?.let(::LevelId))?.let {wall->picked=picked.copy(point=wall.point)}
                 }
                 applyPrecisionPick(picked)
@@ -832,7 +834,7 @@ fun DrawingCanvasScreen(
             action("library_import","Import library",Icons.Outlined.FileOpen){editor?.onImportLibrary?.invoke()},action("library_export","Export library",Icons.Outlined.Share){editor?.onExportLibrary?.invoke()})
         CanvasGroup.ROUTE->RouteKind.entries.map {kind->action("tool_route_${kind.name}",kind.name.replace('_',' '),Icons.Outlined.Route,routeKind==kind){beginRoute(kind)}}+
             action("canvas_route_list","Route list",Icons.AutoMirrored.Outlined.List){setPanel(CanvasPanelId.DRAW,PanelVisibility.OPEN)}
-        CanvasGroup.LEVEL->listOf(action("level_all","All levels",Icons.Outlined.Layers,selectedLevel==null){if(routeKind==null)cancelConstruction();if(is3D)orbitLevel=null else level=null},action("level_units","Units and levels",Icons.Outlined.Tune){setPanel(CanvasPanelId.VIEW,PanelVisibility.OPEN)})+
+        CanvasGroup.LEVEL->listOf(action("level_all","All levels",Icons.Outlined.Layers,selectedLevel==null){if(routeKind==null)cancelConstruction();if(is3D)orbitLevel=null else level=null},action("level_units","Units and levels",Icons.Outlined.Tune){setPanel(CanvasPanelId.VIEW,PanelVisibility.OPEN)},action("level_ceiling","Ceiling",Icons.Outlined.Layers,enabled=document.levels.isNotEmpty()){ceilingLevelDialog=(selectedLevel?.let(::LevelId) ?: document.levels.firstOrNull()?.id)})+
             document.levels.map {l->action("level_${l.id.value}",l.name,Icons.Outlined.Layers,selectedLevel==l.id.value){if(routeKind==null)cancelConstruction()else clearPrecisionCandidate();editor?.onSelect?.invoke(emptySet());if(is3D)orbitLevel=l.id.value else level=l.id.value}}
         CanvasGroup.MEASURE->listOf(action("canvas_measure","Measure distance",Icons.Outlined.Straighten){beginMeasurement(MeasurementMode.DISTANCE)},
             action("canvas_reference_dimension","Reference dimension",Icons.Outlined.Straighten){beginMeasurement(MeasurementMode.REFERENCE)},
@@ -888,7 +890,7 @@ fun DrawingCanvasScreen(
                         lockMode=selectedElements.maxByOrNull {it.lockMode.ordinal}?.lockMode ?: LockMode.NONE,
                         onLockMode=editor.onSelectionLockMode,onLockLevel={editor.onLevelLock(selectedLevel,it)},
                         display=selectedRoomSide?.let {side->selectedElements.singleOrNull()?.roomSideDisplay(side)} ?: selectedElements.firstOrNull()?.objectDisplay ?: ObjectDisplay.NORMAL,
-                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},
+                        onDisplay={display->selectedRoomSide?.let {editor.onRoomSideDisplay(it,display)} ?: editor.onSelectionDisplay(display)},onResetDisplay={selectedRoomSide?.let {editor.onRoomSideDisplay(it,ObjectDisplay.NORMAL)} ?: editor.onResetDisplay()},
                         room=selectedElements.singleOrNull()?.takeIf {it.body is ElementBody.Room},selectedRoomSide=selectedRoomSide,
                         onRoomSide={selectedRoomSide=it},onHideRoomSide={editor.onRoomSideDisplay(it,ObjectDisplay.HIDDEN)},
                         onShowRoomWalls={selectedElements.singleOrNull()?.let {editor.onShowRoomWalls(it.id)}},layout=canvasLayout.copy(panels=canvasLayout.panels.mapValues {(id,p)->p.copy(state=if(id==activeDetail)PanelVisibility.OPEN else PanelVisibility.HIDDEN)}),
@@ -917,14 +919,14 @@ fun DrawingCanvasScreen(
                         if(selectionHasMeasurements)MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,{activeDetail=null},embedded=true)
                         else if(selectedProperties!=null)panelStates.SaveableStateProvider("properties:$propertiesSession:${source?.id?.value}") {
                             PropertiesSidePanel(selectedProperties,document.project.settings.lengthUnit,document.project.settings.decimalPlaces,onApply=actions.onProperties,onDismiss={activeDetail=null},lockMode=source?.lockMode ?: LockMode.NONE,layerLocked=document.layers.any {it.id==source?.layerId && it.locked},embedded=true,libraryProperties=selectedLibraryProperties,
-                                onApplyLibrary={transform,parameters->actions.onLibraryProperties(transform,parameters,false)},onUpdateAllOfType={transform,parameters->actions.onLibraryProperties(transform,parameters,true)},onResetToLibraryDefault=actions.onResetLibraryProperties)
+                                onApplyLibrary={transform,parameters->actions.onLibraryProperties(transform,parameters,false)},onUpdateAllOfType={transform,parameters->actions.onLibraryProperties(transform,parameters,true)},onResetToLibraryDefault=actions.onResetLibraryProperties,extraContent=source?.takeIf {it.body is ElementBody.Room}?.let {room->({TextButton({ceilingRoomDialog=room.id},Modifier.testTag("property_room_ceiling")){Text("Ceiling: ${roomCeiling(document,room).type.name.lowercase().replaceFirstChar(Char::uppercase)}")}})})
                         }else Text(stringResource(R.string.presentation_select_properties),Modifier.padding(12.dp))
                     }
                     CanvasPanelId.MEASURE,CanvasPanelId.MEASUREMENTS->MeasurementsPanel(renderDocument,actions.onMeasurementsVisibility,actions.onUpdateMeasurement,actions.onDeleteElements,{activeDetail=null},embedded=true)
                     CanvasPanelId.SCHEDULES->SchedulesPanel(document,!is3D,{ids->actions.onSelect(ids);scheduleFocus=ids;clashFocus=null;issueView=null;level=null;orbitLevel=null;if(ids.isNotEmpty())fitSelection()},onTakeoffSettings,onTakeoffRate,onShareSchedule)
                     CanvasPanelId.ISSUES->Column {IssuesPanel(document,::openIssue,{val ids=actions.selectedIds;val p=if(ids.isEmpty())pointerWorld ?: Point3(viewport.center.x,viewport.center.y,floorZ)else elementWorldBounds(document,ids).center();issueEdit=freshIssue(p,ids)},onIssueExport);TextButton({issueView=null}){Text("Return to project visibility")}}
                     CanvasPanelId.CLASHES->ClashPanel(document,clashProgress,clashSummary,{clashDialog=true},onCancelClash,{issue->clashFocus=issue.id;scheduleFocus=emptySet();actions.onSelect(emptySet());is3D=true;orbitLevel=null;issue.clash?.let {c->val p=c.position;val r=max(.4,min(3.0,max(c.overlap,c.requiredClearance)*3));orbit=orbit.preset(ViewPreset.ISOMETRIC).withProjection(Projection.ORTHOGRAPHIC).fit(Bounds3(Point3(p.x-r,p.y-r,p.z-r),Point3(p.x+r,p.y+r,p.z+r)),size.width.toDouble()/size.height.coerceAtLeast(1))}}, {clashFocus=null},clashXray,{clashXray=it},onClashStatus,{source->issueEdit=freshIssue(source.clash!!.position,source.elementIds,source)})
-                    CanvasPanelId.VISIBILITY->ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,embedded=true,onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility)
+                    CanvasPanelId.VISIBILITY->ObjectVisibilityPanel(document,actions.onLevelVisibility,{id,display->actions.onElementsDisplay(setOf(id),display)},actions.onSystemVisibility,actions.onShowAll,actions.onShowHidden,actions.onAutoXray,actions.onRoomSideDisplay,embedded=true,onLayerVisible=actions.onLayerVisibility,onWallSettings=actions.onWallSettings,onWallSchedule={wallSchedule=true},onFloorSettings=actions.onFloorSettings,onFloorSchedule={floorScheduleOpen=true},onMeasurementsVisible=actions.onMeasurementsVisibility,onResetAllDisplay=actions.onResetAllDisplay,onShowCeilings=actions.onShowCeilings,onConfigureRoomCeiling={ceilingRoomDialog=it},onConfigureLevelCeiling={ceilingLevelDialog=it})
                     CanvasPanelId.VIEW->CanvasStatus(document,is3D,orbit,cursor,selectedLevel,onUnitsChange,{if(routeKind==null)cancelConstruction()else clearPrecisionCandidate();actions.onSelect(emptySet());if(is3D)orbitLevel=it else level=it},{snapsOpen=true})
                     CanvasPanelId.EDIT->Unit
                     null->Unit
@@ -1183,7 +1185,7 @@ fun DrawingCanvasScreen(
                 if(pendingLibraryItem?.mounting==MountingType.WALL && wallFrames(document).none {f->(selectedLevel==null || f.host.levelId==null || f.host.levelId?.value==selectedLevel) && com.eezydraw.core.geometry.ScenePresentation(document).display(f.host)!=ObjectDisplay.HIDDEN}) {
                     Row(Modifier.fillMaxWidth()) {Text("No wall on this level. Draw a room or wall first.",Modifier.weight(1f));TextButton({cancelConstruction();buildingTool="wall";tool=DrawingTool.LINE},Modifier.testTag("missing_wall_open_tool")){Text("Open Wall tool")}}
                 }
-                if(pendingLibraryItem?.mounting==MountingType.WALL) { WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it;clearPrecisionCandidate()}) }
+                if(pendingLibraryItem?.mounting==MountingType.WALL) { WallDeviceBar(pendingLibraryItem,libraryWallOptions ?: defaultWallDeviceOptions(pendingLibraryItem),{libraryWallOptions=it},libraryPlacement?.let {readWallMount(document,it.element)},document.project.settings.snap.gridSpacing) }
                 if(routeKind!=null) {
                     RoutingSettingsBar(routeKind!!,routeConfig,{
                         routeConfig=it
@@ -1223,6 +1225,13 @@ fun DrawingCanvasScreen(
                 if (loading == SceneLoad.Failed) Text(stringResource(R.string.canvas_prepare_error), Modifier.align(Alignment.Center).padding(32.dp))
     }
     } // Measured canvas chrome / loupe obstacles.
+    ceilingRoomDialog?.let {id->document.elements.find {it.id==id && it.body is ElementBody.Room}?.let {room->
+        CeilingOptionsDialog("Room ceiling",roomCeiling(document,room),{editor?.onRoomCeiling?.invoke(id,it);ceilingRoomDialog=null},{ceilingRoomDialog=null},
+            onInherit={editor?.onRoomCeiling?.invoke(id,null);ceilingRoomDialog=null})
+    }}
+    ceilingLevelDialog?.let {id->document.levels.find {it.id==id}?.let {l->
+        CeilingOptionsDialog("${l.name} ceiling",l.ceiling,{editor?.onLevelCeiling?.invoke(id,it);ceilingLevelDialog=null},{ceilingLevelDialog=null})
+    }}
     if (snapsOpen) SnapOptions(snapSettings, onSnapSettingsChange, onDismiss = { snapsOpen = false })
     if (arrayOpen && editor != null) ArrayDialog(document.project.settings.lengthUnit,
         onApply = { columns, rows, dx, dy -> editor.onArray(columns,rows,dx,dy); arrayOpen = false },onDismiss = { arrayOpen = false })

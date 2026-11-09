@@ -6,6 +6,16 @@ import kotlin.math.*
 @Serializable enum class WallServiceMode { SURFACE, CHASE, RECESS, OPENING }
 @Serializable enum class WallFaceSide { LEFT, RIGHT }
 @Serializable enum class WallDrop { NONE, CEILING, FLOOR }
+@Serializable enum class OpeningKind { DOOR, DOUBLE_DOOR, SLIDING_DOOR, WINDOW, DOUBLE_WINDOW }
+@Serializable enum class DoorHinge { LEFT, RIGHT }
+@Serializable enum class DoorDirection { IN, OUT }
+@Serializable data class DoorSwing(val hinge:DoorHinge=DoorHinge.LEFT,val direction:DoorDirection=DoorDirection.IN) {
+    fun flipped()=copy(direction=if(direction==DoorDirection.IN)DoorDirection.OUT else DoorDirection.IN)
+}
+@Serializable enum class WallPositionReference { LEFT_END, RIGHT_END, NEAREST_CORNER, NEAREST_DOOR }
+@Serializable data class AlongWallPosition(val reference:WallPositionReference,val distance:Double) {
+    init {require(distance.isFinite() && distance>=0)}
+}
 @Serializable enum class OpeningProfile { RECTANGULAR, CIRCULAR }
 @Serializable
 data class WallServiceOptions(
@@ -14,6 +24,10 @@ data class WallServiceOptions(
     val depth:Double? = null,
     val drop:WallDrop = WallDrop.NONE,
     val profile:OpeningProfile = OpeningProfile.RECTANGULAR,
+    /** Placement/edit intent; resolved into the attachment side/transform, then cleared. */
+    val side:WallFaceSide?=null,
+    val position:AlongWallPosition?=null,
+    val swing:DoorSwing?=null,
 ) {
     init {require(clearance.isFinite() && clearance in 0.0..1.0);require(depth==null || depth.isFinite() && depth>0 && depth<=10)}
 }
@@ -82,7 +96,9 @@ fun wallServiceCuts(document:ProjectDocument):List<WallCut> {
     val direct=document.elements.flatMap {e->
         val attachment=e.wallService() ?: return@flatMap emptyList()
         val frame=frames[attachment.wallId to attachment.roomSide] ?: return@flatMap emptyList()
-        val options=attachment.options
+        val definition=(e.body as? ElementBody.Component)?.let {b->document.libraryItems.find {it.id==b.libraryItemId} ?: BuiltInLibrary.find(b.libraryItemId)}
+        val architectural=definition?.openingKind()!=null
+        val options=if(architectural)attachment.options.copy(mode=WallServiceMode.OPENING,clearance=0.0,depth=null,profile=OpeningProfile.RECTANGULAR)else attachment.options
         if(options.mode==WallServiceMode.SURFACE)return@flatMap emptyList()
         fun cut(outline:List<Point2>,depth:Double):WallCut {
             val from=if(options.mode==WallServiceMode.OPENING || attachment.side==WallFaceSide.LEFT)0.0 else (frame.thickness-depth).coerceAtLeast(0.0)
@@ -118,5 +134,17 @@ fun wallDepthWarnings(document:ProjectDocument):List<String> = wallServiceCuts(d
     "${cut.description.ifBlank {cut.sourceId.value}}: cut depth ${"%.0f".format(java.util.Locale.ROOT,cut.depth*1000)} mm exceeds ${"%.0f".format(java.util.Locale.ROOT,document.project.settings.wallServices.maxDepthFraction*100)}% of wall thickness."
 }.distinct()
 
-fun defaultWallDeviceOptions(item:LibraryItem):WallServiceOptions = item.wallService ?: if(item.symbol in setOf(LibrarySymbol.SWITCH,LibrarySymbol.DOUBLE_SWITCH,LibrarySymbol.DIMMER,LibrarySymbol.SOCKET,LibrarySymbol.DATA_OUTLET,LibrarySymbol.TV_OUTLET))
+fun defaultWallDeviceOptions(item:LibraryItem):WallServiceOptions = if(item.openingKind()!=null)
+    WallServiceOptions(WallServiceMode.OPENING,clearance=0.0,swing=DoorSwing().takeIf {item.openingKind() in setOf(OpeningKind.DOOR,OpeningKind.DOUBLE_DOOR)})
+    else item.wallService ?: if(item.symbol in setOf(LibrarySymbol.SWITCH,LibrarySymbol.DOUBLE_SWITCH,LibrarySymbol.DIMMER,LibrarySymbol.SOCKET,LibrarySymbol.DATA_OUTLET,LibrarySymbol.TV_OUTLET))
     WallServiceOptions(WallServiceMode.RECESS)else WallServiceOptions()
+
+/** Defaults for project definitions saved before architectural opening metadata existed. */
+fun LibraryItem.openingKind():OpeningKind? = opening ?: when((catalogSourceId ?: id).value) {
+    "eezy.architecture.single-door"->OpeningKind.DOOR
+    "eezy.architecture.double-door"->OpeningKind.DOUBLE_DOOR
+    "eezy.architecture.sliding-door"->OpeningKind.SLIDING_DOOR
+    "eezy.architecture.single-window","eezy.architecture.fixed-window"->OpeningKind.WINDOW
+    "eezy.architecture.double-window"->OpeningKind.DOUBLE_WINDOW
+    else->null
+}

@@ -101,7 +101,8 @@ class PresentationCommandsTest {
         val hidden=history.execute(doc,PresentationCommands.setRoomSideDisplay(doc,RoomSideRef(roomId,0),ObjectDisplay.HIDDEN))
         val xray=history.execute(hidden,PresentationCommands.setRoomSideDisplay(hidden,RoomSideRef(roomId,1),ObjectDisplay.XRAY))
         val room=xray.elements.single {it.id==roomId}
-        assertEquals(ObjectDisplay.HIDDEN,room.roomSideDisplay(RoomSideRef(roomId,0)))
+        assertEquals(ObjectDisplay.HIDDEN,xray.elements.single {it.id==wallId}.objectDisplay)
+        assertEquals("Linked sides edit their physical wall, not a room override",ObjectDisplay.NORMAL,room.roomSideDisplay(RoomSideRef(roomId,0)))
         assertEquals(ObjectDisplay.XRAY,room.roomSideDisplay(RoomSideRef(roomId,1)))
         assertEquals(ObjectDisplay.NORMAL,room.roomSideDisplay(RoomSideRef(roomId,2)))
         assertEquals(doc.elements.map {it.body},xray.elements.map {it.body})

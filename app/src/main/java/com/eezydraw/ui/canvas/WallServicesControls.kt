@@ -10,17 +10,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.eezydraw.core.model.*
+import com.eezydraw.core.editing.WallMountProperties
 import java.util.Locale
 
 internal fun wallModeLabel(mode:WallServiceMode)=when(mode){WallServiceMode.SURFACE->"Surface mounted";WallServiceMode.CHASE->"Concealed (chase)";WallServiceMode.RECESS->"Recess / back box";WallServiceMode.OPENING->"Through opening"}
 @Composable
-internal fun WallDeviceBar(item:LibraryItem,options:WallServiceOptions,onChange:(WallServiceOptions)->Unit) {
+internal fun WallDeviceBar(item:LibraryItem,options:WallServiceOptions,onChange:(WallServiceOptions)->Unit,mount:WallMountProperties?=null,step:Double=.01) {
     Surface(tonalElevation=2.dp) {Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp).testTag("wall_device_settings"),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        RouteChoice("Wall mounting",options.mode,listOf(WallServiceMode.SURFACE,WallServiceMode.RECESS,WallServiceMode.OPENING),{onChange(options.copy(mode=it))},::wallModeLabel)
-        RouteNumber("Clearance",options.clearance,{onChange(options.copy(clearance=it.coerceIn(0.0,1.0)))},false)
+        mount?.let {Text("Face: ${it.face}",Modifier.testTag("wall_face_label"),style=MaterialTheme.typography.labelMedium)}
+        RouteChoice("Wall face",options.side,listOf(null,WallFaceSide.LEFT,WallFaceSide.RIGHT),{onChange(options.copy(side=it))}) {side->
+            when(side){null->"Nearest to crosshair";WallFaceSide.LEFT->mount?.leftFace ?: "Left face";WallFaceSide.RIGHT->mount?.rightFace ?: "Right face"}
+        }
+        TextButton({val side=options.side ?: mount?.side ?: WallFaceSide.LEFT;onChange(options.copy(side=if(side==WallFaceSide.LEFT)WallFaceSide.RIGHT else WallFaceSide.LEFT))},Modifier.testTag("wall_flip_side")){Text("Flip side")}
+        val position=options.position ?: AlongWallPosition(WallPositionReference.LEFT_END,mount?.fromLeft ?: item.defaultSize.width/2)
+        RouteChoice("Position along wall",position.reference,WallPositionReference.entries,{onChange(options.copy(position=position.copy(reference=it)))}){wallPositionLabel(it)}
+        RouteNumber("Distance to item centre",position.distance,{onChange(options.copy(position=position.copy(distance=it.coerceAtLeast(0.0))))},false)
+        TextButton({onChange(options.copy(position=position.copy(distance=(position.distance-step).coerceAtLeast(0.0))))},Modifier.testTag("wall_position_decrease")){Text("−")}
+        TextButton({onChange(options.copy(position=position.copy(distance=position.distance+step)))},Modifier.testTag("wall_position_increase")){Text("+")}
+        if(item.openingKind() in setOf(OpeningKind.DOOR,OpeningKind.DOUBLE_DOOR)) {
+            val swing=options.swing ?: DoorSwing()
+            RouteChoice("Hinge",swing.hinge,DoorHinge.entries,{onChange(options.copy(swing=swing.copy(hinge=it)))}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
+            RouteChoice("Swing",swing.direction,DoorDirection.entries,{onChange(options.copy(swing=swing.copy(direction=it)))}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
+            TextButton({onChange(options.copy(swing=swing.flipped()))},Modifier.testTag("door_flip")){Text("Flip")}
+        }
+        if(item.openingKind()==null)RouteChoice("Wall mounting",options.mode,listOf(WallServiceMode.SURFACE,WallServiceMode.RECESS,WallServiceMode.OPENING),{onChange(options.copy(mode=it))},::wallModeLabel)
+        if(item.openingKind()==null)RouteNumber("Clearance",options.clearance,{onChange(options.copy(clearance=it.coerceIn(0.0,1.0)))},false)
         if(options.mode==WallServiceMode.RECESS)RouteNumber("Recess depth",options.depth ?: item.defaultSize.depth,{onChange(options.copy(depth=it.coerceAtMost(10.0)))})
         if(options.mode!=WallServiceMode.OPENING)RouteChoice("Conduit drop",options.drop,WallDrop.entries,{onChange(options.copy(drop=it))}) {when(it){WallDrop.NONE->"Nearby concealed conduit";WallDrop.CEILING->"From ceiling";WallDrop.FLOOR->"From floor"}}
-        if(options.mode==WallServiceMode.OPENING)RouteChoice("Opening",options.profile,OpeningProfile.entries,{onChange(options.copy(profile=it))}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
+        if(options.mode==WallServiceMode.OPENING && item.openingKind()==null)RouteChoice("Opening",options.profile,OpeningProfile.entries,{onChange(options.copy(profile=it))}){it.name.lowercase().replaceFirstChar(Char::uppercase)}
     }}
 }
 @Composable
@@ -37,7 +54,7 @@ internal fun WallServiceSelection(element:Element,document:ProjectDocument,onApp
     if(edit && mount!=null) {
         var value by remember(element) {mutableStateOf(mount.options)}
         AlertDialog(onDismissRequest={edit=false},title={Text("Wall mounting")},text={Column {
-            if(item!=null)WallDeviceBar(item,value,{value=it})else {
+            if(item!=null)WallDeviceBar(item,value,{value=it},com.eezydraw.core.editing.readWallMount(document,element))else {
                 RouteChoice("Mounting",value.mode,listOf(WallServiceMode.SURFACE,WallServiceMode.CHASE),{value=value.copy(mode=it)},::wallModeLabel)
                 RouteNumber("Clearance",value.clearance,{value=value.copy(clearance=it.coerceIn(0.0,1.0))},false)
                 RouteNumber("Chase depth",value.depth ?: .035,{value=value.copy(depth=it.coerceAtMost(10.0))})
@@ -68,4 +85,9 @@ internal fun WallScheduleDialog(document:ProjectDocument,onSettings:(WallService
             }
         }
     }},confirmButton={TextButton(onDismiss){Text("Close")}})
+}
+
+internal fun wallPositionLabel(reference:WallPositionReference)=when(reference) {
+    WallPositionReference.LEFT_END->"Left end";WallPositionReference.RIGHT_END->"Right end"
+    WallPositionReference.NEAREST_CORNER->"Nearest corner";WallPositionReference.NEAREST_DOOR->"Nearest door"
 }

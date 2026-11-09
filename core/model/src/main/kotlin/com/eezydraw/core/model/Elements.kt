@@ -55,6 +55,7 @@ sealed interface ElementBody {
         val ceilingHeight: Double = 3.0,
         val wallFaces: List<RoomWallFace> = emptyList(),
         val wallOptions:RoomWallOptions?=null,
+        val ceiling:CeilingOptions?=null,
     ) : ElementBody {
         init {
             require(ceilingHeight.isFinite() && ceilingHeight > 0)

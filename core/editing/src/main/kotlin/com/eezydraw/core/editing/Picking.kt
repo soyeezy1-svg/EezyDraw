@@ -1,5 +1,7 @@
 package com.eezydraw.core.editing
 
+import com.eezydraw.core.geometry.wallCutMesh
+import com.eezydraw.core.geometry.ScenePresentation
 import com.eezydraw.core.geometry.DrawingScene
 import com.eezydraw.core.geometry.OrbitCamera
 import com.eezydraw.core.geometry.SceneSegment
@@ -22,9 +24,26 @@ class EditorPicker(
     private val document: ProjectDocument,
     private val scene: DrawingScene,
     private val index: SpatialIndex = SpatialIndex(scene.segments),
+    private val planView:Boolean=false,
 ) {
     private val records: Map<String, PickRecord>
     private val root: PickNode?
+    private val frames=wallFrames(document).associateBy {it.host.id to it.roomSide}
+    private val cuts=wallServiceCuts(document).groupBy {it.wallId to it.roomSide}
+    private val architecturalSources=document.elements.mapNotNull {e->(e.body as? ElementBody.Component)?.let {b->
+        if(document.libraryItems.find {it.id==b.libraryItemId}?.openingKind()!=null)e.id else null
+    }}.toSet()
+    private val wallMeshes=frames.filterKeys {cuts[it].orEmpty().isNotEmpty()}.mapValues {(_,frame)->createCutMesh(frame)}
+    private fun cutMesh(frame:WallFrame):Shape.Mesh? = wallMeshes[frame.host.id to frame.roomSide]
+    private fun createCutMesh(frame:WallFrame):Shape.Mesh? {
+        val active=cuts[frame.host.id to frame.roomSide].orEmpty().filter {cut->document.project.settings.wallServices.showCuts ||
+            cut.sourceId in architecturalSources}
+            .map {cut->if(planView && cut.sourceId in architecturalSources) {
+                val l=cut.outline.minOf {it.x};val r=cut.outline.maxOf {it.x}
+                cut.copy(outline=listOf(Point2(l,0.0),Point2(r,0.0),Point2(r,frame.height),Point2(l,frame.height)))
+            }else cut}
+        return wallCutMesh(frame,active,document.project.settings.wallServices.sectionHeight.takeIf {document.project.settings.viewMode==ViewMode.SECTION})
+    }
 
     init {
         val sources = document.elements.associateBy { it.id.value }
@@ -43,8 +62,8 @@ class EditorPicker(
             compareBy<SceneSegment> { distanceToEdge(point.x, point.y, it.a.x, it.a.y, it.b.x, it.b.y).first }
                 .thenByDescending { max(it.a.z, it.b.z) }.thenBy { it.elementId },
         )
-        if (edge != null) return records[edge.elementId]?.element?.id
         val ray = PickRay(DragVector(point.x, point.y, scene.bounds.max.z), DragVector(0.0, 0.0, -1.0))
+        if (edge != null) return resolveRoomWallPick(records[edge.elementId]?.element,ray)
         var closest: Pair<Double, ElementId>? = null
         visit(root, { point.x in it.min.x..it.max.x && point.y in it.min.y..it.max.y }) { record ->
             if (record.onLevel(levelId)) {
@@ -89,15 +108,39 @@ class EditorPicker(
                 }
             }
         }
-        return outline?.id ?: interior?.second
+        val picked=outline?.id ?: interior?.second
+        return resolveRoomWallPick(picked?.let {records[it.value]?.element},ray)
+    }
+
+    /** A room floor outline may coincide with the middle of a generated wall. Resolve that
+     * boundary to the real wall solid; ray tests preserve the empty space in openings. */
+    private fun resolveRoomWallPick(element:Element?,ray:PickRay):ElementId? {
+        val room=element?.body as? ElementBody.Room ?: return element?.id
+        return room.wallFaces.asSequence().map {it.wallId}.distinct().mapNotNull {id->
+            records[id.value]?.element?.let {wall->intersectElement(ray,wall)?.let {it to id}}
+        }.minByOrNull {it.first}?.second ?: element.id
     }
 
     private fun intersectElement(worldRay: PickRay, element: Element): Double? {
         val ray = inverseRay(worldRay, element.transform)
         return when (val body = element.body) {
-            is ElementBody.Room -> extrudedPolygonHit(ray, body.boundary, 0.0, body.ceilingHeight)
+            is ElementBody.Room -> {
+                val presentation=ScenePresentation(document,planView)
+                val hits=mutableListOf<Double>()
+                polygonHit(ray,body.boundary,0.0)?.let(hits::add)
+                frames.values.filter {it.host.id==element.id && it.roomSide!=null && presentation.sideDisplay(element,it.roomSide!!)!=ObjectDisplay.HIDDEN}
+                     .forEach {frame->
+                        if(cuts[frame.host.id to frame.roomSide].orEmpty().isNotEmpty())cutMesh(frame)?.let {mesh->meshHit(ray,mesh)?.let(hits::add)}
+                        else {
+                            val points=listOf(frame.world(0.0,0.0,0.0),frame.world(frame.length,0.0,0.0),frame.world(frame.length,0.0,frame.height),frame.world(0.0,0.0,frame.height)).map {measurementToLocal(element.transform,it)}
+                            planarRingHit(ray,points)?.let(hits::add)
+                        }
+                    }
+                hits.minOrNull()
+            }
             is ElementBody.Slab -> extrudedPolygonHit(ray, body.boundary, -body.thickness, 0.0)
-            is ElementBody.Wall -> extrudedPolygonHit(ray, wallPolygon(body), 0.0, body.height)
+            is ElementBody.Wall -> if(cuts[element.id to null].orEmpty().isEmpty())extrudedPolygonHit(ray, wallPolygon(body), 0.0, body.height)
+                else frames[element.id to null]?.let {f->cutMesh(f)?.let {meshHit(ray,it)}}
             is ElementBody.Component -> {
                 // Detailed components retain outline selection rather than gaining an invented solid.
                 val definition = document.libraryItems.firstOrNull { it.id == body.libraryItemId }
@@ -323,3 +366,16 @@ private fun pickUnion(a: Bounds3, b: Bounds3) = Bounds3(
     Point3(min(a.min.x, b.min.x), min(a.min.y, b.min.y), min(a.min.z, b.min.z)),
     Point3(max(a.max.x, b.max.x), max(a.max.y, b.max.y), max(a.max.z, b.max.z)),
 )
+
+private fun meshHit(ray:PickRay,mesh:Shape.Mesh):Double? {
+    var nearest:Double?=null
+    for(i in mesh.triangles.indices step 3) {
+        val a=vector(mesh.vertices[mesh.triangles[i]]);val b=vector(mesh.vertices[mesh.triangles[i+1]]);val c=vector(mesh.vertices[mesh.triangles[i+2]])
+        val e1=b-a;val e2=c-a;val p=cross(ray.direction,e2);val det=e1 dot p
+        if(abs(det)<1e-12)continue
+        val q=ray.origin-a;val u=(q dot p)/det;if(u<0 || u>1)continue
+        val r=cross(q,e1);val v=(ray.direction dot r)/det;if(v<0 || u+v>1)continue
+        val t=(e2 dot r)/det;if(t>=0 && (nearest==null || t<nearest))nearest=t
+    }
+    return nearest
+}

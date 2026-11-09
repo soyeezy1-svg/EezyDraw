@@ -54,12 +54,18 @@ fun ObjectVisibilityPanel(
     onFloorSchedule:()->Unit={},
     onWallSettings:(WallServiceSettings)->Unit={},
     onWallSchedule:()->Unit={},
+    onResetAllDisplay:()->Unit={},
+    onShowCeilings:(Boolean)->Unit={},
+    onConfigureLevelCeiling:(LevelId)->Unit={},
+    onConfigureRoomCeiling:(ElementId)->Unit={},
 ) {
     Column((if(embedded)modifier.fillMaxSize() else modifier.width(300.dp).heightIn(max=480.dp)).verticalScroll(rememberScrollState())
         .padding(8.dp).testTag("object_visibility_panel"),verticalArrangement=Arrangement.spacedBy(4.dp)) {
         TextButton(onShowAll,Modifier.fillMaxWidth().heightIn(min=48.dp).testTag("visibility_show_all")) {
             Text(stringResource(R.string.visibility_show_all))
         }
+        TextButton(onResetAllDisplay,Modifier.fillMaxWidth().heightIn(min=48.dp).testTag("visibility_reset_all_display")){Text("Reset all display")}
+        VisibilityOption("Show ceilings",document.project.settings.showCeilings,"visibility_ceilings",onShowCeilings)
         VisibilityOption(stringResource(R.string.visibility_show_hidden),document.project.settings.showHiddenObjects,
             "visibility_show_hidden",onShowHidden)
         Text(stringResource(R.string.visibility_show_hidden_help),style=MaterialTheme.typography.bodySmall)
@@ -75,6 +81,7 @@ fun ObjectVisibilityPanel(
         document.levels.forEach {level->
             VisibilityEye(level.name,level.id !in document.project.settings.hiddenLevelIds,
                 "visibility_level_${level.id.value}") {onLevelVisible(level.id,it)}
+            TextButton({onConfigureLevelCeiling(level.id)},Modifier.testTag("level_ceiling_${level.id.value}")){Text("Ceiling: ${level.ceiling.type.name.lowercase().replaceFirstChar(Char::uppercase)}")}
         }
         VisibilityHeading(R.string.visibility_rooms)
         document.elements.filter {it.body is ElementBody.Room}.forEachIndexed {index,element->
@@ -82,10 +89,13 @@ fun ObjectVisibilityPanel(
                 "visibility_element_${element.id.value}",detail=stringResource(objectDisplayLabel(element.objectDisplay))) {
                 onElementDisplay(element.id,if(it)ObjectDisplay.NORMAL else ObjectDisplay.HIDDEN)
             }
+            TextButton({onConfigureRoomCeiling(element.id)},Modifier.testTag("room_ceiling_${element.id.value}")){Text("Ceiling: ${((element.body as ElementBody.Room).ceiling?.type ?: document.levels.find {it.id==element.levelId}?.ceiling?.type ?: CeilingType.NONE).name.lowercase().replaceFirstChar(Char::uppercase)}")}
             roomSides(element).forEach {side->
-                VisibilityEye(roomSideLabel(side),element.roomSideDisplay(side)!=ObjectDisplay.HIDDEN,
+                val presentation=com.eezydraw.core.geometry.ScenePresentation(document)
+                val mode=presentation.linkedWall(element,side)?.let(presentation::display) ?: presentation.sideDisplay(element,side)
+                VisibilityEye(roomSideLabel(side),mode!=ObjectDisplay.HIDDEN,
                     "visibility_room_${side.roomId.value}_${side.ringIndex ?: "outer"}_${side.edgeIndex}",
-                    modifier=Modifier.padding(start=16.dp),detail=stringResource(objectDisplayLabel(element.roomSideDisplay(side)))) {
+                    modifier=Modifier.padding(start=16.dp),detail=stringResource(objectDisplayLabel(mode))) {
                     onRoomSideDisplay(side,if(it)ObjectDisplay.NORMAL else ObjectDisplay.HIDDEN)
                 }
             }

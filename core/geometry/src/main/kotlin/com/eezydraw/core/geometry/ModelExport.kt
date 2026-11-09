@@ -40,7 +40,7 @@ object ModelExport {
         val ids=document.elements.filter(::included).mapTo(hashSetOf()){it.id}
         val source=unfilteredGeometryDocument(document).let {it.copy(project=it.project.copy(settings=it.project.settings.copy(
             floorServices=it.project.settings.floorServices.copy(showChannels=options.cuts==ModelCuts.CUTS),wallServices=it.project.settings.wallServices.copy(showCuts=options.cuts==ModelCuts.CUTS))))}
-        val scene=buildSurfaceScene(source,ids)
+        val scene=buildSurfaceScene(source,ids,architecturalCuts=options.cuts==ModelCuts.CUTS)
         val meshes=scene.chunks.groupBy {it.elementId}.map { (id,chunks)->
             val element=byId.getValue(ElementId(id))
             val vertices=chunks.filter {c->options.scope!=ModelScope.VISIBLE || c.roomSide?.let {side->byId[side.roomId]?.let {presentation.sideDisplay(it,side)!=ObjectDisplay.HIDDEN}}!=false}.flatMap {c->

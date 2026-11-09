@@ -119,9 +119,9 @@ class LibraryPlacementTest {
         assertEquals(-1.0, ceiling.element.transform.scale.z, 0.0)
     }
 
-    @Test fun `ceiling follows containing rooms finish ceiling instead of structural storey`() {
+    @Test fun `ceiling follows explicit room mounting height even with no ceiling object`() {
         val room = Element(ElementId("room"), project, layer,
-            ElementBody.Room(Polygon2(listOf(Point2(0.0, 0.0), Point2(8.0, 0.0), Point2(8.0, 8.0), Point2(0.0, 8.0))), ceilingHeight = 2.8),
+            ElementBody.Room(Polygon2(listOf(Point2(0.0, 0.0), Point2(8.0, 0.0), Point2(8.0, 8.0), Point2(0.0, 8.0))), ceilingHeight = 2.8, ceiling=CeilingOptions(height=2.8)),
             levelId = level.id, transform = Transform3(Point3(z = 3.0)))
         val ceiling = preview(document(listOf(room)), Point3(2.0, 3.0), wallItem.copy(mounting = MountingType.CEILING))
         assertEquals(5.8, ceiling.element.transform.translation.z, 1e-9)
