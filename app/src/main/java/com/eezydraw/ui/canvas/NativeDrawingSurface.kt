@@ -21,6 +21,7 @@ internal fun NativeDrawingSurface(
     frame: CanvasFrame,
     modifier: Modifier,
     onError: (String) -> Unit,
+    onLoupe: (CapturedLoupe?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -46,6 +47,7 @@ internal fun NativeDrawingSurface(
         modifier = modifier,
         update = {
             it.onRenderError = onError
+            it.onLoupe = onLoupe
             it.render(scene ?: EmptyDrawingScene, frame)
         },
     )

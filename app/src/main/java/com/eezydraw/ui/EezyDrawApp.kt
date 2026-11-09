@@ -141,7 +141,8 @@ fun EezyDrawApp(
         }
     }
     EezyDrawTheme(themeMode = state.settings.theme) {
-        SyncSystemBars(dark = !startupComplete || MaterialTheme.colorScheme.background.luminance() < .5f)
+        SyncSystemBars(dark = !startupComplete || MaterialTheme.colorScheme.background.luminance() < .5f,
+            canvas = startupComplete && state.screen == AppScreen.PROJECT)
         Surface(Modifier.fillMaxSize()) {
             Scaffold(
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),

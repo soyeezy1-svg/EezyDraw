@@ -53,6 +53,31 @@ class MobileCanvasNavigationFlowTest {
         compose.waitForIdle()
         assertNotEquals(prior,frame.get().viewport.center)
     }
+    @Test fun nativeLoupeSourceFollowsTheSnappedCrosshairThroughoutADrag() {
+        show();compose.cadTool("line")
+        compose.onNodeWithTag("canvas_surface").performTouchInput {down(Offset(width*.5f,height*.4f))}
+        compose.waitForIdle()
+        fun source():LoupeSource {
+            val mark=compose.onNodeWithTag("precision_crosshair").fetchSemanticsNode().config
+            val source=checkNotNull(frame.get().loupe)
+            assertEquals(mark[PrecisionScreenX],source.crosshair.x,0.0)
+            assertEquals(mark[PrecisionScreenY],source.crosshair.y,0.0)
+            assertEquals(settings.precisionPointer.magnifierZoom,source.zoom,0.0)
+            return source
+        }
+        val before=source()
+        compose.onNodeWithTag("canvas_surface").performTouchInput {moveBy(Offset(65f,30f))}
+        compose.waitForIdle()
+        assertNotEquals(before.crosshair,source().crosshair)
+        val lens=compose.onNodeWithTag("precision_loupe").fetchSemanticsNode().boundsInRoot
+        for(tag in listOf("cad_top_toolbar","canvas_close","canvas_view_cube","cad_bottom_controls","precision_controls")) {
+            for(node in compose.onAllNodesWithTag(tag).fetchSemanticsNodes())assertFalse("Lens overlaps $tag",lens.overlaps(node.boundsInRoot))
+        }
+        compose.onNodeWithTag("canvas_surface").performTouchInput {up()}
+        compose.waitForIdle()
+        assertNull(frame.get().loupe)
+        compose.onNodeWithTag("precision_crosshair").assertExists()
+    }
     @Test fun planRotationNamedViewsAndSectionFacesRestoreAndUpdateClippedScene() {
         show();nav("navigate_rotate_plan")
         compose.onNodeWithTag("plan_rotation_angle").performTextReplacement("37.5");compose.onNodeWithTag("plan_rotation_apply").performClick()

@@ -33,13 +33,34 @@ class PrecisionPointerGeometryTest {
         assertEquals(point,offsetCrosshair(point,1000.0,800.0,2.0,settings.copy(enabled=false)))
     }
     @Test fun loupeMovesAwayFromTargetAndFingerAndAlwaysFits() {
-        val first=precisionLoupeBounds(Point2(120.0,120.0),Point2(80.0,80.0),1000.0,800.0,1.0)
+        val first=checkNotNull(precisionLoupeBounds(Point2(120.0,120.0),Point2(80.0,80.0),1000.0,800.0,1.0))
         assertFalse(first.contains(Point2(120.0,120.0)));assertFalse(first.contains(Point2(80.0,80.0)))
         assertEquals(120.0,first.width,0.0)
-        val moved=precisionLoupeBounds(Point2(first.center.x+20,first.center.y+20),first.center,1000.0,800.0,1.0)
+        val moved=precisionLoupeBounds(Point2(first.center.x+20,first.center.y+20),first.center,1000.0,800.0,1.0,previous=first)
         assertNotEquals(first,moved)
-        val tiny=precisionLoupeBounds(null,Point2(4.0,4.0),40.0,30.0,2.0)
-        assertTrue(tiny.left>=0 && tiny.top>=0 && tiny.right<=40 && tiny.bottom<=30)
+        assertNull(precisionLoupeBounds(null,Point2(4.0,4.0),40.0,30.0,2.0))
+    }
+    @Test fun measuredChromeAndSafeAreasAreExcludedOnPhoneAndTabletInBothOrientations() {
+        for((w,h) in listOf(360.0 to 800.0,800.0 to 360.0,800.0 to 1280.0,1280.0 to 800.0)) {
+            val safe=PointerRect(24.0,24.0,w-24.0,h-24.0)
+            val occupied=listOf(PointerRect(24.0,24.0,200.0,140.0), // Close and view cube
+                PointerRect(w-72,24.0,w-24,if(w<520)264.0 else 72.0), // Top toolbar
+                PointerRect(24.0,h-160,w-24,h-24), // Bottom / options / hint
+                PointerRect(w-220,h-276,w-24,h-160)) // Place / Cancel
+            for(x in listOf(w*.2,w*.5,w*.8))for(y in listOf(h*.2,h*.5,h*.8)) {
+                val target=Point2(x,y);val finger=Point2(x+36,y+72)
+                val r=checkNotNull(precisionLoupeBounds(finger,target,w,h,1.0,occupied=occupied,safe=safe))
+                assertTrue(r.left>=safe.left && r.top>=safe.top && r.right<=safe.right && r.bottom<=safe.bottom)
+                assertFalse(r.contains(target));assertFalse(r.contains(finger))
+                assertTrue(occupied.none {r.left<it.right && r.right>it.left && r.top<it.bottom && r.bottom>it.top})
+                val same=precisionLoupeBounds(finger,target,w,h,1.0,occupied=occupied,safe=safe,previous=r)
+                assertEquals("Keep a free location stable",r,same)
+            }
+        }
+    }
+    @Test fun fullyCoveredCanvasNeverReturnsAnOverlappingFallback() {
+        assertNull(precisionLoupeBounds(null,Point2(200.0,200.0),400.0,400.0,1.0,
+            occupied=listOf(PointerRect(0.0,0.0,400.0,400.0))))
     }
     @Test fun nudgingUsesPhysicalUnitsAndProjectsInScreenDirections() {
         val point=Point3(1e9,-1e9,2.4)

@@ -34,24 +34,39 @@ data class PointerRect(val left:Double,val top:Double,val right:Double,val botto
     fun contains(point:Point2)=point.x in left..right && point.y in top..bottom
 }
 
-/** Choose a visible corner away from the finger and the precision target, with deterministic ties. */
-fun precisionLoupeBounds(finger:Point2?,crosshair:Point2,width:Double,height:Double,density:Double,sizeDp:Double=120.0):PointerRect {
+/**
+ * Search free rectangles, including positions beside measured chrome (not just corners).
+ * Keep the current position until a control or pointer approaches it. Never return an
+ * overlapping fallback: a fully occluded canvas has no valid display position.
+ */
+fun precisionLoupeBounds(finger:Point2?,crosshair:Point2,width:Double,height:Double,density:Double,
+    sizeDp:Double=120.0,occupied:List<PointerRect> = emptyList(),
+    safe:PointerRect=PointerRect(0.0,0.0,width,height),previous:PointerRect?=null,
+):PointerRect? {
     require(width.isFinite() && height.isFinite() && width>=0 && height>=0 && density.isFinite() && density>0)
     require(sizeDp.isFinite() && sizeDp>0)
-    val margin=min(12*density,min(width,height)/4)
-    val side=min(sizeDp*density,min(width,height)-2*margin).coerceAtLeast(0.0)
-    val corners=listOf(Point2(width-margin-side,margin),Point2(margin,margin),
-        Point2(width-margin-side,height-margin-side),Point2(margin,height-margin-side))
-    fun separation(rect:PointerRect,p:Point2):Double {
-        val dx=max(0.0,max(rect.left-p.x,p.x-rect.right))
-        val dy=max(0.0,max(rect.top-p.y,p.y-rect.bottom))
-        return hypot(dx,dy)
+    val gap=8*density
+    val area=PointerRect(max(0.0,safe.left)+gap,max(0.0,safe.top)+gap,
+        min(width,safe.right)-gap,min(height,safe.bottom)-gap)
+    val blockers=occupied+listOfNotNull(finger?.let {PointerRect(it.x-40*density,it.y-40*density,it.x+40*density,it.y+40*density)},
+        PointerRect(crosshair.x-28*density,crosshair.y-28*density,crosshair.x+28*density,crosshair.y+28*density))
+    fun fits(r:PointerRect)=r.left>=area.left && r.top>=area.top && r.right<=area.right && r.bottom<=area.bottom &&
+        blockers.none {r.left<it.right+gap && r.right>it.left-gap && r.top<it.bottom+gap && r.bottom>it.top-gap}
+    if(previous!=null && fits(previous))return previous
+    // Compact landscapes can need a smaller lens, but retain the requested 2x–4x scale.
+    for(dp in listOf(sizeDp,96.0,72.0,48.0).distinct().filter {it<=sizeDp}) {
+        val side=min(dp*density,min(area.width,area.height))
+        if(side<=0)continue
+        val xs=(listOf(area.left,area.right-side)+blockers.flatMap {listOf(it.left-gap-side,it.right+gap)}).distinct()
+        val ys=(listOf(area.top,area.bottom-side)+blockers.flatMap {listOf(it.top-gap-side,it.bottom+gap)}).distinct()
+        val candidates=xs.flatMap {x->ys.map {y->PointerRect(x,y,x+side,y+side)}}.filter(::fits)
+        val best=candidates.maxByOrNull {r->
+            fun distance(p:Point2)=hypot(r.center.x-p.x,r.center.y-p.y)
+            min(distance(crosshair),finger?.let(::distance) ?: Double.POSITIVE_INFINITY)
+        }
+        if(best!=null)return best
     }
-    return corners.map {PointerRect(it.x,it.y,it.x+side,it.y+side)}.maxBy {rect->
-        val target=separation(rect,crosshair)
-        val touch=finger?.let {separation(rect,it)} ?: Double.POSITIVE_INFINITY
-        min(target,touch)*10+min(1e4,hypot(rect.center.x-crosshair.x,rect.center.y-crosshair.y))
-    }
+    return null
 }
 
 fun projectPrecisionPoint(point:Point3,viewport:Viewport2D,orbit:OrbitCamera,is3D:Boolean,width:Double,height:Double):Point2? =
