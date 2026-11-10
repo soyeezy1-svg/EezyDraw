@@ -32,7 +32,9 @@ fun createMeasurement(
     fun anchor(point: Point3, id: ElementId?): MeasurementAnchor {
         val host = id?.let { key -> requireNotNull(document.elements.find { it.id == key }) { "The reference object no longer exists." } }
         val fixed = host == null && fixedFreeAnchors
-        return MeasurementAnchor(if (fixed) point else measurementToLocal(host?.transform ?: transform, point), id, point, fixed)
+        val local = if (fixed) point else measurementToLocal(host?.transform ?: transform, point)
+        val vertex = host?.let { dimensionVertices(it).indexOfFirst { p -> pointDistance(p, local) < 1e-7 }.takeIf { it >= 0 } }
+        return MeasurementAnchor(local, id, point, fixed, vertex)
     }
     return SketchGeometry(Shape.Dimension(DimensionKind.ALIGNED, listOf(a, b),
         Point3(labelLocal.x - midpoint.x, labelLocal.y - midpoint.y, labelLocal.z - midpoint.z),
@@ -83,5 +85,5 @@ internal fun detachMeasurementReferences(document: ProjectDocument, element: Ele
     }
     return element.copy(body = ElementBody.DrawingShape(shape.copy(anchors = local,
         labelOffset = Point3(label.x - midpoint.x, label.y - midpoint.y, label.z - midpoint.z),
-        measurement = data.copy(anchors = anchors))))
+        measurement = data.copy(anchors = anchors, binding = data.binding?.takeUnless { it.elementId in deleted }))))
 }

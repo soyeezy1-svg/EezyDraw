@@ -48,6 +48,7 @@ data class ProjectSettings(
     val canvasLayout: CanvasLayout = CanvasLayout(),
     val clashCheck: ClashCheckOptions = ClashCheckOptions(),
     val takeoff:TakeoffSettings = TakeoffSettings(),
+    val dimensionFixedEnd: FixedEnd = FixedEnd.START,
 ) {
     init {
         require(decimalPlaces in 0..8)

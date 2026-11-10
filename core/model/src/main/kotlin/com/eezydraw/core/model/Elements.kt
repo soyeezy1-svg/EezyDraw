@@ -21,6 +21,7 @@ data class Element(
     val materialId: MaterialId? = null,
     val tags: Set<String> = emptySet(),
     val properties: Map<String, ParameterValue> = emptyMap(),
+    val wallDistances: List<WallDistance> = emptyList(),
 )
 
 @Serializable

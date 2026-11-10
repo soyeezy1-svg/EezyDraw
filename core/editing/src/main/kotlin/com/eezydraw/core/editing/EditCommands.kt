@@ -12,8 +12,9 @@ object EditCommands {
     fun between(before: ProjectDocument, after: ProjectDocument, label: String = "Edit drawing"): EditCommand =
         betweenValidated(before,after,label)
 
-    private fun betweenValidated(before: ProjectDocument, after: ProjectDocument, label: String,
+    private fun betweenValidated(before: ProjectDocument, proposed: ProjectDocument, label: String,
         allowLockedPresentation:Boolean=false): EditCommand {
+        val after = WallPositioning.reconcile(before, proposed)
         require(before.project.id == after.project.id) { "An edit cannot change project ownership" }
         require(before.copy(elements = after.elements, layers = after.layers, groups = after.groups, issues = after.issues, assets=after.assets, views=after.views,
             systems=after.systems,libraryItems=after.libraryItems,materials=after.materials,levels=after.levels,
@@ -170,7 +171,7 @@ object EditCommands {
                 replacements[element.id] = null
             } else {
                 val detached = detachMeasurementReferences(document, element, ids)
-                val changed = detached.copy(body = detach(detached.body, ids))
+                val changed = detached.copy(body = detach(detached.body, ids), wallDistances = detached.wallDistances.filter { it.wallId !in ids })
                 if (changed != element) {
                     requireEditable(document, element)
                     replacements[element.id] = changed
@@ -246,6 +247,7 @@ object EditCommands {
                 projectId = document.project.id,
                 layerId = layerId ?: element.layerId,
                 transform = element.transform.copy(translation = Point3(t.x + offset.x, t.y + offset.y, t.z + offset.z)),
+                wallDistances = element.wallDistances.map { c -> c.copy(wallId=ids[c.wallId] ?: c.wallId, roomSide=c.roomSide?.let { it.copy(roomId=ids[it.roomId] ?: it.roomId) }) },
                 body = remap(element.body, ids).let {b->if(b !is ElementBody.Route || b.routing==null)b else {
                     val r=b.routing!!
                     b.copy(routing=r.copy(networkId=nodeIds.getValue(r.networkId),startNode=nodeIds.getValue(r.startNode),endNode=nodeIds.getValue(r.endNode),
@@ -269,7 +271,7 @@ object EditCommands {
                 val dimension = body.shape as? Shape.Dimension
                 val measurement = dimension?.measurement
                 if (dimension == null || measurement == null) body else body.copy(shape = dimension.copy(
-                    measurement = measurement.copy(anchors = measurement.anchors.map { anchor ->
+                    measurement = measurement.copy(binding=measurement.binding?.let { it.copy(elementId=ids[it.elementId] ?: it.elementId) }, anchors = measurement.anchors.map { anchor ->
                         anchor.copy(elementId = ids[anchor.elementId] ?: anchor.elementId)
                     }),
                 ))
@@ -377,6 +379,7 @@ object EditCommands {
         }
         val faces=wallFrames(document.copy(elements=all)).mapTo(hashSetOf()){it.host.id to it.roomSide}
         for (element in changed) {
+            require(element.wallDistances.size <= 2 && element.wallDistances.all { it.wallId != element.id && it.wallId to it.roomSide in faces }) { "A distance constraint refers to a missing wall" }
             element.properties[CEILING_OWNER]?.let {owner->require(owner is ParameterValue.Text && all.any {it.id.value==owner.value && it.body is ElementBody.Room} && element.body is ElementBody.Slab){"A ceiling must belong to an existing room"}}
             element.wallService()?.let {require(it.wallId to it.roomSide in faces){"The wall service host no longer exists"}}
             require(element.levelId == null || element.levelId in levels) { "Object level no longer exists" }
@@ -388,6 +391,7 @@ object EditCommands {
                     require(data == null || data.anchors.all { it.elementId == null || it.elementId != element.id && it.elementId in elements }) {
                         "A measurement reference object no longer exists"
                     }
+                    require(data?.binding?.let { dimensionEndpoints(document, it) != null } != false) { "A dimension reference edge no longer exists" }
                     require(data?.floorLevelId == null || data.floorLevelId in levels) { "The measurement floor no longer exists" }
                 }
                 is ElementBody.Room -> require(body.wallFaces.all { elements[it.wallId]?.body is ElementBody.Wall }) {

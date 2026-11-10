@@ -17,7 +17,8 @@ data class MeasurementAnchor(
     val fallbackPoint: Point3 = point,
     /** Fixed grid/free references stay in project coordinates when only their label is moved. */
     val projectFixed: Boolean = false,
-)
+    val vertexIndex: Int? = null,
+) { init { require(vertexIndex == null || vertexIndex >= 0) } }
 
 /** Optional metadata keeps older, unassociated dimensions backward compatible. */
 @Serializable
@@ -28,6 +29,7 @@ data class MeasurementData(
     val showHeightAboveFloor: Boolean = false,
     /** Null follows the source object's current level, then the nearest floor below it. */
     val floorLevelId: LevelId? = null,
+    val binding: DimensionBinding? = null,
 ) {
     init {
         require(name.isNotBlank() && name.length <= 120 && name.none { it.isISOControl() })
@@ -70,10 +72,11 @@ fun resolveMeasurement(
     val shape = measurementShape(element) ?: return null
     val data = shape.measurement ?: return null
     fun resolve(anchor: MeasurementAnchor): Point3 = anchor.elementId?.let { id ->
-        elements[id]?.let { measurementToWorld(it.transform, anchor.point) } ?: anchor.fallbackPoint
+        elements[id]?.let { measurementToWorld(it.transform, anchor.vertexIndex?.let { index -> dimensionVertices(it).getOrNull(index) } ?: anchor.point) } ?: anchor.fallbackPoint
     } ?: if (anchor.projectFixed) anchor.point else measurementToWorld(element.transform, anchor.point)
-    val start = resolve(data.anchors[0])
-    val end = resolve(data.anchors[1])
+    val bound = data.binding?.let { dimensionEndpoints(document, it) }
+    val start = bound?.first ?: resolve(data.anchors[0])
+    val end = bound?.second ?: resolve(data.anchors[1])
     val dx = end.x - start.x; val dy = end.y - start.y; val dz = end.z - start.z
     val horizontal = hypot(dx, dy)
     val distance = hypot(horizontal, dz)

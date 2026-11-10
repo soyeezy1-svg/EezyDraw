@@ -249,3 +249,12 @@ Draw includes **Room**, **Room polygon** and a chained **Wall** tool. Rooms crea
 Floor installations are available for conduit, trunking, cable tray and pipe. Draw a **Floor slab**, then choose **Installation → In screed / In slab / Under floor (raised floor void)** in the route bar. Depths are below finished floor; plan routes are dashed. Visibility includes **Show underfloor services** and the **Floor services schedule**. Library provides recessed floor boxes, floor sockets and slab sleeves; select a route for **Rise to wall / Rise to floor box**. See [the underfloor validation and manual path](docs/UNDERFLOOR_TEST_REPORT.md).
 
 Project → **Export → Export 3D model** saves IFC4, OBJ, embedded glTF, GLB or STL through the Android file picker. Choose project/level/selection/visible scope, system filters, units, categories and baked/separate cuts. See [3D-export validation](docs/MODEL_EXPORT_TEST_REPORT.md).
+
+
+## Dimensions and positioning
+
+Measure distance and Aligned dimension show a live distance and save after two points. Tap a saved value (or a selected room edge value) to enter a dimension; choose Start fixed, End fixed or Center fixed. The last successful choice is remembered in the project. While drawing a Wall or Line, use Exact length after the first point, or type digits on a hardware keyboard and press Enter.
+
+Tap a wall with Measure/Dimension or select it and tap **Dimension this wall** for its own length, thickness and height. **More → Wall dimension options** chooses centerline, inside and outside lengths. **Snap to selected object only** is on by default for measurement and can be switched off for cross-object picks.
+
+Select an item and choose **More → Move from wall**, pick a wall face, then enter a distance to its Near edge, Center or Far edge. **Pick a second wall** adds the second direction. Editable clearance labels and nudge/grid controls also appear with a selected item. **Lock distance to wall** retains the relationship when a wall moves; uncheck it and Apply to release it. A conflicting object/layer lock refuses the complete change. See [validation and device QA](docs/DIMENSIONS_POSITIONING_TEST_REPORT.md).

@@ -50,6 +50,7 @@ internal fun validateDocument(document: ProjectDocument) {
         "The project thumbnail asset is missing.")
 
     document.elements.forEach { element ->
+        valid(element.wallDistances.size <= 2 && element.wallDistances.all { it.wallId != element.id && it.wallId to it.roomSide in wallFaces }, "A distance constraint refers to a missing wall.")
         element.properties[CEILING_OWNER]?.let {ref->valid(ref is ParameterValue.Text && elements[ElementId(ref.value)]?.body is ElementBody.Room && element.body is ElementBody.Slab,"A ceiling room is missing.")}
         valid(element.layerId in layers, "An element refers to a missing layer.")
         valid(element.levelId == null || element.levelId in levels, "An element refers to a missing level.")
@@ -61,6 +62,7 @@ internal fun validateDocument(document: ProjectDocument) {
                 valid(data == null || data.anchors.all { anchor ->
                     anchor.elementId == null || anchor.elementId != element.id && anchor.elementId in elements
                 }, "A measurement refers to a missing object.")
+                valid(data?.binding?.let { dimensionEndpoints(document, it) != null } != false, "A dimension refers to a missing edge.")
                 valid(data?.floorLevelId == null || data.floorLevelId in levels,
                     "A measurement refers to a missing floor level.")
             }

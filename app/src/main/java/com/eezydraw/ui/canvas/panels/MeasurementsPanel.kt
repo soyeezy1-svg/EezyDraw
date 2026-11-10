@@ -28,7 +28,7 @@ import kotlin.math.hypot
 @Composable
 fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
     onEdit:(ElementId,Point3,Point3,Point3,String,Boolean,Boolean)->Unit,onDelete:(Set<ElementId>)->Unit,
-    onDismiss:()->Unit,modifier:Modifier=Modifier,embedded:Boolean=false) {
+    onDismiss:()->Unit,modifier:Modifier=Modifier,embedded:Boolean=false,onDimensionValue:((ElementId)->Unit)?=null) {
     var editing by remember { mutableStateOf<ElementId?>(null) }
     val content: @Composable () -> Unit = {
         Column((if(embedded)Modifier.fillMaxWidth()else Modifier.width(320.dp)).fillMaxHeight().testTag("measurements_panel")) {
@@ -53,7 +53,10 @@ fun MeasurementsPanel(document: ProjectDocument,onVisibility:(Boolean)->Unit,
                                 val allLocked=element.lockMode==LockMode.ALL || document.layers.any {it.id==element.layerId && it.locked}
                                 IconButton({onDelete(setOf(element.id))},Modifier.testTag("measurement_delete_${element.id.value}"),enabled=!allLocked) { Icon(Icons.Outlined.Delete,stringResource(R.string.editing_delete)) }
                             }
-                            measurementText(summary,document.project.settings).forEach { Text(it,style=MaterialTheme.typography.bodySmall) }
+                            measurementText(summary,document.project.settings).forEachIndexed {index,text->
+                                if(index==0 && onDimensionValue!=null)TextButton({onDimensionValue(element.id)},Modifier.testTag("measurement_value_${element.id.value}")){Text(text,style=MaterialTheme.typography.bodySmall)}
+                                else Text(text,style=MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }

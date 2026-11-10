@@ -215,6 +215,8 @@ class CanvasWorkflowImprovementsTest {
         compose.cadGroup("measure")
         compose.onNodeWithTag("canvas_reference_dimension").performClick()
         compose.cadCloseStrip("measure")
+        // Cross-object references explicitly opt out of the new default object-only scope.
+        compose.onNodeWithTag("snap_selected_object_only").performScrollTo().performClick()
         // Full screen leaves the wall corner clear of the active measurement options.
         compose.onNodeWithTag("canvas_hide_panels").performClick()
         clickWorld(Point3(.3, 0.0, 1.2))

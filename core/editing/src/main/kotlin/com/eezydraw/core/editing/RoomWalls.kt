@@ -41,11 +41,15 @@ object RoomWalls {
      val old=before.elements.find {it.id==id}
      val wallBody=ElementBody.Wall(Point2(a.x,a.y),Point2(b.x,b.y),edge.options.thickness,edge.options.height*abs(edge.room.transform.scale.z),reference)
      val base=document.elements.find {it.id==id} ?: old ?: Element(id,document.project.id,edge.room.layerId,wallBody,name="Room wall")
-     base.copy(layerId=edge.room.layerId,body=wallBody,levelId=edge.room.levelId,transform=Transform3(Point3(z=a.z)),materialId=material.id,properties=base.properties+(GENERATED_ROOM_WALL to ParameterValue.Flag(true)))
+     val effectiveBody=wallBody.copy(thickness=(base.properties[WALL_THICKNESS_OVERRIDE] as? ParameterValue.Number)?.value ?: wallBody.thickness,
+         height=(base.properties[WALL_HEIGHT_OVERRIDE] as? ParameterValue.Number)?.value ?: wallBody.height)
+     base.copy(layerId=edge.room.layerId,body=effectiveBody,levelId=edge.room.levelId,transform=Transform3(Point3(z=a.z)),materialId=material.id,properties=base.properties+(GENERATED_ROOM_WALL to ParameterValue.Flag(true)))
     }
     val shape=wall.body as ElementBody.Wall
     val requestedHeight=edge.options.height*abs(edge.room.transform.scale.z)
-    if(requestedHeight>shape.height || edge.options.thickness>shape.thickness)generated[key]=wall.copy(body=shape.copy(height=max(shape.height,requestedHeight),thickness=max(shape.thickness,edge.options.thickness)))
+    val height=if(WALL_HEIGHT_OVERRIDE in wall.properties)shape.height else max(shape.height,requestedHeight)
+    val thickness=if(WALL_THICKNESS_OVERRIDE in wall.properties)shape.thickness else max(shape.thickness,edge.options.thickness)
+    if(height!=shape.height || thickness!=shape.thickness)generated[key]=wall.copy(body=shape.copy(height=height,thickness=thickness))
     links.getOrPut(edge.room.id){mutableListOf()}.add(RoomWallFace(edge.index,wall.id,if(forward)WallSide.LEFT else WallSide.RIGHT,edge.ring))
    }
   }
