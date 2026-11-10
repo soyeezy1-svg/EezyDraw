@@ -58,6 +58,31 @@ class EditedGeometryPersistenceTest {
         ownedProjectIds.forEach { File(File(context.filesDir, "projects"), it).deleteRecursively() }
     }
 
+    @Test fun dimensionsWallFaceLocksAndFixedEndDefaultSurviveRepositoryReopenAndArchive() = runBlocking {
+        val created=repository.create("Dimension positioning",ProjectTemplate.EMPTY,ProjectSettings(dimensionFixedEnd=FixedEnd.CENTER))
+        ownedProjectIds += created.project.id.value
+        val wall=Element(ElementId("dimension-wall"),created.project.id,created.layers.first().id,
+            ElementBody.Wall(Point2(0.0,0.0),Point2(5.0,0.0),.2,3.0),created.levels.first().id)
+        val item=wall.copy(id=ElementId("positioned-item"),body=ElementBody.DrawingShape(Shape.Box(Size3(.5,.8,.6))),
+            transform=Transform3(Point3(1.0,1.1)),wallDistances=listOf(WallDistance(wall.id,WallFaceSide.LEFT,1.0,DistanceReference.NEAR_EDGE)))
+        val binding=DimensionBinding(wall.id,wallFace=WallLengthFace.INSIDE)
+        val anchors=listOf(MeasurementAnchor(Point3(0.0,.1),wall.id,Point3(0.0,.1),vertexIndex=0),MeasurementAnchor(Point3(5.0,.1),wall.id,Point3(5.0,.1),vertexIndex=1))
+        val dimension=wall.copy(id=ElementId("bound-dimension"),body=ElementBody.DrawingShape(Shape.Dimension(DimensionKind.ALIGNED,
+            listOf(Point3(0.0,.1),Point3(5.0,.1)),Point3(y=.3),MeasurementData("Wall inside",anchors,binding=binding))))
+        val saved=repository.save(created.copy(elements=listOf(wall,item,dimension)))
+        database.close();reopenDatabase()
+        val loaded=repository.load(saved.project.id.value)
+        assertEquals(saved,loaded)
+        assertEquals(FixedEnd.CENTER,loaded.project.settings.dimensionFixedEnd)
+        assertEquals(item.wallDistances,loaded.elements[1].wallDistances)
+        assertEquals(5.0,resolveMeasurement(loaded,loaded.elements[2])!!.distance,1e-8)
+        val bytes=ByteArrayOutputStream().also {repository.exportProject(saved.project.id.value,it)}.toByteArray()
+        val imported=repository.importProject(ByteArrayInputStream(bytes))
+        ownedProjectIds += imported.project.id.value
+        assertEquals(saved.elements,imported.elements.map {it.copy(projectId=saved.project.id)})
+        assertEquals(binding,measurementShape(imported.elements[2])!!.measurement!!.binding)
+    }
+
     @Test fun drawingToolsAndMirroredTransformsSurviveReopenAndPortableArchiveImport() = runBlocking {
         val created = repository.create("Edited geometry", ProjectTemplate.EMPTY, ProjectSettings())
         ownedProjectIds += created.project.id.value

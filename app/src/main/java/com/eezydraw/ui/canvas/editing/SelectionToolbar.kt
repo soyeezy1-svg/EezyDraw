@@ -87,6 +87,9 @@ fun SelectionToolbar(
     onHideRoomSide: (RoomSideRef) -> Unit = {},
     onShowRoomWalls: () -> Unit = {},
     onGenerateWalls:(()->Unit)?=null,
+    onMoveFromWall:(()->Unit)?=null,
+    onDimensionWall:(()->Unit)?=null,
+    onWallDimensionOptions:(()->Unit)?=null,
     layout: CanvasLayout = CanvasLayout(),
     onPanelVisibility: (CanvasPanelId, PanelVisibility) -> Unit = { _, _ -> },
     onHideAllPanels: (Boolean) -> Unit = {},
@@ -104,6 +107,7 @@ fun SelectionToolbar(
         shape = RoundedCornerShape(12.dp), tonalElevation = 5.dp, shadowElevation = 4.dp,
     ) {
         Row {
+            if(onDimensionWall!=null) androidx.compose.material3.TextButton(onDimensionWall,Modifier.testTag("selection_dimension_wall")){Text("Dimension this wall")}
             if(onGenerateWalls!=null) androidx.compose.material3.TextButton(onGenerateWalls,Modifier.testTag("selection_generate_walls")){Text("Generate walls")}
             CanvasActionButton(
                 if (mode == GizmoMode.ROTATE) Icons.AutoMirrored.Outlined.RotateRight else Icons.Outlined.OpenWith,
@@ -132,6 +136,8 @@ fun SelectionToolbar(
                     }
                     when (page) {
                         SelectionMenuPage.MAIN -> {
+                            if(onMoveFromWall!=null)DropdownMenuItem(text={Text("Move from wall")},onClick={act(onMoveFromWall)},modifier=Modifier.testTag("selection_move_from_wall"))
+                            if(onWallDimensionOptions!=null)DropdownMenuItem(text={Text("Wall dimension options")},onClick={act(onWallDimensionOptions)},modifier=Modifier.testTag("selection_wall_dimension_options"))
                             SelectionMenuItem(R.string.selection_scale, "selection_scale", canEdit,
                                 checked = mode == GizmoMode.SCALE) { act { onMode(GizmoMode.SCALE) } }
                             SelectionMenuItem(R.string.selection_keep_proportions,"selection_keep_proportions",canEdit,

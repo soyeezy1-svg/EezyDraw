@@ -11,10 +11,11 @@ data class PrecisionPick(val point:Point3,val screen:Point2,val mode:SnapMode?=n
     val elementId:ElementId?=null,val wallEdge:Boolean=false)
 
 /** Prepared with a scene, never rebuilt for a finger movement. The world BVH also handles front/side. */
-class PointPickContext(document:ProjectDocument,scene:DrawingScene) {
-    private val index=SpatialIndex(scene.segments)
+class PointPickContext(document:ProjectDocument,scene:DrawingScene,objectIds:Set<ElementId>?=null) {
+    private val edges=if(objectIds==null)scene.segments else scene.segments.filter {ElementId(it.elementId) in objectIds}
+    private val index=SpatialIndex(edges)
     private val plan=SnapEngine(index)
-    private val world=ScreenSegmentIndex(scene.segments)
+    private val world=ScreenSegmentIndex(edges)
     private val wallIds=document.elements.filter {it.body is ElementBody.Wall}.mapTo(HashSet()) {it.id.value}
 
     /** Local world edges for the magnifier; no scene scan or screen-index rebuild on drag. */

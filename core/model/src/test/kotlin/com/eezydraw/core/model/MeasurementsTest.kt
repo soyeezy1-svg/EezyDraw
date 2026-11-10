@@ -28,6 +28,17 @@ class MeasurementsTest {
         assertEquals(1.0, shape.anchors[1].x, 0.0)
     }
 
+    @Test fun oldProjectRecordsDecodeWithNoDimensionOrPositioningConstraints() {
+        val oldElement="""{"id":"old","projectId":"project","layerId":"drawing","body":{"type":"shape","shape":{"type":"line","start":{},"end":{"x":1.0}}}}"""
+        val element=Json.decodeFromString<Element>(oldElement)
+        assertTrue(element.wallDistances.isEmpty())
+        assertEquals(FixedEnd.START,Json.decodeFromString<ProjectSettings>("{}").dimensionFixedEnd)
+        val anchor=Json.decodeFromString<MeasurementAnchor>("""{"point":{}}""")
+        assertNull(anchor.vertexIndex)
+        val oldData=Json.decodeFromString<MeasurementData>("""{"anchors":[{"point":{}},{"point":{"x":1.0}}]}""")
+        assertNull(oldData.binding)
+    }
+
     @Test fun measurementsAndReferencesRoundTripInTheNativeDocument() {
         val document = document()
         val decoded = Json.decodeFromString<ProjectDocument>(Json.encodeToString(document))

@@ -399,6 +399,17 @@ class AppViewModel(
         }
     }
 
+    fun editDimension(id:ElementId,value:Double,fixed:FixedEnd):Boolean = drawingEdit(validate={doc->
+        val dimension=requireNotNull(doc.elements.find {it.id==id})
+        resolveMeasurement(doc,dimension)?.let {summary->require(kotlin.math.abs(summary.distance-value)<=maxOf(1e-7,value*1e-8)) {"A wall distance or host constraint prevents this dimension. Release that constraint first."}}
+    }) {_,doc->DimensionEditing.edit(doc,id,value,fixed)}
+    fun editEdgeDimension(binding:DimensionBinding,value:Double,fixed:FixedEnd):Boolean = drawingEdit {_,doc->
+        val next=DimensionEditing.editBinding(doc,binding,value,fixed)
+        EditCommands.between(doc,next.copy(project=next.project.copy(settings=next.project.settings.copy(dimensionFixedEnd=fixed))),"Edit edge dimension")
+    }
+    fun dimensionSelectedWall(id:ElementId,faces:Set<WallLengthFace>,thickness:Boolean,height:Boolean):Boolean = drawingEdit {_,doc->dimensionWall(doc,id,faces,thickness,height)}
+    fun moveFromWall(id:ElementId,distances:List<WallDistance>,lock:Boolean):Boolean = drawingEdit {_,doc->WallPositioning.move(doc,id,distances,lock)}
+
     fun updateSavedMeasurement(id: ElementId, start: Point3, end: Point3, label: Point3,
         name: String, coordinates: Boolean, heightAboveFloor: Boolean) {
         drawingEdit { _, document ->
@@ -588,6 +599,7 @@ class AppViewModel(
     /** Commands are sparse and session-only; saving changes the baseline without clearing history. */
     private fun drawingEdit(
         selectAdded: Boolean = false,
+        validate: (ProjectDocument) -> Unit = {},
         build: (AppUiState, ProjectDocument) -> EditCommand,
     ): Boolean {
         val current = state.value
@@ -603,6 +615,7 @@ class AppViewModel(
             FloorServices.validateCuts(document,connected)
             val generated=lockGeneratedWalls(document,connected,current.settings.lockWallsByDefault)
             val command=if(generated==preview)prepared else EditCommands.between(document,generated,prepared.label)
+            validate(command.preview(document))
             val changed = history.execute(document, command)
             publishDrawing(current, changed, if (selectAdded && !command.isEmpty) command.addedElementIds else current.selectedIds)
             true
