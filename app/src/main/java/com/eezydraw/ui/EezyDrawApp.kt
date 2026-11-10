@@ -96,9 +96,13 @@ fun EezyDrawApp(
     val exportModel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
         if(uri!=null)viewModel.exportModel(uri.toString())else viewModel.cancelModelExport()
     }
+    val exportObjPackage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {uri->
+        if(uri!=null)viewModel.exportModel(uri.toString())else viewModel.cancelModelExport()
+    }
     if(modelDialog)state.document?.let {document->com.eezydraw.ui.canvas.ModelExportDialog(document,modelOptions ?: com.eezydraw.core.geometry.ModelExportOptions(),{options->
         modelOptions=options;viewModel.prepareModelExport(options);modelDialog=false
-        exportModel.launch(document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)+"."+options.format.extension)
+        val filename=document.project.name.replace(Regex("[^A-Za-z0-9 _-]"),"_").take(80)+"."+options.fileExtension
+        if(options.format==com.eezydraw.core.geometry.ModelFormat.OBJ)exportObjPackage.launch(filename)else exportModel.launch(filename)
     },{modelDialog=false})}
     val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { viewModel.exportProject(it.toString()) }

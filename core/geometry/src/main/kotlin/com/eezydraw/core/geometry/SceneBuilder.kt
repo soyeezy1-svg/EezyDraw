@@ -64,8 +64,8 @@ fun buildDrawingScene(
         if (!document.project.settings.showMeasurements && isMeasurement(element)) continue
         val transform = SceneTransform(element.transform)
         val levelId = element.levelId?.value
-        val definitionMaterial = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)?.materialId
-        val color = renderColour(element,layer,system,(element.materialId ?: definitionMaterial)?.let(materials::get))
+        val definition = (element.body as? ElementBody.Component)?.libraryItemId?.let(library::get)
+        val color = renderColour(element,layer,system,(element.materialId ?: definition?.materialId)?.let(materials::get),definition)
         val partSide = if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter = presentation.roomCenter(element)
         fun worldEmitter(mode:ObjectDisplay, side:RoomSideRef?):(Point3,Point3)->Unit = { originalA,originalB ->

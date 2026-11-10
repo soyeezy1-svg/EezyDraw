@@ -123,7 +123,8 @@ class LibraryCommandsTest {
             base.copy(libraryItems = listOf(legacy.copy(materialId = definitionMaterial.id))) to definitionMaterial.colourArgb,
             base.copy(libraryItems = listOf(legacy.copy(materialId = definitionMaterial.id)),
                 elements = listOf(component.copy(materialId = instanceMaterial.id))) to instanceMaterial.colourArgb,
-            base.copy(elements = listOf(component.copy(materialId = instanceMaterial.id, systemId = system.id))) to system.colourArgb,
+            base.copy(elements = listOf(component.copy(materialId = instanceMaterial.id, systemId = system.id))) to instanceMaterial.colourArgb,
+            base.copy(elements = listOf(component.copy(systemId = system.id))) to system.colourArgb,
             base.copy(elements = listOf(component.copy(systemId = system.id,
                 properties = mapOf(ELEMENT_COLOUR_KEY to ParameterValue.Colour(0xFF8833AA))))) to 0xFF8833AAL,
         )

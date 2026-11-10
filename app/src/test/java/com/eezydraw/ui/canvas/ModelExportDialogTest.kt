@@ -61,4 +61,25 @@ class ModelExportDialogTest {
         assertEquals(ModelUnits.M,result!!.units)
         assertTrue(result!!.moveToOrigin)
     }
+    @Test fun materialOptionsStlNoteAndObjPackageAreReviewable() {
+        val document=ProjectDocument(Project(ProjectId("colours"),"Colours",0,0))
+        var result:ModelExportOptions?=null
+        compose.setContent {MaterialTheme {ModelExportDialog(document,ModelExportOptions(),{result=it},{})}}
+        compose.onNodeWithTag("route_choice_Colour by").performScrollTo().performClick()
+        compose.onNodeWithText("System").performClick()
+        compose.onNodeWithTag("export_display_mode").performScrollTo().performClick()
+        compose.onNodeWithTag("model_export_save").performClick()
+        assertEquals(ModelColourBy.SYSTEM,result!!.colourBy);assertTrue(result!!.exportDisplayMode)
+        compose.onNodeWithTag("route_choice_Colour by").performScrollTo().performClick()
+        compose.onNodeWithText("Level").performClick()
+        compose.onNodeWithTag("route_choice_Format").performScrollTo().performClick()
+        compose.onNodeWithText("STL").performClick()
+        compose.onNodeWithTag("stl_colourless_note").performScrollTo().assertTextContains("STL is colourless.",substring=true)
+        compose.onNodeWithTag("route_choice_Format").performScrollTo().performClick()
+        compose.onNodeWithText("OBJ").performClick()
+        compose.onNodeWithText("OBJ and its material file are saved together as a ZIP. Extract both files into the same folder before opening the OBJ.").performScrollTo().assertExists()
+        compose.onNodeWithTag("model_export_save").performClick()
+        assertEquals("zip",result!!.fileExtension);assertEquals(ModelColourBy.LEVEL,result!!.colourBy)
+    }
+
 }

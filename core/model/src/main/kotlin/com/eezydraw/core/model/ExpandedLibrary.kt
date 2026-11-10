@@ -123,7 +123,14 @@ private class StockGroup(
             category = category, defaultSize = size, builtIn = true, mounting = mounting,
             defaultMountingHeight = if (mounting == MountingType.CEILING) 3.0 else height,
             geometry = stockGeometry(form, size), symbolGeometry = stockSymbol(form, size),
-            defaultMaterial = material, defaultSystem = system, defaultColourArgb = colour,
+            defaultMaterial = material, defaultSystem = system, defaultColourArgb = when(form) {
+                StockForm.SINGLE_DOOR,StockForm.DOUBLE_DOOR,StockForm.SLIDING_DOOR->MattePalette.DOOR
+                StockForm.SINGLE_WINDOW,StockForm.DOUBLE_WINDOW,StockForm.FIXED_WINDOW->MattePalette.WINDOW
+                StockForm.CEILING->MattePalette.CEILING
+                StockForm.SLAB->if(discipline==Discipline.ARCHITECTURE)MattePalette.FLOOR else MattePalette.SLAB
+                StockForm.SHEAR_WALL->MattePalette.WALL
+                else->colour
+            },
             parameters = parameters,
             opening=when(form) {
                 StockForm.SINGLE_DOOR->OpeningKind.DOOR;StockForm.DOUBLE_DOOR->OpeningKind.DOUBLE_DOOR

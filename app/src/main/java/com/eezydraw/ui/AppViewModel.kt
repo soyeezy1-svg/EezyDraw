@@ -757,10 +757,10 @@ class AppViewModel(
     fun exportModel(uri:String) = operation {
         val (snapshot,options)=pendingModelExport ?: error("Choose Export 3D model and its options again.")
         withContext(Dispatchers.IO) {
-            application.contentResolver.openOutputStream(uri.toUri(),"w")?.use {com.eezydraw.core.geometry.ModelExport.write(snapshot,options,it)} ?: error("The selected model export file cannot be opened.")
+            application.contentResolver.openOutputStream(uri.toUri(),"w")?.use {com.eezydraw.core.geometry.ModelExport.writePackage(snapshot,options,it)} ?: error("The selected model export file cannot be opened.")
         }
         pendingModelExport=null
-        mutableState.update {it.copy(notice="3D model exported",noticeUndo=false)}
+        mutableState.update {it.copy(notice=if(options.format==com.eezydraw.core.geometry.ModelFormat.OBJ)"OBJ and materials exported together as ZIP" else "3D model exported",noticeUndo=false)}
     }
 
     fun prepareViewExport(request: ViewExportRequest, format: ViewExportFormat) {

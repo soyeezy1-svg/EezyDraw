@@ -64,7 +64,7 @@ class ViewExportTest {
         } finally { image.recycle() }
     }
 
-    @Test fun sixModesProduceFilledDepthTestedViewsAndUseSystemColour() {
+    @Test fun sixModesProduceFilledDepthTestedViewsWithMaterialThenSystemColour() {
         val item=shape("box",Shape.Box(Size3(1.0,1.0,1.0))).copy(systemId=SystemId("system"),materialId=MaterialId("material"))
         val document=document(item).copy(
             materials=listOf(Material(MaterialId("material"),"Red material",red)),
@@ -82,11 +82,17 @@ class ViewExportTest {
         assertEquals(background,centers[ViewMode.WIREFRAME])
         assertEquals(background,centers[ViewMode.HIDDEN_LINE])
         val shaded=checkNotNull(centers[ViewMode.SHADED])
-        assertTrue(Color.blue(shaded)>Color.red(shaded))
+        assertTrue(Color.red(shaded)>Color.blue(shaded))
         assertNotEquals(background,shaded)
         val xray=checkNotNull(centers[ViewMode.XRAY])
         assertTrue("Transparent fill blends with the background",Color.red(xray)>Color.red(shaded))
         assertNotEquals(shaded,centers[ViewMode.REALISTIC])
+        val systemOnly=document.copy(elements=listOf(item.copy(materialId=null)))
+        val fallback=ViewExport.render(ViewExportRequest(systemOnly,frame(ViewMode.SHADED),200,200))
+        try {
+            val pixel=fallback.getPixel(100,100)
+            assertTrue(Color.blue(pixel)>Color.red(pixel))
+        }finally {fallback.recycle()}
     }
 
     @Test fun hiddenLineOmitsAnOpenEdgeBehindASolidButWireframeKeepsIt() {

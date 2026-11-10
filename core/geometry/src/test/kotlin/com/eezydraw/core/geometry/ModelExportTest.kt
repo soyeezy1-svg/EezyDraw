@@ -25,6 +25,7 @@ class ModelExportTest {
         for(format in ModelFormat.entries) {
             val data=bytes(ModelExportOptions(format=format))
             File(folder,"fixture.${format.extension}").writeBytes(data)
+            if(format==ModelFormat.OBJ)File(folder,"model.mtl").outputStream().use {ModelExport.writeObjMaterials(doc,ModelExportOptions(format=format),it)}
             assertTrue(data.size>100)
             when(format) {
                 ModelFormat.IFC->{val text=data.toString(Charsets.UTF_8);assertTrue("FILE_SCHEMA(('IFC4'))" in text);assertTrue("IFCWALL(" in text);assertTrue("IFCBUILDINGSTOREY(" in text);assertTrue("IFCTRIANGULATEDFACESET(" in text);assertTrue("Pset_EezyDraw" in text)}
@@ -46,9 +47,9 @@ class ModelExportTest {
         val other=wall.copy(id=ElementId("other"),levelId=LevelId("upper"))
         val hidden=wall.copy(id=ElementId("hidden")).withDisplay(ObjectDisplay.HIDDEN)
         val document=doc.copy(levels=doc.levels+level.copy(id=LevelId("upper"),elevation=6.0),elements=listOf(wall,other,hidden))
-        assertEquals(3,ModelExport.meshes(document,ModelExportOptions()).size)
+        assertEquals(2,ModelExport.meshes(document,ModelExportOptions()).size)
         assertEquals(2,ModelExport.meshes(document,ModelExportOptions(scope=ModelScope.VISIBLE)).size)
-        assertEquals(2,ModelExport.meshes(document,ModelExportOptions(scope=ModelScope.LEVEL,levelId=level.id)).size)
+        assertEquals(1,ModelExport.meshes(document,ModelExportOptions(scope=ModelScope.LEVEL,levelId=level.id)).size)
         val ifc=bytes(ModelExportOptions(scope=ModelScope.LEVEL,levelId=level.id),document).toString(Charsets.UTF_8)
         assertEquals(1,ifc.lines().count {"=IFCBUILDINGSTOREY(" in it})
         assertEquals(1,ModelExport.meshes(document,ModelExportOptions(scope=ModelScope.SELECTED,selected=setOf(other.id))).size)
