@@ -9,6 +9,13 @@ import org.junit.Test
 class ExpandedLibraryTest {
     private val items = expandedLibraryItems()
 
+    @Test fun architecturalStockDefaultsDistinguishDoorWindowFloorSlabAndCeiling() {
+        val names=listOf("Single door","Single window","Floor","Slab","Ceiling","Shear wall")
+        val colours=names.map {name->items.single {it.name==name}.defaultColourArgb}
+        assertEquals(names.size,colours.toSet().size)
+        assertEquals(listOf(MattePalette.DOOR,MattePalette.WINDOW,MattePalette.FLOOR,MattePalette.SLAB,MattePalette.CEILING,MattePalette.WALL),colours)
+    }
+
     @Test fun `expanded catalogue contains every requested device plant fixture and architectural type`() {
         val expected = mapOf(
             Discipline.FIRE_PROTECTION to setOf("Smoke detector", "Heat detector", "Manual call point",

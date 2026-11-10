@@ -1,6 +1,6 @@
 """Read the marked-box fixtures with independent codecs and verify the coordinate contract.
 
-Run ModelExportAxisTest first. Requires ifcopenshell, trimesh, pygltflib and numpy.
+Run ModelExportAxisTest first. Requires ifcopenshell, trimesh, pygltflib, numpy and networkx.
 """
 import pathlib
 import sys
@@ -33,7 +33,7 @@ def check_solid(mesh, low, high, axis, shift, name):
 
 
 folder = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/eezy-axis-export')
-paths = sorted(folder.iterdir())
+paths = sorted(path for path in folder.iterdir() if path.suffix in ('.ifc', '.obj', '.stl', '.gltf', '.glb'))
 assert len(paths) == 42, 'Run ModelExportAxisTest to generate all 42 fixtures'
 for path in paths:
     fmt, axis, units, origin = path.stem.split('-')

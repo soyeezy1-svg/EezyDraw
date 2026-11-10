@@ -43,9 +43,7 @@ fun readLibraryProperties(document: ProjectDocument, element: Element): LibraryI
         mountingHeight = libraryFittingConnectionPoint(item, element)?.let { it.z - floor }
             ?: (element.transform.translation.z - floor).let { if (item.mounting == MountingType.FREE) it else it.coerceAtLeast(0.0) },
         material = material?.name ?: text(LibraryParameterKeys.MATERIAL),
-        colourArgb = element.colourOverride ?: system?.colourArgb ?: material?.colourArgb ?: layer?.colourArgb
-            ?: (params[LibraryParameterKeys.COLOUR] as? ParameterValue.Colour)?.argb
-            ?: item.defaultColourArgb,
+        colourArgb = renderColour(element,layer,system,material,item),
         system = system?.name ?: text(LibraryParameterKeys.SYSTEM),
         manufacturer = text(LibraryParameterKeys.MANUFACTURER),
         model = text(LibraryParameterKeys.MODEL),

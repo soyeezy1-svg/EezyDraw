@@ -15,6 +15,10 @@ import com.eezydraw.core.model.*
     var value by remember {mutableStateOf(initial)}
     AlertDialog(onDismissRequest=onDismiss,title={Text("Export 3D model")},text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()).testTag("model_export_options")) {
         RouteChoice("Format",value.format,ModelFormat.entries,{value=value.copy(format=it,upAxis=null,units=if(it in listOf(ModelFormat.OBJ,ModelFormat.GLTF,ModelFormat.GLB))ModelUnits.M else value.units)}){if(it==ModelFormat.IFC)"IFC4 (BIM)"else it.name}
+        if(value.format==ModelFormat.OBJ)Text("OBJ and its material file are saved together as a ZIP. Extract both files into the same folder before opening the OBJ.")
+        if(value.format==ModelFormat.STL)Text("STL is colourless. Use OBJ, glTF, GLB or IFC to keep colours and transparency.",Modifier.testTag("stl_colourless_note"))
+        RouteChoice("Colour by",value.colourBy,ModelColourBy.entries,{value=value.copy(colourBy=it)}){it.name.lowercase().replaceFirstChar {c->c.uppercase()}}
+        Row {Checkbox(value.exportDisplayMode,{value=value.copy(exportDisplayMode=it)},Modifier.testTag("export_display_mode"));Text("Export display mode (X-ray as transparent)")}
         RouteChoice("What to export",value.scope,ModelScope.entries,{value=value.copy(scope=it)}){when(it){ModelScope.PROJECT->"Whole project";ModelScope.LEVEL->"Current level only";ModelScope.SELECTED->"Selected objects only";ModelScope.VISIBLE->"Visible objects only"}}
         RouteChoice("Level",value.levelId,document.levels.map {it.id},{value=value.copy(levelId=it)}){id->document.levels.find {it.id==id}?.name ?: "Choose a level"}
         RouteChoice("Units",value.units,ModelUnits.entries,{value=value.copy(units=it)}){it.name.lowercase()}

@@ -50,7 +50,7 @@ fun buildSurfaceScene(document: ProjectDocument, elementIds: Set<ElementId>? = n
         val component = element.body as? ElementBody.Component
         val definition = component?.let { library[it.libraryItemId] }
         val material = (element.materialId ?: definition?.materialId)?.let(materials::get)
-        val colour = renderColour(element,layer,system,material)
+        val colour = renderColour(element,layer,system,material,definition)
         val transform = SurfaceTransform(element.transform)
         val partSide=if(element.body is ElementBody.Wall && !(ELEMENT_DISPLAY_KEY in element.properties && element.objectDisplay==ObjectDisplay.NORMAL))presentation.wallSide(element) else null
         val roomCenter=presentation.roomCenter(element)

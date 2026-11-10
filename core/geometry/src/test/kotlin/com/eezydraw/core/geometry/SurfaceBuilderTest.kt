@@ -97,18 +97,20 @@ class SurfaceBuilderTest {
         val hiddenLayer = LayerId("hidden")
         val box = Shape.Box(Size3(1.0, 1.0, 1.0))
         val doc = document(element(box, "layer"), element(box, "material").copy(materialId = materialId),
-            element(box, "system").copy(materialId = materialId, systemId = systemId),
+            element(box, "system").copy(systemId = systemId),
+            element(box, "both").copy(materialId = materialId, systemId = systemId),
             element(box, "hidden").copy(layerId = hiddenLayer)).copy(
             layers = listOf(Layer(layerId, projectId, "Layer", 0xFF00FF00), Layer(hiddenLayer, projectId, "Hidden", visible = false)),
             materials = listOf(Material(materialId, "Red", 0xFFFF0000)),
             systems = listOf(BuildingSystem(systemId, projectId, "Blue", Discipline.HVAC, 0x800000FF)),
         )
         val scene = buildSurfaceScene(doc)
-        assertEquals(setOf("layer", "material", "system"), scene.chunks.map { it.elementId }.toSet())
+        assertEquals(setOf("layer", "material", "system", "both"), scene.chunks.map { it.elementId }.toSet())
         fun colour(id: String) = scene.chunks.first { it.elementId == id }.vertices.sliceArray(6..9)
         assertEquals(listOf(0f, 1f, 0f, 1f), colour("layer").toList())
         assertEquals(listOf(1f, 0f, 0f, 1f), colour("material").toList())
         assertEquals(128f / 255, colour("system")[3], 1e-6f)
+        assertEquals(listOf(1f, 0f, 0f, 1f), colour("both").toList())
         val filtered = buildSurfaceScene(doc, setOf(ElementId("system")))
         assertTrue(filtered.chunks.all { it.elementId == "system" })
         assertTrue(buildSurfaceScene(doc.copy(systems = doc.systems.map { it.copy(visible = false) }), setOf(ElementId("system"))).chunks.isEmpty())

@@ -99,6 +99,7 @@ class ModelExportAxisTest {
                 File(folder, "${format.name}-${axis.name}-${units.name}-${if(move) "MOVE" else "PROJECT"}.${format.extension}").writeBytes(bytes)
             }
         }
-        assertEquals(42, folder.listFiles()!!.size)
+        File(folder,"model.mtl").outputStream().use {ModelExport.writeObjMaterials(document,ModelExportOptions(format=ModelFormat.OBJ),it)}
+        assertEquals(42, folder.listFiles()!!.count {it.extension in ModelFormat.entries.map {format->format.extension}})
     }
 }

@@ -14,6 +14,8 @@ internal fun ifcClass(document:ProjectDocument,m:ExportMesh):String {
         is ElementBody.Route->when(b.kind){RouteKind.PIPE->"IFCPIPESEGMENT";RouteKind.DUCT->"IFCDUCTSEGMENT";else->"IFCCABLECARRIERSEGMENT"}
         is ElementBody.Component->{val item=document.libraryItems.find {it.id==b.libraryItemId};val name=item?.name.orEmpty().lowercase();val building=item?.discipline in listOf(Discipline.ARCHITECTURE,Discipline.STRUCTURE,Discipline.CIVIL)
             when {item?.fitting!=null->when(item.fitting!!.routeKind){RouteKind.PIPE->"IFCPIPEFITTING";RouteKind.DUCT->"IFCDUCTFITTING";else->"IFCCABLECARRIERFITTING"}
+                item?.opening in listOf(OpeningKind.DOOR,OpeningKind.DOUBLE_DOOR,OpeningKind.SLIDING_DOOR)->"IFCDOOR"
+                item?.opening in listOf(OpeningKind.WINDOW,OpeningKind.DOUBLE_WINDOW)->"IFCWINDOW"
                 building && Regex("\\bwall$").containsMatchIn(name)->"IFCWALL";building && ("slab" in name || name=="floor")->"IFCSLAB";building && Regex("\\bdoor\\b").containsMatchIn(name)->"IFCDOOR";building && Regex("\\bwindow\\b").containsMatchIn(name)->"IFCWINDOW";building && "column" in name->"IFCCOLUMN";building && "beam" in name->"IFCBEAM"
                 "pump" in name->"IFCPUMP";"valve" in name->"IFCVALVE";"fan" in name->"IFCFAN";"ahu" in name || "fcu" in name || "air handling" in name->"IFCUNITARYEQUIPMENT"
                 item?.symbol==LibrarySymbol.PANEL->"IFCELECTRICDISTRIBUTIONBOARD";item?.symbol in listOf(LibrarySymbol.SOCKET,LibrarySymbol.FLOOR_BOX)->"IFCOUTLET";item?.symbol==LibrarySymbol.LIGHT->"IFCLIGHTFIXTURE";item?.symbol==LibrarySymbol.SWITCH->"IFCSWITCHINGDEVICE";item?.symbol==LibrarySymbol.RACK->"IFCCOMMUNICATIONSAPPLIANCE";else->"IFCBUILDINGELEMENTPROXY"}}
@@ -47,7 +49,7 @@ internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:M
         val faces=entity("IFCTRIANGULATEDFACESET","#$points,$,.F.,${m.vertices.indices.step(3).joinToString(",","(",")"){"(${it+1},${it+2},${it+3})"}},$")
         val colour=entity("IFCCOLOURRGB","$,${rgb(m.colourArgb).joinToString()}")
         val shading=entity("IFCSURFACESTYLERENDERING","#$colour,${1-(m.colourArgb shr 24 and 255)/255.0},$,$,$,$,$,$,.MATT.")
-        val style=entity("IFCSURFACESTYLE","${str(m.name+" matte")},.BOTH.,(#$shading)")
+        val style=entity("IFCSURFACESTYLE","${str(m.material.name)},.BOTH.,(#$shading)")
         entity("IFCSTYLEDITEM","#$faces,(#$style),$")
         val shape=entity("IFCSHAPEREPRESENTATION","#$context,'Body','Tessellation',(#$faces)")
         val representation=entity("IFCPRODUCTDEFINITIONSHAPE","$,$,(#$shape)")
@@ -57,7 +59,7 @@ internal fun writeIfc(document:ProjectDocument,meshes:List<ExportMesh>,options:M
         val id=entity(type,args);objects[m.element.id]=id
         // Spaces and opening voids may have styled geometry, but no material association.
         if(type!="IFCSPACE" && type!="IFCOPENINGELEMENT") {
-            val materialName=document.materials.find {it.id==m.element.materialId}?.name ?: renderMaterial(m.element).name.lowercase()+" matte"
+            val materialName=m.material.name
             val material=entity("IFCMATERIAL","${str(materialName)},$,$")
             entity("IFCRELASSOCIATESMATERIAL","${guid()},$,$,$,(#$id),#$material")
         }

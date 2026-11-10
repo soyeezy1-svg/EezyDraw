@@ -47,13 +47,15 @@ class MeasurementRenderingTest {
         assertTrue(scene.chunks.all { it.vertices.all(Float::isFinite) })
     }
 
-    @Test fun linesUseTheSameSystemThenMaterialThenLayerColourOrderAsFaces() {
+    @Test fun linesUseTheSameMaterialThenSystemThenLayerColourOrderAsFaces() {
         val material = Material(MaterialId("metal"), "Metal", 0xFF00FF00)
         val system = BuildingSystem(SystemId("power"), owner, "Power", Discipline.ELECTRICAL, 0xFFFF0000)
         val materialObject = source.copy(materialId = material.id)
         val document = document().copy(materials = listOf(material), systems = listOf(system), elements = listOf(materialObject))
         assertEquals(material.colourArgb, buildDrawingScene(document).segments.first().colorArgb)
-        assertEquals(system.colourArgb, buildDrawingScene(document.copy(elements = listOf(materialObject.copy(systemId = system.id))))
+        assertEquals(material.colourArgb, buildDrawingScene(document.copy(elements = listOf(materialObject.copy(systemId = system.id))))
+            .segments.first().colorArgb)
+        assertEquals(system.colourArgb, buildDrawingScene(document.copy(elements = listOf(source.copy(systemId = system.id))))
             .segments.first().colorArgb)
     }
 

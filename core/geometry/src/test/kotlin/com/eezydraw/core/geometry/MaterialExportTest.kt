@@ -15,12 +15,14 @@ class MaterialExportTest {
         val json=Json.parseToJsonElement(write(ModelFormat.GLTF)).jsonObject
         val material=json.getValue("materials").jsonArray.single().jsonObject.getValue("pbrMetallicRoughness").jsonObject
         val colour=material.getValue("baseColorFactor").jsonArray.map {it.jsonPrimitive.double}
-        assertEquals(rgb(MattePalette.WALL)+1.0,colour)
+        assertEquals(linearRgb(MattePalette.WALL)+1.0,colour)
         assertEquals(.9,material.getValue("roughnessFactor").jsonPrimitive.double,0.0)
         assertEquals(0.0,material.getValue("metallicFactor").jsonPrimitive.double,0.0)
         assertEquals(0,json.getValue("meshes").jsonArray.single().jsonObject.getValue("primitives").jsonArray.single().jsonObject.getValue("material").jsonPrimitive.int)
-        val obj=write(ModelFormat.OBJ).lines().first {it.startsWith("v ")}.split(' ').drop(4).map(String::toDouble)
-        assertEquals(rgb(MattePalette.WALL),obj)
+        val obj=write(ModelFormat.OBJ)
+        assertTrue("mtllib model.mtl" in obj);assertTrue("usemtl material_0_Wall_matte" in obj)
+        val mtl=ByteArrayOutputStream().also {ModelExport.writeObjMaterials(doc,ModelExportOptions(format=ModelFormat.OBJ),it)}.toString(Charsets.UTF_8)
+        assertTrue("Kd ${rgb(MattePalette.WALL).joinToString(" ")}" in mtl)
         val ifc=write(ModelFormat.IFC)
         assertTrue("IFCCOLOURRGB" in ifc);assertTrue("IFCSURFACESTYLERENDERING" in ifc);assertTrue(".MATT." in ifc);assertTrue("IFCRELASSOCIATESMATERIAL" in ifc)
     }
